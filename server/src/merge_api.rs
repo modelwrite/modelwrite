@@ -188,6 +188,24 @@ pub async fn merge_branches(
         ));
     }
 
+    // Refuse before storing the merged document, so a lock-refused merge leaves no
+    // orphaned blob. The store checks again inside its transaction, and that check is the
+    // authority; this one avoids writing bytes we already know will be rejected.
+    {
+        let touched = touched_elements(&ours, &merged);
+        let held = state
+            .store
+            .holders_of(&project, &touched, now_seconds())
+            .map_err(map_store_error)?;
+        let holder = body.holder.as_deref().unwrap_or("");
+        if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
+            return Err(ApiError::conflict(format!(
+                "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
+                blocked.element, blocked.holder, blocked.expires_at
+            )));
+        }
+    }
+
     let bytes = serde_json::to_vec(&merged).map_err(|e| {
         eprintln!("merged model could not be serialised: {}", e);
         ApiError::internal("the merged model could not be stored")

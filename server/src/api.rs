@@ -169,18 +169,41 @@ pub fn commit_refusal_guard(
         Ok(commit) => Ok(commit),
         Err(error) if is_lock_refusal(&error) => {
             let detail = error.to_string();
-            record_refusal(
+            // Recording the refusal must never change the answer. If the log cannot be
+            // written, that is a problem with the log, not with the caller: the write was
+            // still correctly refused, and reporting 500 would tell the caller their commit
+            // failed for an unrelated reason and invite a retry that cannot succeed.
+            if let Err(recording) = record_refusal(
                 state.store.as_ref(),
                 project,
                 author,
                 "commit.refused",
                 branch,
                 &detail,
-            )?;
+            ) {
+                eprintln!("could not record the refusal: {:?}", recording);
+            }
             Err(map_store_error(error))
         }
         Err(error) => Err(map_store_error(error)),
     }
+}
+
+/// Every element an incoming document names, used when a branch has no tip yet.
+///
+/// A first commit has nothing to diff against, and diffing a document against itself
+/// yields an EMPTY touched set - so a lease taken before the branch existed would not be
+/// enforced. Treating "no tip" as "an empty document" gives the honest answer: every
+/// element this commit introduces is an element it changes.
+fn all_touched(root: &okf::types::OkfRoot) -> Vec<String> {
+    let mut ids = okf::diff::element_ids(root);
+    if let Some(graph) = &root.graph {
+        for edge in &graph.edges {
+            ids.insert(edge.source.clone());
+            ids.insert(edge.target.clone());
+        }
+    }
+    ids.into_iter().collect()
 }
 
 /// The elements a commit changes: every diff entry that names an element, plus the
@@ -323,17 +346,35 @@ pub async fn create_commit(
         .store
         .branch_tip(&project, &body.branch)
         .map_err(map_store_error)?;
-    let tip_model = match tip_hash.as_deref() {
-        Some(tip) => load_model(&state, &project, tip)?,
-        None => root.clone(),
+    let touched = match tip_hash.as_deref() {
+        Some(tip) => {
+            let tip_model = load_model(&state, &project, tip)?;
+            touched_elements(&tip_model, &root)
+        }
+        None => all_touched(&root),
     };
-    let touched = touched_elements(&tip_model, &root);
     let guard = CommitGuard {
         holder: body.holder.as_deref().unwrap_or(""),
         elements: &touched,
         now,
         expected_tip: tip_hash.as_deref(),
     };
+
+    // Cheap refusal BEFORE anything is stored, so a rejected commit leaves no orphaned
+    // blob behind. The store checks again inside its transaction, and THAT check is the
+    // authority: this one exists to avoid writing bytes we already know will be refused.
+    if let Some(holder) = body.holder.as_deref() {
+        let held = state
+            .store
+            .holders_of(&project, &touched, now_seconds())
+            .map_err(map_store_error)?;
+        if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
+            return Err(ApiError::conflict(format!(
+                "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
+                blocked.element, blocked.holder, blocked.expires_at
+            )));
+        }
+    }
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
     // One call, one transaction: the parents come from the tip the store reads inside the

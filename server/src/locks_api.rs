@@ -105,14 +105,18 @@ pub async fn acquire_locks(
             // A refused acquire is a refusal worth recording: another holder's lease denied
             // this one. Nothing was written, so the entry appends on its own.
             if crate::store::is_lock_refusal(&error) {
-                record_refusal(
+                // As with a refused commit: failing to record a refusal must not change the
+                // answer. The acquire was correctly refused; the caller is told so.
+                if let Err(recording) = record_refusal(
                     state.store.as_ref(),
                     &project,
                     &body.holder,
                     "lock.denied",
                     &elements.join(","),
                     &error.to_string(),
-                )?;
+                ) {
+                    eprintln!("could not record the refusal: {:?}", recording);
+                }
             }
             return Err(map_store_error(error));
         }

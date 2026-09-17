@@ -93,7 +93,11 @@ impl std::fmt::Display for StoreError {
                 element,
                 holder,
                 expires_at,
-            } => write!(f, "{} is held by {} until {}", element, holder, expires_at),
+            } => write!(
+                f,
+                "{} is locked by {} until {}",
+                element, holder, expires_at
+            ),
         }
     }
 }

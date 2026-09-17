@@ -952,3 +952,48 @@ async fn the_holder_may_finish_its_own_work_through_merge_and_reset() {
         "the holder may revert what it holds"
     );
 }
+#[tokio::test]
+async fn a_first_commit_is_guarded_like_any_other() {
+    // A branch with no tip has nothing to diff against. Diffing the incoming document
+    // against itself produced an EMPTY touched set, so a lease taken before the branch
+    // existed was not enforced at all: the first commit on a branch could take an element
+    // somebody else already holds. An empty document is the honest baseline instead.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    seed_project(&router).await;
+
+    // Alex takes b1 before any commit exists on the branch.
+    let locked = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({ "branch": "main", "elements": ["b1"], "holder": "alex", "ttlSeconds": 600 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(locked.status(), StatusCode::CREATED);
+
+    let refused = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "sam", "message": "first", "okf": model_with_nodes(&["b1"]), "holder": "sam" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.status(),
+        StatusCode::CONFLICT,
+        "the first commit must be refused when it takes a locked element"
+    );
+
+    // The holder can make the same first commit.
+    let allowed = router
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "first", "okf": model_with_nodes(&["b1"]), "holder": "alex" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::CREATED);
+}

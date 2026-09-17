@@ -505,3 +505,31 @@ fn the_audit_table_refuses_update_and_delete() {
         "DELETE on the audit table must be refused by the trigger"
     );
 }
+#[test]
+fn a_mutation_rolls_back_when_its_audit_entry_cannot_be_written() {
+    // The audit trail promises that a mutation and its record succeed or fail together.
+    // Asserting that rows EXIST does not prove it: only making the audit write FAIL does.
+    // The table's CHECK rejects an entry that names nobody, which forces exactly that.
+    use server::store::AuditEntry;
+
+    let (store, _dir) = store();
+    let unwritable = AuditEntry {
+        id: 0,
+        project: "coffee".to_string(),
+        at: 0,
+        actor: String::new(),
+        action: "project.create".to_string(),
+        subject: "coffee".to_string(),
+        detail: "an entry that names nobody is not a record".to_string(),
+    };
+
+    let refused = store.create_project("coffee", Some(&unwritable));
+    assert!(
+        refused.is_err(),
+        "an unwritable audit entry must fail the mutation it describes"
+    );
+    assert!(
+        store.project("coffee").unwrap().is_none(),
+        "the project must NOT survive: the mutation rolled back with its record"
+    );
+}

@@ -60,7 +60,13 @@ CREATE TABLE IF NOT EXISTS audit (
     actor TEXT NOT NULL,
     action TEXT NOT NULL,
     subject TEXT NOT NULL,
-    detail TEXT NOT NULL
+    detail TEXT NOT NULL,
+    -- An entry that names nobody or nothing is not a record of anything. The constraint is
+    -- also how a test can make an audit write fail on purpose: if the entry cannot be
+    -- written, the mutation it describes must not survive either, which is the atomicity
+    -- the audit trail promises.
+    CHECK (length(actor) > 0),
+    CHECK (length(action) > 0)
 );
 -- Append-only is a property of the DATABASE, not a convention of the trait: these
 -- triggers make UPDATE and DELETE on the audit table fail outright, so a written entry
