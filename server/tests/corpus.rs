@@ -63,7 +63,7 @@ async fn the_corpus_can_be_committed_branched_and_gated() {
     let broken: serde_json::Value = serde_json::from_str(&test_support::load_okf_broken()).unwrap();
 
     let imported = commit(&router, "main", "import the exported model", expected).await;
-    router
+    let branched = router
         .clone()
         .oneshot(post(
             "/projects/coffee/branches",
@@ -71,7 +71,16 @@ async fn the_corpus_can_be_committed_branched_and_gated() {
         ))
         .await
         .unwrap();
+    assert_eq!(
+        branched.status(),
+        StatusCode::CREATED,
+        "the branch must exist before the lossy commit lands on it"
+    );
     let corrupted = commit(&router, "corrupted", "drop a requirement", broken).await;
+    // The lossy commit must DESCEND from the imported one. Without this, a broken branch
+    // or parentage would still pass: the gate detects loss by content, not by topology,
+    // and a commit onto a branch that did not exist would simply start a new history.
+    assert_ne!(imported, corrupted);
 
     let clean = router
         .clone()
@@ -81,6 +90,7 @@ async fn the_corpus_can_be_committed_branched_and_gated() {
         ))
         .await
         .unwrap();
+    assert_eq!(clean.status(), StatusCode::OK);
     let clean = json_body(clean).await;
     assert_eq!(clean["passed"], true);
     assert_eq!(clean["integration"]["componentCount"], 1);
@@ -94,6 +104,11 @@ async fn the_corpus_can_be_committed_branched_and_gated() {
         ))
         .await
         .unwrap();
+    assert_eq!(
+        lossy.status(),
+        StatusCode::OK,
+        "a failed gate is a successful run"
+    );
     let lossy = json_body(lossy).await;
     assert_eq!(lossy["passed"], false);
     let failures: Vec<String> = lossy["failures"]
