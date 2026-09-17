@@ -7,7 +7,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::auth::AuthConfig;
+use crate::auth::{AuthConfig, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{
     is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError,
@@ -267,9 +267,16 @@ pub struct CreateProject {
 }
 
 pub async fn create_project(
+    identity: Identity,
     State(state): State<ApiState>,
     Json(body): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !identity.may(Permission::Administer) {
+        return Err(ApiError::forbidden("admin permission required"));
+    }
+    if !identity.may_reach(&body.name) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("project name", &body.name)?;
     let audit = AuditEntry {
         id: 0,
@@ -290,7 +297,13 @@ pub async fn create_project(
     ))
 }
 
-pub async fn list_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+pub async fn list_projects(
+    identity: Identity,
+    State(state): State<ApiState>,
+) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
     let projects = state.store.list_projects().map_err(map_store_error)?;
     let out: Vec<Value> = projects
         .iter()
@@ -309,10 +322,17 @@ pub struct CreateCommit {
 }
 
 pub async fn create_commit(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<CreateCommit>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     if state
         .store
         .project(&project)
@@ -414,10 +434,17 @@ pub struct BranchQuery {
 }
 
 pub async fn list_commits(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Query(query): Query<BranchQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     let branch = query.branch.unwrap_or_else(|| "main".to_string());
     let commits = state
         .store
@@ -429,9 +456,16 @@ pub async fn list_commits(
 }
 
 pub async fn get_commit(
+    identity: Identity,
     State(state): State<ApiState>,
     Path((project, hash)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     let commit = state
         .store
         .commit(&project, &hash)
@@ -459,10 +493,17 @@ pub struct CreateBranch {
 }
 
 pub async fn create_branch(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<CreateBranch>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("branch name", &body.name)?;
     let audit = AuditEntry {
         id: 0,
@@ -484,9 +525,16 @@ pub async fn create_branch(
 }
 
 pub async fn list_branches(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     if state
         .store
         .project(&project)
@@ -507,9 +555,16 @@ pub async fn list_branches(
 }
 
 pub async fn delete_branch(
+    identity: Identity,
     State(state): State<ApiState>,
     Path((project, name)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
+    if !identity.may(Permission::Administer) {
+        return Err(ApiError::forbidden("admin permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("branch name", &name)?;
     let audit = AuditEntry {
         id: 0,
@@ -541,10 +596,17 @@ pub struct ResetBranch {
 /// history is never rewritten: the old tip stays reachable, and the revert is itself a
 /// commit with an author and a message.
 pub async fn reset_branch(
+    identity: Identity,
     State(state): State<ApiState>,
     Path((project, name)): Path<(String, String)>,
     Json(body): Json<ResetBranch>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("branch name", &name)?;
     if state
         .store

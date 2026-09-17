@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{map_store_error, record_refusal, validate_element_name, validate_name, ApiState};
+use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{now_epoch, AuditEntry, Lock};
 
@@ -40,10 +41,17 @@ pub struct AcquireLocks {
 }
 
 pub async fn acquire_locks(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<AcquireLocks>,
 ) -> Result<(StatusCode, Json<Vec<Lock>>), ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("branch name", &body.branch)?;
     validate_holder(&body.holder)?;
     if body.elements.is_empty() {
@@ -125,9 +133,16 @@ pub async fn acquire_locks(
 }
 
 pub async fn list_locks(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
 ) -> Result<Json<Vec<Lock>>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     if state
         .store
         .project(&project)
@@ -150,10 +165,17 @@ pub struct ReleaseLocks {
 }
 
 pub async fn release_locks(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<ReleaseLocks>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     if state
         .store
         .project(&project)

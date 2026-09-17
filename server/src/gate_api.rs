@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{load_model, map_store_error, ApiState};
+use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{now_epoch, now_seconds, AuditEntry, GateRun};
 
@@ -15,10 +16,17 @@ pub struct GateRequest {
 }
 
 pub async fn run_gate(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<GateRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     let reference = load_model(&state, &project, &body.reference)?;
     let candidate = load_model(&state, &project, &body.candidate)?;
 
@@ -81,9 +89,16 @@ pub async fn run_gate(
 }
 
 pub async fn list_gate_runs(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Review) {
+        return Err(ApiError::forbidden("review permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     let runs = state.store.gate_runs(&project).map_err(map_store_error)?;
     let out: Vec<Value> = runs
         .iter()

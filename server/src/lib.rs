@@ -34,6 +34,11 @@ impl AppState {
     }
 }
 
+/// The complete route table. `/health` and `/version` are public liveness/information
+/// endpoints and take no identity. Every other route takes `Identity` as its first
+/// extractor and enforces the required permission — and project reachability, where a
+/// project is named — before touching the store, so an unauthenticated caller gets 401 and
+/// an under-privileged one gets 403 rather than reaching project data.
 pub fn app(state: AppState) -> Router {
     let api_state = state.api();
     Router::new()

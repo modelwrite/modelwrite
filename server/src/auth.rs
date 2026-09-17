@@ -94,6 +94,10 @@ pub enum AuthConfig {
     Jwt {
         jwks_source: String,
     },
+    /// Every request resolves to this exact identity. Only tests construct this: it lets
+    /// the permission and project-scope decisions be exercised with a specific role or
+    /// scope before Task 4 wires a real per-claim authority. `from_env` never produces it.
+    Fixed(Identity),
 }
 
 impl AuthConfig {
@@ -112,6 +116,14 @@ impl AuthConfig {
         AuthConfig::Static {
             token_hash: hash_token(token),
         }
+    }
+
+    /// Pin every request to one identity. This is a test hook: `from_env` never produces
+    /// it, and it exists so the role and project-scope decisions on every route can be
+    /// exercised with a viewer, an author or a single-project scope before Task 4 adds a
+    /// real token authority that can express those claims.
+    pub fn fixed(identity: Identity) -> AuthConfig {
+        AuthConfig::Fixed(identity)
     }
 }
 
@@ -180,6 +192,7 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 pub async fn identity(state: &ApiState, headers: &HeaderMap) -> Result<Identity, ApiError> {
     match &state.auth {
         AuthConfig::Open => Ok(Identity::open()),
+        AuthConfig::Fixed(identity) => Ok(identity.clone()),
         AuthConfig::Static { .. } => {
             let token = bearer_token(headers)
                 .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;

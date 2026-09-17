@@ -4,6 +4,7 @@ use axum::Json;
 use serde::Deserialize;
 
 use crate::api::{map_store_error, ApiState};
+use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::store::AuditEntry;
 
@@ -16,10 +17,17 @@ pub struct AuditQuery {
 /// attempted as well as what succeeded, and can never be edited: the store exposes only
 /// an append and this read, never an update or a delete.
 pub async fn list_audit(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Query(query): Query<AuditQuery>,
 ) -> Result<Json<Vec<AuditEntry>>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     if state
         .store
         .project(&project)

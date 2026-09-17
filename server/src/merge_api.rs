@@ -9,6 +9,7 @@ use crate::api::{
     commit_json, commit_refusal_guard, load_model, map_store_error, touched_elements,
     validate_name, ApiState,
 };
+use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::merge::merge;
 use crate::store::{now_seconds, AuditEntry, CommitGuard};
@@ -113,10 +114,17 @@ fn common_ancestor(
 }
 
 pub async fn merge_branches(
+    identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
     Json(body): Json<MergeRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
     validate_name("branch name", &body.branch)?;
     validate_name("branch name", &body.other)?;
     if state
