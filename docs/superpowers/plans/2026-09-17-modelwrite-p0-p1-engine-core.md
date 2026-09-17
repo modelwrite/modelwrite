@@ -2309,13 +2309,16 @@ git commit -m "feat: add C ABI for validation and the gate"
 - Create: engine/mcp/src/lib.rs
 - Create: engine/mcp/src/main.rs (binary mw-mcp)
 - Test: engine/mcp/tests/mcp.rs
+- Create: docs/agents/mcp-tools.json (the published tool manifest: the agent contract)
+- Create: docs/agents/mcp-agent.md (the shipped agent: what Slice 1 provides, what Slice 5 adds)
 - Modify: Cargo.toml (add engine/mcp to workspace members)
 
 **Interfaces:**
-- Consumes: okf::{types, validate}; graph::graph_stats; gate::run.
+- Consumes: okf::{types, validate, diff}; graph::graph_stats; gate::run.
 - Produces:
   - mcp::handle_request(line: &str) -> String — one JSON-RPC 2.0 request (a single line) in, one JSON-RPC response line out; an empty String for notifications.
-  - Binary mw-mcp: reads JSON-RPC lines from stdin, writes responses to stdout. Tools: okf.validate, graph.stats, gate.run.
+  - Binary mw-mcp: reads JSON-RPC lines from stdin, writes responses to stdout. Tools: okf.validate, okf.diff, graph.stats, gate.run. Resources: mw://okf/1.0/spec (the specification text) and mw://evidence/latest.
+  - The published tool manifest docs/agents/mcp-tools.json: the stable contract the modelwrite agent (Slice 5) and third-party agents bind to. Tool names and input schemas are additive and stable.
 
 - [ ] **Step 1: Write engine/mcp/Cargo.toml**
 
@@ -2411,6 +2414,21 @@ fn call_tool(msg: &Value) -> Value {
                 }
             }
         }
+        "okf.diff" => {
+            let reference = args.get("reference").and_then(Value::as_str);
+            let candidate = args.get("candidate").and_then(Value::as_str);
+            let (Some(reference), Some(candidate)) = (reference, candidate) else {
+                return tool_error("missing reference or candidate argument");
+            };
+            let parse = |s: &str| serde_json::from_str::<okf::types::OkfRoot>(s);
+            match (parse(reference), parse(candidate)) {
+                (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
+                (Ok(reference), Ok(candidate)) => {
+                    let report = okf::diff::diff(&reference, &candidate);
+                    tool_ok(serde_json::to_string_pretty(&report).expect("diff serializes"))
+                }
+            }
+        }
         _ => tool_error(&format!("unknown tool: {}", name)),
     }
 }
@@ -2477,8 +2495,49 @@ pub fn handle_request(line: &str) -> String {
                     },
                     "required": ["reference", "candidate"]
                 }
+            },
+            {
+                "name": "okf.diff",
+                "description": "Semantic diff between two OKF documents: elements, edges and attributes",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "reference": { "type": "string" },
+                        "candidate": { "type": "string" }
+                    },
+                    "required": ["reference", "candidate"]
+                }
             }
         ] }),
+        "resources/list" => json!({ "resources": [
+            {
+                "uri": "mw://okf/1.0/spec",
+                "name": "OKF 1.0 specification",
+                "mimeType": "text/markdown"
+            },
+            {
+                "uri": "mw://evidence/latest",
+                "name": "latest gate evidence",
+                "mimeType": "application/json"
+            }
+        ] }),
+        "resources/read" => {
+            let uri = msg
+                .get("params")
+                .and_then(|p| p.get("uri"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if uri == "mw://okf/1.0/spec" {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../docs/okf/okf-1.0-spec.md");
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] }),
+                    Err(e) => json!({ "contents": [], "error": format!("cannot read spec: {}", e) }),
+                }
+            } else {
+                json!({ "contents": [] })
+            }
+        }
         "tools/call" => call_tool(&msg),
         _ => {
             return json!({
@@ -2540,7 +2599,7 @@ fn initialize_returns_server_info() {
 }
 
 #[test]
-fn tools_list_has_three_tools() {
+fn tools_list_exposes_the_agent_toolset() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }));
     let names: Vec<&str> = resp["result"]["tools"]
         .as_array()
@@ -2548,7 +2607,10 @@ fn tools_list_has_three_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["okf.validate", "graph.stats", "gate.run"]);
+    assert_eq!(
+        names,
+        vec!["okf.validate", "graph.stats", "gate.run", "okf.diff"]
+    );
 }
 
 #[test]
@@ -2579,6 +2641,36 @@ fn gate_tool_runs_roundtrip() {
 }
 
 #[test]
+fn diff_tool_reports_a_removed_requirement() {
+    let reference = test_support::load_okf_expected();
+    let mut model: serde_json::Value = serde_json::from_str(&reference).unwrap();
+    model["requirements"].as_array_mut().unwrap().pop();
+    let candidate = model.to_string();
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": { "name": "okf.diff", "arguments": { "reference": reference, "candidate": candidate } }
+    }));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let report: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(report["equal"], false);
+    assert_eq!(report["missingElements"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn resources_list_exposes_the_spec() {
+    let resp = call(json!({ "jsonrpc": "2.0", "id": 7, "method": "resources/list", "params": {} }));
+    let uris: Vec<&str> = resp["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
+    assert!(uris.contains(&"mw://okf/1.0/spec"));
+}
+
+#[test]
 fn unknown_method_returns_error() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 5, "method": "nope", "params": {} }));
     assert_eq!(resp["error"]["code"], -32601);
@@ -2598,13 +2690,118 @@ Expected: all 5 tests pass.
 
 Expected: one JSON line listing okf.validate, graph.stats and gate.run. If piping into the binary is blocked in the current environment, skip this step (the unit tests already cover handle_request) and note it in the commit message.
 
-- [ ] **Step 8: Format, lint and commit**
+- [ ] **Step 8: Publish the tool manifest (the agent contract)**
+
+Write docs/agents/mcp-tools.json:
+
+```json
+{
+  "manifestVersion": "1.0",
+  "server": { "name": "modelwrite-mcp", "protocolVersion": "2024-11-05" },
+  "stability": "Tool names and input schemas are additive. Existing names never change meaning; new capability arrives as new tools.",
+  "tools": [
+    {
+      "name": "okf.validate",
+      "summary": "Validate an OKF document and return the validation report",
+      "inputSchema": { "type": "object", "properties": { "okf": { "type": "string" } }, "required": ["okf"] }
+    },
+    {
+      "name": "okf.diff",
+      "summary": "Semantic diff between two OKF documents: elements, edges and attributes",
+      "inputSchema": { "type": "object", "properties": { "reference": { "type": "string" }, "candidate": { "type": "string" } }, "required": ["reference", "candidate"] }
+    },
+    {
+      "name": "graph.stats",
+      "summary": "Graph health of an OKF document: nodes, edges, isolated nodes, components",
+      "inputSchema": { "type": "object", "properties": { "okf": { "type": "string" } }, "required": ["okf"] }
+    },
+    {
+      "name": "gate.run",
+      "summary": "Run the round-trip fidelity gate and return its evidence record",
+      "inputSchema": { "type": "object", "properties": { "reference": { "type": "string" }, "candidate": { "type": "string" }, "strictCoverage": { "type": "boolean" } }, "required": ["reference", "candidate"] }
+    }
+  ],
+  "resources": [
+    { "uri": "mw://okf/1.0/spec", "mimeType": "text/markdown" },
+    { "uri": "mw://evidence/latest", "mimeType": "application/json" }
+  ],
+  "agentContract": {
+    "gateIsTheOnlyAuthority": true,
+    "plannedTools": [
+      "rules.check",
+      "model.read",
+      "model.propose",
+      "patterns.list",
+      "patterns.instantiate",
+      "evidence.write"
+    ],
+    "note": "The shipped modelwrite agent (Slice 5) binds to this manifest. Planned tools arrive with the slices that own them, and are additive."
+  }
+}
+```
+
+- [ ] **Step 9: Document the agent seam**
+
+Write docs/agents/mcp-agent.md:
+
+```markdown
+# The modelwrite agent
+
+Slice 1 provides the contract. Slice 5 provides the agent. This file is the seam
+between them, so the agent is designed for rather than retrofitted.
+
+## What exists after Slice 1
+
+- The MCP server (mw-mcp): okf.validate, okf.diff, graph.stats, gate.run, plus the
+  resources mw://okf/1.0/spec and mw://evidence/latest.
+- The published manifest docs/agents/mcp-tools.json: tool names, input schemas and the
+  stability rule.
+- The rule pack agents/CLAUDE.md: the invariants any agent, ours or third party, must
+  respect.
+
+## What Slice 5 adds
+
+- agent/: the shipped MCP client. Skill packs, a provider abstraction (local model
+  first, customer endpoint or approved cloud optionally), step and token budgets, and a
+  replayable run log.
+- The model-edit API and its tools: model.read, model.propose, rules.check,
+  patterns.list, patterns.instantiate, evidence.write.
+- Generation, repair and review skills, and the agent evaluation harness that measures
+  them.
+
+## The loop
+
+intake -> propose instructions on the model-edit API -> apply them to a draft branch ->
+run the rules -> run the gate -> repair what the gate rejects -> draft commit for human
+review -> evidence.
+
+Patterns are the generation substrate: the agent instantiates and parameterises known
+patterns rather than inventing structure, which is what makes generated models sound
+before anyone reviews them.
+
+## Rules that bind the agent
+
+1. The gate is the only authority on correctness; no agent, log line or tool parameter
+   can mark a run as passed.
+2. Every action is an instruction on the model-edit API, never a direct edit.
+3. Every iteration ends in a gate run, and the output is a draft commit for human review.
+4. Ambiguity is a question, not an invention: the agent asks rather than guessing.
+5. Every run is replayable: prompts, tool calls and results are logged, and step, token
+   and wall-clock budgets are enforced.
+```
+
+- [ ] **Step 10: Run the tests again**
+
+Run: cargo test -p mw-mcp
+Expected: all 7 tests pass (the 5 original plus the diff and resources tests).
+
+- [ ] **Step 11: Format, lint and commit**
 
 ```powershell
 cargo fmt --all
 cargo clippy -p mw-mcp --all-targets -- -D warnings
-git add Cargo.toml engine/mcp
-git commit -m "feat: add MCP server exposing validation, graph stats and the gate"
+git add Cargo.toml engine/mcp docs/agents
+git commit -m "feat: add MCP server and the published agent tool contract"
 ```
 
 ---
