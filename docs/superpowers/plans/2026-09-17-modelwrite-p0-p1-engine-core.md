@@ -1356,7 +1356,7 @@ fn rejects_duplicate_element_ids() {
 }
 
 #[test]
-fn rejects_dangling_edge_endpoint() {
+fn warns_dangling_edge_endpoint() {
     let mut root = expected();
     if let Some(graph) = root.graph.as_mut() {
         let target = graph.nodes[0].id.clone();
@@ -1368,8 +1368,10 @@ fn rejects_dangling_edge_endpoint() {
         });
     }
     let report = validate::validate(&root);
-    assert!(!report.valid);
-    assert!(report.errors.iter().any(|e| e.contains("missing-node")));
+    // Unresolved endpoints are warnings, not errors (ruling B): a real exporter can
+    // emit them, so the document stays valid and the defect is reported loudly.
+    assert!(report.valid, "unexpected errors: {:?}", report.errors);
+    assert!(report.warnings.iter().any(|w| w.contains("missing-node")));
 }
 
 #[test]
