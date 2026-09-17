@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -51,7 +51,7 @@ fn model(name: &str) -> serde_json::Value {
     })
 }
 
-async fn seed_project(router: &axum::Router, dir: &std::path::Path) -> (String, String) {
+async fn seed_project(router: &axum::Router) -> (String, String) {
     router
         .clone()
         .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
@@ -83,7 +83,6 @@ async fn seed_project(router: &axum::Router, dir: &std::path::Path) -> (String, 
     let second = json_body(second).await;
     let candidate = second["hash"].as_str().unwrap().to_string();
 
-    let _ = dir;
     (reference, candidate)
 }
 
@@ -91,7 +90,7 @@ async fn seed_project(router: &axum::Router, dir: &std::path::Path) -> (String, 
 async fn gating_a_commit_against_itself_passes_and_records_evidence() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state(dir.path()));
-    let (reference, _candidate) = seed_project(&router, dir.path()).await;
+    let (reference, _candidate) = seed_project(&router).await;
 
     let response = router
         .clone()
@@ -124,7 +123,7 @@ async fn gating_a_commit_against_itself_passes_and_records_evidence() {
 async fn gating_a_changed_model_fails_and_is_still_a_successful_run() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state(dir.path()));
-    let (reference, candidate) = seed_project(&router, dir.path()).await;
+    let (reference, candidate) = seed_project(&router).await;
 
     let response = router
         .clone()
@@ -157,7 +156,7 @@ async fn gating_a_changed_model_fails_and_is_still_a_successful_run() {
 async fn gating_an_unknown_commit_is_not_found() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state(dir.path()));
-    let (reference, _candidate) = seed_project(&router, dir.path()).await;
+    let (reference, _candidate) = seed_project(&router).await;
     let response = router
         .oneshot(post(
             "/projects/coffee/gate",

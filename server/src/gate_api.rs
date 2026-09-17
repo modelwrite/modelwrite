@@ -27,11 +27,6 @@ fn load_model(
     serde_json::from_slice(&bytes).map_err(|e| ApiError::internal(e.to_string()))
 }
 
-fn short(hash: &str) -> &str {
-    let end = 12.min(hash.len());
-    &hash[..end]
-}
-
 #[derive(Deserialize)]
 pub struct GateRequest {
     pub reference: String,
@@ -54,18 +49,9 @@ pub async fn run_gate(
         .map(|c| c.branch)
         .unwrap_or_else(|| "main".to_string());
 
-    // Evidence lands beside the engine's records under a deterministic name: the same
-    // two commits always produce the same file, so a run is reproducible and citable.
-    let file_name = format!(
-        "server-{}-{}-{}.json",
-        project,
-        short(&body.reference),
-        short(&body.candidate)
-    );
-    let path = state.evidence_dir.join(file_name);
-    gate::write_evidence(&path, &outcome.evidence)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
+    // The run is recorded first: the store carries the whole evidence payload, so it is
+    // the authority, and the file written below is an export of it. Writing first would
+    // let a failed insert leave an evidence file no recorded run cites.
     let run = GateRun {
         project: project.clone(),
         branch,
@@ -76,6 +62,17 @@ pub async fn run_gate(
         created_at: now_epoch(),
     };
     state.store.record_gate_run(&run).map_err(map_store_error)?;
+
+    // The name carries both FULL hashes. Truncating them would keep determinism but lose
+    // uniqueness: two commit pairs sharing a prefix would overwrite each other's evidence
+    // while both runs stayed recorded, so a run would cite a file it never wrote.
+    let file_name = format!(
+        "server-{}-{}-{}.json",
+        project, body.reference, body.candidate
+    );
+    let path = state.evidence_dir.join(file_name);
+    gate::write_evidence(&path, &outcome.evidence)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(outcome.evidence))
 }
