@@ -3,6 +3,7 @@ pub mod api;
 pub mod error;
 pub mod gate_api;
 pub mod merge;
+pub mod merge_api;
 pub mod store;
 
 pub use error::ApiError;
@@ -51,6 +52,7 @@ pub fn app(state: AppState) -> Router {
             axum::routing::delete(api::delete_branch),
         )
         .route("/projects/:project/gate", post(gate_api::run_gate))
+        .route("/projects/:project/merge", post(merge_api::merge_branches))
         .route(
             "/projects/:project/gate-runs",
             get(gate_api::list_gate_runs),

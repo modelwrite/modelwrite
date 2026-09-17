@@ -4,28 +4,9 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{map_store_error, ApiState};
+use crate::api::{load_model, map_store_error, ApiState};
 use crate::error::ApiError;
 use crate::store::{now_epoch, GateRun};
-
-/// Load the OKF document behind a commit hash.
-fn load_model(
-    state: &ApiState,
-    project: &str,
-    hash: &str,
-) -> Result<okf::types::OkfRoot, ApiError> {
-    let commit = state
-        .store
-        .commit(project, hash)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
-    let bytes = state
-        .store
-        .blob(&commit.okf_hash)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::internal(format!("missing blob {}", commit.okf_hash)))?;
-    serde_json::from_slice(&bytes).map_err(|e| ApiError::internal(e.to_string()))
-}
 
 #[derive(Deserialize)]
 pub struct GateRequest {

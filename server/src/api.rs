@@ -66,7 +66,26 @@ pub fn map_store_error(e: StoreError) -> ApiError {
     }
 }
 
-fn commit_json(commit: &Commit) -> Value {
+/// Load the OKF document behind a commit hash.
+pub fn load_model(
+    state: &ApiState,
+    project: &str,
+    hash: &str,
+) -> Result<okf::types::OkfRoot, ApiError> {
+    let commit = state
+        .store
+        .commit(project, hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
+    let bytes = state
+        .store
+        .blob(&commit.okf_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::internal(format!("missing blob {}", commit.okf_hash)))?;
+    serde_json::from_slice(&bytes).map_err(|e| ApiError::internal(e.to_string()))
+}
+
+pub fn commit_json(commit: &Commit) -> Value {
     json!({
         "hash": commit.hash,
         "project": commit.project,
