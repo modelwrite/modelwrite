@@ -48,6 +48,22 @@ pub struct Lock {
     pub expires_at: i64,
 }
 
+/// One entry in the append-only audit log. The `id` is assigned by the store on append
+/// (callers pass 0); `at` is the wall-clock time supplied by the HTTP layer, never read
+/// inside the store; `actor` is what the request SAID it was - its author or holder - not
+/// a verified identity, which is a later tranche.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub id: i64,
+    pub project: String,
+    pub at: i64,
+    pub actor: String,
+    pub action: String,
+    pub subject: String,
+    pub detail: String,
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     NotFound(String),
@@ -118,6 +134,12 @@ pub fn now_epoch() -> String {
     }
 }
 
+/// The real clock in seconds, for callers that pass time INTO the store (lock expiry,
+/// audit timestamps). The store itself never calls this.
+pub fn now_seconds() -> i64 {
+    now_epoch().parse().unwrap_or(0)
+}
+
 /// What a guarded commit must not change. The holder is the one asking; any element in
 /// `elements` held by a DIFFERENT holder with a live lease refuses the commit.
 pub struct CommitGuard<'a> {
@@ -144,6 +166,7 @@ pub trait Store: Send + Sync {
     /// and writing afterwards leaves a window in which another holder acquires the lock and
     /// the guarded commit lands anyway, which would make a lock advisory in the worst way -
     /// it would look enforced and not be.
+    #[allow(clippy::too_many_arguments)]
     fn commit_model(
         &self,
         project: &str,
@@ -152,10 +175,12 @@ pub trait Store: Send + Sync {
         author: &str,
         message: &str,
         guard: Option<CommitGuard<'_>>,
+        audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError>;
 
     /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
     /// A merge commit has two parents, so the parent list cannot be derived from the tip.
+    #[allow(clippy::too_many_arguments)]
     fn commit_merge(
         &self,
         project: &str,
@@ -164,6 +189,7 @@ pub trait Store: Send + Sync {
         okf_hash: &str,
         author: &str,
         message: &str,
+        audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError>;
 
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError>;
@@ -213,4 +239,12 @@ pub trait Store: Send + Sync {
         elements: &[String],
         now: i64,
     ) -> Result<Vec<Lock>, StoreError>;
+
+    /// Append one entry to the audit log and return its row id. There is deliberately NO
+    /// update, delete or truncate method anywhere in this trait: the log is append-only by
+    /// construction rather than by convention, so a written entry can never be rewritten.
+    fn append_audit(&self, entry: &AuditEntry) -> Result<i64, StoreError>;
+
+    /// The audit entries for a project, newest first, at most `limit` rows (capped at 1000).
+    fn audit(&self, project: &str, limit: i64) -> Result<Vec<AuditEntry>, StoreError>;
 }

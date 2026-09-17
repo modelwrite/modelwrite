@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pub mod api;
+pub mod audit_api;
 pub mod error;
 pub mod gate_api;
 pub mod locks_api;
@@ -62,6 +63,7 @@ pub fn app(state: AppState) -> Router {
             "/projects/:project/gate-runs",
             get(gate_api::list_gate_runs),
         )
+        .route("/projects/:project/audit", get(audit_api::list_audit))
         .route(
             "/projects/:project/locks",
             post(locks_api::acquire_locks)

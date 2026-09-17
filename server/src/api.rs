@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::store::{now_epoch, Commit, CommitGuard, Store, StoreError};
+use crate::store::{now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -166,6 +166,18 @@ pub async fn create_project(
         .store
         .create_project(&body.name)
         .map_err(map_store_error)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.name.clone(),
+            at: now_seconds(),
+            actor: "unknown".to_string(),
+            action: "project.create".to_string(),
+            subject: project.name.clone(),
+            detail: "project created".to_string(),
+        })
+        .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "name": project.name, "createdAt": project.created_at })),
@@ -245,7 +257,17 @@ pub async fn create_commit(
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
     // One call, one transaction: the parents come from the tip the store reads inside the
     // same lock that writes the commit, so two concurrent commits to one branch chain
-    // instead of forking the history.
+    // instead of forking the history. The audit row rides the SAME transaction, so the
+    // commit and its record of who made it succeed or fail together.
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: body.author.clone(),
+        action: "commit.create".to_string(),
+        subject: body.branch.clone(),
+        detail: body.message.clone(),
+    };
     let commit = state
         .store
         .commit_model(
@@ -255,6 +277,7 @@ pub async fn create_commit(
             &body.author,
             &body.message,
             guard,
+            Some(&audit),
         )
         .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
@@ -320,6 +343,18 @@ pub async fn create_branch(
         .store
         .create_branch(&project, &body.name, &body.from)
         .map_err(map_store_error)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.clone(),
+            at: now_seconds(),
+            actor: "unknown".to_string(),
+            action: "branch.create".to_string(),
+            subject: body.name.clone(),
+            detail: format!("from {}", body.from),
+        })
+        .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "name": body.name, "tip": body.from })),
@@ -357,6 +392,18 @@ pub async fn delete_branch(
     state
         .store
         .delete_branch(&project, &name)
+        .map_err(map_store_error)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.clone(),
+            at: now_seconds(),
+            actor: "unknown".to_string(),
+            action: "branch.delete".to_string(),
+            subject: name.clone(),
+            detail: "branch deleted".to_string(),
+        })
         .map_err(map_store_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -400,6 +447,15 @@ pub async fn reset_branch(
         .ok_or_else(|| ApiError::not_found(format!("commit {}", body.to)))?;
     // The target's model is already stored, so this reuses its blob rather than copying
     // the bytes: the restored content is byte-identical to the original by construction.
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: body.author.clone(),
+        action: "branch.reset".to_string(),
+        subject: name.clone(),
+        detail: format!("reset to {}", body.to),
+    };
     let commit = state
         .store
         .commit_model(
@@ -409,6 +465,7 @@ pub async fn reset_branch(
             &body.author,
             &body.message,
             None,
+            Some(&audit),
         )
         .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))

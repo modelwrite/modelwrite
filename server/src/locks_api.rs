@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::api::{map_store_error, validate_name, ApiState};
 use crate::error::ApiError;
-use crate::store::{now_epoch, Lock};
+use crate::store::{now_epoch, AuditEntry, Lock};
 
 /// The real clock in seconds, as the store requires it. The store itself never reads the
 /// clock: time is passed in so lock expiry is testable without sleeping.
@@ -71,6 +71,24 @@ pub async fn acquire_locks(
             now_seconds(),
         )
         .map_err(map_store_error)?;
+    let expiry = locks.first().map(|l| l.expires_at).unwrap_or(0);
+    state
+        .store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.clone(),
+            at: now_seconds(),
+            actor: body.holder.clone(),
+            action: "lock.acquire".to_string(),
+            subject: elements.join(","),
+            detail: format!(
+                "{} element(s) by {} until {}",
+                locks.len(),
+                body.holder,
+                expiry
+            ),
+        })
+        .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(locks)))
 }
 
@@ -116,5 +134,21 @@ pub async fn release_locks(
         .store
         .release_locks(&project, &body.holder, &body.ids)
         .map_err(map_store_error)?;
+    // A release that removes nothing is not a mutation (a foreign holder, or already
+    // released ids), so it writes no audit entry.
+    if released > 0 {
+        state
+            .store
+            .append_audit(&AuditEntry {
+                id: 0,
+                project: project.clone(),
+                at: now_seconds(),
+                actor: body.holder.clone(),
+                action: "lock.release".to_string(),
+                subject: body.ids.join(","),
+                detail: format!("released {} lock(s)", released),
+            })
+            .map_err(map_store_error)?;
+    }
     Ok(Json(json!({ "released": released })))
 }

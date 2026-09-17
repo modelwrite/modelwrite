@@ -33,7 +33,7 @@ fn commits_land_on_a_branch_and_move_its_tip() {
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
     let first = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit", None)
+        .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
         .unwrap();
     assert_eq!(
         store.branch_tip("coffee", "main").unwrap().unwrap(),
@@ -41,7 +41,15 @@ fn commits_land_on_a_branch_and_move_its_tip() {
     );
 
     let second = store
-        .commit_model("coffee", "main", "okf2", "alex", "second commit", None)
+        .commit_model(
+            "coffee",
+            "main",
+            "okf2",
+            "alex",
+            "second commit",
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(
         store.branch_tip("coffee", "main").unwrap().unwrap(),
@@ -63,7 +71,7 @@ fn duplicate_projects_and_branches_are_conflicts() {
         other => panic!("expected a conflict, got {:?}", other),
     }
     let commit = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit", None)
+        .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
         .unwrap();
     store
         .create_branch("coffee", "review", &commit.hash)
@@ -100,6 +108,7 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
                     &format!("okf-{}", i),
                     "alex",
                     "concurrent",
+                    None,
                     None,
                 )
                 .expect("commit model");
@@ -164,13 +173,21 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None)
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
     store
         .create_branch("coffee", "feature", &root.hash)
         .unwrap();
     let their_side = store
-        .commit_model("coffee", "feature", "okf-feature", "alex", "feature", None)
+        .commit_model(
+            "coffee",
+            "feature",
+            "okf-feature",
+            "alex",
+            "feature",
+            None,
+            None,
+        )
         .unwrap();
 
     // The concurrent commit: main moves AFTER the merge read its tips.
@@ -182,6 +199,7 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
             "alex",
             "concurrent",
             None,
+            None,
         )
         .unwrap();
 
@@ -192,6 +210,7 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
         "okf-merged",
         "alex",
         "merge",
+        None,
     );
     match refused {
         Err(StoreError::Conflict(_)) => {}
@@ -222,7 +241,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
     store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None)
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
 
     // Alex holds b1.
@@ -243,6 +262,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             elements: &touched,
             now: 1000,
         }),
+        None,
     );
     match refused {
         Err(StoreError::Conflict(message)) => {
@@ -265,6 +285,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             elements: &touched,
             now: 2000,
         }),
+        None,
     );
     assert!(allowed.is_ok(), "an expired lease must not block a commit");
 
@@ -285,6 +306,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             elements: &elsewhere,
             now: 1000,
         }),
+        None,
     );
     assert!(unrelated.is_ok(), "only the guarded elements are protected");
 }

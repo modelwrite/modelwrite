@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::api::{load_model, map_store_error, ApiState};
 use crate::error::ApiError;
-use crate::store::{now_epoch, GateRun};
+use crate::store::{now_epoch, now_seconds, AuditEntry, GateRun};
 
 #[derive(Deserialize)]
 pub struct GateRequest {
@@ -43,6 +43,26 @@ pub async fn run_gate(
         created_at: now_epoch(),
     };
     state.store.record_gate_run(&run).map_err(map_store_error)?;
+
+    // The audit entry records what was ATTEMPTED, so a FAILED gate is recorded too: the
+    // verdict is part of the detail, and the log exists to show what happened, not only
+    // what succeeded.
+    let verdict = if outcome.passed { "passed" } else { "failed" };
+    state
+        .store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.clone(),
+            at: now_seconds(),
+            actor: "unknown".to_string(),
+            action: "gate.run".to_string(),
+            subject: body.candidate.clone(),
+            detail: format!(
+                "{}: candidate {} against reference {}",
+                verdict, body.candidate, body.reference
+            ),
+        })
+        .map_err(map_store_error)?;
 
     // The name carries both FULL hashes. Truncating them would keep determinism but lose
     // uniqueness: two commit pairs sharing a prefix would overwrite each other's evidence

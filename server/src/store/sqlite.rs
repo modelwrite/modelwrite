@@ -3,7 +3,9 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
-use super::{now_epoch, Commit, CommitGuard, GateRun, Lock, Project, Store, StoreError};
+use super::{
+    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, Lock, Project, Store, StoreError,
+};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
@@ -51,6 +53,15 @@ CREATE TABLE IF NOT EXISTS locks (
     expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS locks_element ON locks(project, element);
+CREATE TABLE IF NOT EXISTS audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    detail TEXT NOT NULL
+);
 ";
 
 pub struct SqliteStore {
@@ -94,6 +105,18 @@ fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
     serde_json::from_str(raw).map_err(|e| {
         StoreError::Backend(format!("corrupt parents column for commit {}: {}", hash, e))
     })
+}
+
+/// Insert one audit row and return its AUTOINCREMENT id. The caller's `id` field is
+/// ignored: the store assigns ids, and no update or delete path ever reuses or rewrites one.
+/// Shared by `append_audit` and by the commit/merge transactions that must write the audit
+/// row atomically with the mutation it describes.
+fn insert_audit(c: &Connection, entry: &AuditEntry) -> rusqlite::Result<i64> {
+    c.execute(
+        "INSERT INTO audit (project, at, actor, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![entry.project, entry.at, entry.actor, entry.action, entry.subject, entry.detail],
+    )?;
+    Ok(c.last_insert_rowid())
 }
 
 impl Store for SqliteStore {
@@ -169,6 +192,7 @@ impl Store for SqliteStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit_model(
         &self,
         project: &str,
@@ -177,6 +201,7 @@ impl Store for SqliteStore {
         author: &str,
         message: &str,
         guard: Option<CommitGuard<'_>>,
+        audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError> {
         let connection = self
             .connection
@@ -242,6 +267,9 @@ impl Store for SqliteStore {
             params![project, branch, hash],
         )
         .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if let Some(audit) = audit {
+            insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
         tx.commit()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -257,6 +285,7 @@ impl Store for SqliteStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit_merge(
         &self,
         project: &str,
@@ -265,6 +294,7 @@ impl Store for SqliteStore {
         okf_hash: &str,
         author: &str,
         message: &str,
+        audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError> {
         // A merge commit has exactly two parents. Anything else is a caller mistake, and it
         // would quietly write a root commit or an ordinary single-parent commit under the
@@ -340,6 +370,9 @@ impl Store for SqliteStore {
             params![project, branch, hash],
         )
         .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if let Some(audit) = audit {
+            insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
         tx.commit()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -517,6 +550,31 @@ impl Store for SqliteStore {
                     passed: row.get::<_, i64>(4)? != 0,
                     evidence: row.get(5)?,
                     created_at: row.get(6)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    fn append_audit(&self, entry: &AuditEntry) -> Result<i64, StoreError> {
+        self.with(|c| insert_audit(c, entry))
+    }
+
+    fn audit(&self, project: &str, limit: i64) -> Result<Vec<AuditEntry>, StoreError> {
+        let limit = limit.clamp(1, 1000);
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, project, at, actor, action, subject, detail FROM audit WHERE project = ?1 ORDER BY id DESC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![project, limit], |row| {
+                Ok(AuditEntry {
+                    id: row.get(0)?,
+                    project: row.get(1)?,
+                    at: row.get(2)?,
+                    actor: row.get(3)?,
+                    action: row.get(4)?,
+                    subject: row.get(5)?,
+                    detail: row.get(6)?,
                 })
             })?;
             rows.collect()

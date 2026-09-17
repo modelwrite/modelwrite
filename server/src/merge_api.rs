@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::api::{commit_json, load_model, map_store_error, validate_name, ApiState};
 use crate::error::ApiError;
 use crate::merge::merge;
+use crate::store::{now_seconds, AuditEntry};
 
 #[derive(Deserialize)]
 pub struct MergeRequest {
@@ -140,7 +141,20 @@ pub async fn merge_branches(
     if !outcome.conflicts.is_empty() {
         // A conflict is not a transport failure: nothing is written, and the caller gets
         // every conflicting subject with its base, ours and theirs values so a human or an
-        // agent can resolve it deliberately rather than guess.
+        // agent can resolve it deliberately rather than guess. The attempt is still
+        // recorded: the audit log exists to show what was tried, not only what succeeded.
+        state
+            .store
+            .append_audit(&AuditEntry {
+                id: 0,
+                project: project.clone(),
+                at: now_seconds(),
+                actor: body.author.clone(),
+                action: "merge.conflict".to_string(),
+                subject: body.branch.clone(),
+                detail: format!("merge conflict between {} and {}", body.branch, body.other),
+            })
+            .map_err(map_store_error)?;
         return Ok((
             StatusCode::CONFLICT,
             Json(json!({
@@ -172,6 +186,15 @@ pub async fn merge_branches(
         ApiError::internal("the merged model could not be stored")
     })?;
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: body.author.clone(),
+        action: "merge.clean".to_string(),
+        subject: body.branch.clone(),
+        detail: format!("merged {} into {}", body.other, body.branch),
+    };
     let commit = state
         .store
         .commit_merge(
@@ -181,6 +204,7 @@ pub async fn merge_branches(
             &okf_hash,
             &body.author,
             &body.message,
+            Some(&audit),
         )
         .map_err(map_store_error)?;
 
