@@ -331,6 +331,19 @@ impl Store for SqliteStore {
         Ok(())
     }
 
+    fn delete_branch(&self, project: &str, name: &str) -> Result<(), StoreError> {
+        let removed = self.with(|c| {
+            c.execute(
+                "DELETE FROM branches WHERE project = ?1 AND name = ?2",
+                params![project, name],
+            )
+        })?;
+        if removed == 0 {
+            return Err(StoreError::NotFound(format!("branch {}", name)));
+        }
+        Ok(())
+    }
+
     fn list_branches(&self, project: &str) -> Result<Vec<(String, String)>, StoreError> {
         self.with(|c| {
             let mut stmt =

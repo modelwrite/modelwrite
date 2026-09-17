@@ -226,3 +226,38 @@ pub async fn create_branch(
         Json(json!({ "name": body.name, "tip": body.from })),
     ))
 }
+
+pub async fn list_branches(
+    State(state): State<ApiState>,
+    Path(project): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if state
+        .store
+        .project(&project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
+    let branches = state
+        .store
+        .list_branches(&project)
+        .map_err(map_store_error)?;
+    let out: Vec<Value> = branches
+        .iter()
+        .map(|(name, tip)| json!({ "name": name, "tip": tip }))
+        .collect();
+    Ok(Json(Value::Array(out)))
+}
+
+pub async fn delete_branch(
+    State(state): State<ApiState>,
+    Path((project, name)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    validate_name("branch name", &name)?;
+    state
+        .store
+        .delete_branch(&project, &name)
+        .map_err(map_store_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}

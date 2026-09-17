@@ -21,6 +21,10 @@ fn post(uri: &str, body: serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
+fn get(uri: &str) -> Request<Body> {
+    Request::builder().uri(uri).body(Body::empty()).unwrap()
+}
+
 async fn json_body(response: axum::response::Response) -> serde_json::Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
@@ -288,4 +292,88 @@ async fn names_that_could_escape_a_path_are_rejected() {
         .await
         .unwrap();
     assert_eq!(accepted.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn branches_can_be_listed_and_deleted_without_losing_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "m", "okf": tiny_okf() }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "review", "from": hash }),
+        ))
+        .await
+        .unwrap();
+
+    let listed = router
+        .clone()
+        .oneshot(get("/projects/coffee/branches"))
+        .await
+        .unwrap();
+    let branches = json_body(listed).await;
+    let names: Vec<String> = branches
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.contains(&"main".to_string()));
+    assert!(names.contains(&"review".to_string()));
+
+    let deleted = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/projects/coffee/branches/review")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    // The commit the deleted branch pointed at must still be readable.
+    let still_there = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/projects/coffee/commits/{}", hash))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(still_there.status(), StatusCode::OK);
+
+    let gone = router
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/projects/coffee/branches/review")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), StatusCode::NOT_FOUND);
 }

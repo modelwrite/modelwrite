@@ -41,7 +41,14 @@ pub fn app(state: AppState) -> Router {
             post(api::create_commit).get(api::list_commits),
         )
         .route("/projects/:project/commits/:hash", get(api::get_commit))
-        .route("/projects/:project/branches", post(api::create_branch))
+        .route(
+            "/projects/:project/branches",
+            post(api::create_branch).get(api::list_branches),
+        )
+        .route(
+            "/projects/:project/branches/:name",
+            axum::routing::delete(api::delete_branch),
+        )
         .route("/projects/:project/gate", post(gate_api::run_gate))
         .route(
             "/projects/:project/gate-runs",

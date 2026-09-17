@@ -117,6 +117,11 @@ pub trait Store: Send + Sync {
     fn commits_on(&self, project: &str, branch: &str) -> Result<Vec<Commit>, StoreError>;
     fn branch_tip(&self, project: &str, branch: &str) -> Result<Option<String>, StoreError>;
     fn create_branch(&self, project: &str, name: &str, from: &str) -> Result<(), StoreError>;
+
+    /// Remove a branch pointer. This never deletes commits: the objects a branch pointed
+    /// at stay in the store, so a deleted branch can be recreated at the same hash and no
+    /// history is ever lost.
+    fn delete_branch(&self, project: &str, name: &str) -> Result<(), StoreError>;
     fn list_branches(&self, project: &str) -> Result<Vec<(String, String)>, StoreError>;
     fn record_gate_run(&self, run: &GateRun) -> Result<(), StoreError>;
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError>;
