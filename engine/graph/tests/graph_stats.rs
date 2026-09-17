@@ -106,3 +106,19 @@ fn allocate_edge_counts_only_requirement_endpoints() {
     assert_eq!(cov.covered, 1);
     assert!(cov.uncovered.is_empty());
 }
+#[test]
+fn stats_serialize_with_camel_case_keys() {
+    // The stats are a published contract (the MCP graph.stats tool). Pin the key style
+    // so they cannot drift away from the rest of the platform's JSON.
+    let stats = graph_stats(&expected());
+    let value = serde_json::to_value(&stats).expect("stats serialize");
+    let keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert!(keys.contains(&"nodeCount"), "keys: {:?}", keys);
+    assert!(keys.contains(&"componentCount"), "keys: {:?}", keys);
+    assert!(!keys.contains(&"node_count"), "keys: {:?}", keys);
+}

@@ -125,3 +125,40 @@ fn tool_error_is_reported_in_the_result_not_the_transport() {
     assert!(resp.get("error").is_none(), "unexpected error: {}", resp);
     assert_eq!(resp["result"]["isError"], true);
 }
+#[test]
+fn graph_stats_tool_reports_health() {
+    let okf = test_support::load_okf_expected();
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": { "name": "graph.stats", "arguments": { "okf": okf } }
+    }));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let stats: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(stats["nodeCount"], 99);
+    assert_eq!(stats["edgeCount"], 165);
+    assert_eq!(stats["componentCount"], 1);
+}
+
+#[test]
+fn graph_stats_tool_errors_on_a_graph_less_document() {
+    // A repair loop calls this on invalid candidates, so it must answer with an error
+    // rather than taking the server down.
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": { "name": "graph.stats", "arguments": { "okf": "{\"project\":\"x\",\"summary\":{},\"stateMachine\":{\"name\":\"sm\",\"regions\":[]},\"graph\":null}" } }
+    }));
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected transport error: {}",
+        resp
+    );
+    assert_eq!(resp["result"]["isError"], true);
+    assert!(resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("no graph section"));
+}

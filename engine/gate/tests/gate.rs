@@ -110,3 +110,20 @@ fn candidate_without_a_graph_fails_instead_of_panicking() {
         1
     );
 }
+#[test]
+fn evidence_is_identical_across_runs() {
+    // The evidence annex is the trust anchor of the provable identity, so the
+    // determinism claim is pinned rather than asserted in prose: the same inputs must
+    // serialise to the same bytes, every time, including for independently parsed copies.
+    let reference = expected();
+    let first = gate::run(&reference, &reference, false);
+    let second = gate::run(&reference, &reference, false);
+    assert_eq!(
+        serde_json::to_string(&first.evidence).unwrap(),
+        serde_json::to_string(&second.evidence).unwrap()
+    );
+
+    let reparsed = expected();
+    let third = gate::run(&reparsed, &reparsed, false);
+    assert_eq!(first.evidence, third.evidence);
+}

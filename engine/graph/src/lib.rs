@@ -5,7 +5,11 @@ use okf::types::OkfRoot;
 use petgraph::unionfind::UnionFind;
 use serde::Serialize;
 
+/// Published as camelCase JSON, like every other contract the platform exposes (the
+/// OKF document, the gate evidence, the diff report), so a consumer never has to
+/// special-case one payload's key style.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphStats {
     pub node_count: usize,
     pub edge_count: usize,
@@ -57,6 +61,7 @@ pub fn graph_stats(root: &OkfRoot) -> GraphStats {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CoverageReport {
     pub total: usize,
     pub satisfied: usize,

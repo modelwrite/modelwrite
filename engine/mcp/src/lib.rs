@@ -39,6 +39,12 @@ fn call_tool(msg: &Value) -> Value {
             match serde_json::from_str::<okf::types::OkfRoot>(okf) {
                 Err(e) => tool_error(&format!("parse error: {}", e)),
                 Ok(root) => {
+                    // The engine's graph helpers require a graph, so an invalid candidate
+                    // must be reported as a tool error rather than crashing the server: a
+                    // repair loop calls this tool on exactly these documents.
+                    if root.graph.is_none() {
+                        return tool_error("candidate has no graph section");
+                    }
                     let stats = graph::graph_stats(&root);
                     tool_ok(serde_json::to_string_pretty(&stats).expect("stats serialize"))
                 }
