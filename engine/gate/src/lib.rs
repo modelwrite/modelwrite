@@ -34,26 +34,43 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
         }
     }
 
-    let stats = graph_stats(candidate);
-    if !stats.isolated.is_empty() {
-        failures.push(format!(
-            "integration: {} isolated nodes",
-            stats.isolated.len()
-        ));
-    }
-    if stats.component_count != 1 {
-        failures.push(format!(
-            "integration: {} connected components",
-            stats.component_count
-        ));
+    // A candidate can lose its graph section entirely. Validation already records that
+    // as an error, so the gate must report a failure rather than panic inside the graph
+    // helpers, which require a graph to exist. Exit code 1 is the contract for a lossy
+    // candidate; a crash would be neither a pass nor a failure.
+    let stats = if candidate.graph.is_some() {
+        Some(graph_stats(candidate))
+    } else {
+        failures.push("integration: candidate has no graph section".to_string());
+        None
+    };
+    if let Some(stats) = &stats {
+        if !stats.isolated.is_empty() {
+            failures.push(format!(
+                "integration: {} isolated nodes",
+                stats.isolated.len()
+            ));
+        }
+        if stats.component_count != 1 {
+            failures.push(format!(
+                "integration: {} connected components",
+                stats.component_count
+            ));
+        }
     }
 
-    let cov = requirement_coverage(candidate);
-    if strict_coverage && !cov.uncovered.is_empty() {
-        failures.push(format!(
-            "coverage: {} uncovered requirements",
-            cov.uncovered.len()
-        ));
+    let cov = if candidate.graph.is_some() {
+        Some(requirement_coverage(candidate))
+    } else {
+        None
+    };
+    if let Some(cov) = &cov {
+        if strict_coverage && !cov.uncovered.is_empty() {
+            failures.push(format!(
+                "coverage: {} uncovered requirements",
+                cov.uncovered.len()
+            ));
+        }
     }
 
     let evidence = json!({
@@ -69,19 +86,39 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
             "extraEdges": d.extra_edges,
             "changedAttributes": d.changed_attributes
         },
-        "integration": {
-            "isolated": stats.isolated,
-            "componentCount": stats.component_count,
-            "componentSizes": stats.component_sizes
+        // The schema stays stable when the candidate has no graph: the keys are always
+        // present, with empty values, so a consumer never has to handle a missing object.
+        "integration": match &stats {
+            Some(s) => json!({
+                "isolated": s.isolated,
+                "componentCount": s.component_count,
+                "componentSizes": s.component_sizes
+            }),
+            None => json!({
+                "isolated": [],
+                "componentCount": 0,
+                "componentSizes": []
+            })
         },
-        "coverage": {
-            "total": cov.total,
-            "satisfied": cov.satisfied,
-            "refined": cov.refined,
-            "verified": cov.verified,
-            "allocated": cov.allocated,
-            "covered": cov.covered,
-            "uncovered": cov.uncovered
+        "coverage": match &cov {
+            Some(c) => json!({
+                "total": c.total,
+                "satisfied": c.satisfied,
+                "refined": c.refined,
+                "verified": c.verified,
+                "allocated": c.allocated,
+                "covered": c.covered,
+                "uncovered": c.uncovered
+            }),
+            None => json!({
+                "total": 0,
+                "satisfied": 0,
+                "refined": 0,
+                "verified": 0,
+                "allocated": 0,
+                "covered": 0,
+                "uncovered": []
+            })
         },
         "strictCoverage": strict_coverage,
         "validationErrors": v.errors,

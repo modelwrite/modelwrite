@@ -77,3 +77,23 @@ fn strict_coverage_fails_on_uncovered() {
         .iter()
         .any(|f| f.contains("uncovered requirements")));
 }
+#[test]
+fn candidate_without_a_graph_fails_instead_of_panicking() {
+    // A lossy candidate can lose its graph section outright. The gate must report a
+    // failure with exit-code-1 semantics, never panic inside the graph helpers.
+    let reference = expected();
+    let candidate = okf(r#"{
+  "project": "no graph",
+  "exportedAt": "2026-09-17T00:00:00Z",
+  "summary": {},
+  "stateMachine": {"name": "sm", "regions": []},
+  "graph": null
+}"#);
+    let outcome = gate::run(&reference, &candidate, false);
+    assert!(!outcome.passed);
+    assert!(outcome
+        .failures
+        .iter()
+        .any(|f| f.contains("no graph section")));
+    assert_eq!(outcome.evidence["integration"]["componentCount"], 0);
+}

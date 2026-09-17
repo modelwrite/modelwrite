@@ -13,9 +13,27 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--reference" => reference = args.next().map(PathBuf::from),
-            "--candidate" => candidate = args.next().map(PathBuf::from),
-            "--evidence" => evidence = args.next().map(PathBuf::from),
+            "--reference" => match args.next() {
+                Some(v) => reference = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--reference requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--candidate" => match args.next() {
+                Some(v) => candidate = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--candidate requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--evidence" => match args.next() {
+                Some(v) => evidence = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--evidence requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
             "--json" => json_output = true,
             "--strict-coverage" => strict_coverage = true,
             _ => {
