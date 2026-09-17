@@ -420,3 +420,30 @@ async fn every_route_denies_a_caller_without_permission_or_scope() {
         );
     }
 }
+#[tokio::test]
+async fn a_scoped_identity_only_sees_the_projects_it_may_reach() {
+    // A refusal is not the only way to leak: a listing that returns every project name
+    // tells a caller scoped to one project about all the others. The listing is filtered,
+    // so the answer to "what may I see" is the truth rather than an error.
+    let (router, store, _dir) = app_with_identity(Identity {
+        subject: "alex".to_string(),
+        roles: vec!["viewer".to_string()],
+        projects: vec!["coffee".to_string()],
+    });
+    store.create_project("coffee", None).unwrap();
+    store.create_project("tea", None).unwrap();
+
+    let response = router
+        .oneshot(Request::builder().uri("/projects").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let names: Vec<String> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, vec!["coffee"], "tea must not be disclosed");
+}

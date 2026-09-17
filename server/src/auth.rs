@@ -80,7 +80,7 @@ impl Permission {
 /// How the service decides who a request is. Authentication is opt-in: the `Open` variant
 /// is the default, and the only non-open variant Task 1's startup path constructs is
 /// `Static`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum AuthConfig {
     Open,
     /// A single shared bearer token, stored as its SHA-256 hex digest so the secret itself
@@ -98,6 +98,28 @@ pub enum AuthConfig {
     /// the permission and project-scope decisions be exercised with a specific role or
     /// scope before Task 4 wires a real per-claim authority. `from_env` never produces it.
     Fixed(Identity),
+}
+
+/// Redacted on purpose: a derived Debug would print the token digest, and a configuration
+/// that can be printed into a log is a configuration that eventually will be. The digest is
+/// not the secret, but it is the thing compared to the secret, so it stays out of logs.
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthConfig::Open => write!(f, "AuthConfig::Open"),
+            AuthConfig::Static { .. } => {
+                write!(f, "AuthConfig::Static {{ token_hash: <redacted> }}")
+            }
+            AuthConfig::Jwt { jwks_source } => f
+                .debug_struct("AuthConfig::Jwt")
+                .field("jwks_source", jwks_source)
+                .finish(),
+            AuthConfig::Fixed(identity) => f
+                .debug_struct("AuthConfig::Fixed")
+                .field("subject", &identity.subject)
+                .finish(),
+        }
+    }
 }
 
 impl AuthConfig {

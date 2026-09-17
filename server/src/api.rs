@@ -305,8 +305,12 @@ pub async fn list_projects(
         return Err(ApiError::forbidden("read permission required"));
     }
     let projects = state.store.list_projects().map_err(map_store_error)?;
+    // A caller scoped to particular projects must not learn the names of the others. The
+    // listing is filtered rather than refused: an identity that reaches nothing gets an
+    // empty list, which is the truthful answer to "what may I see".
     let out: Vec<Value> = projects
         .iter()
+        .filter(|p| identity.may_reach(&p.name))
         .map(|p| json!({ "name": p.name, "createdAt": p.created_at }))
         .collect();
     Ok(Json(Value::Array(out)))
