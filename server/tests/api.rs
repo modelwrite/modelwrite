@@ -377,3 +377,27 @@ async fn branches_can_be_listed_and_deleted_without_losing_commits() {
         .unwrap();
     assert_eq!(gone.status(), StatusCode::NOT_FOUND);
 }
+#[tokio::test]
+async fn branch_routes_report_an_unknown_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let listed = router
+        .clone()
+        .oneshot(get("/projects/nope/branches"))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::NOT_FOUND);
+
+    let deleted = router
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/projects/nope/branches/main")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NOT_FOUND);
+}

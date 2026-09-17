@@ -397,6 +397,11 @@ impl Store for SqliteStore {
     }
 
     fn delete_branch(&self, project: &str, name: &str) -> Result<(), StoreError> {
+        // Ask which thing is missing, so the 404 says so: a delete on an unknown project
+        // would otherwise report a branch that was never the problem.
+        if self.project(project)?.is_none() {
+            return Err(StoreError::NotFound(format!("project {}", project)));
+        }
         let removed = self.with(|c| {
             c.execute(
                 "DELETE FROM branches WHERE project = ?1 AND name = ?2",
