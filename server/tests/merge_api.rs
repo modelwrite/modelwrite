@@ -92,10 +92,10 @@ async fn seed(router: &axum::Router) -> String {
 async fn a_clean_merge_writes_a_two_parent_commit() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state(dir.path()));
-    let _base = seed(&router).await;
+    let base = seed(&router).await;
 
     // The feature branch renames the block; main is untouched.
-    router
+    let renamed = router
         .clone()
         .oneshot(post(
             "/projects/coffee/commits",
@@ -103,6 +103,10 @@ async fn a_clean_merge_writes_a_two_parent_commit() {
         ))
         .await
         .unwrap();
+    let feature_tip = json_body(renamed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let merged = router
         .clone()
@@ -114,7 +118,13 @@ async fn a_clean_merge_writes_a_two_parent_commit() {
         .unwrap();
     assert_eq!(merged.status(), StatusCode::CREATED);
     let body = json_body(merged).await;
-    assert_eq!(body["commit"]["parents"].as_array().unwrap().len(), 2);
+    // Order is part of the contract: the first parent is the branch being merged INTO, the
+    // second is the branch merged from. A reader reconstructing history depends on it.
+    assert_eq!(
+        body["commit"]["parents"],
+        json!([base, feature_tip]),
+        "the merge commit must cite our tip first, then theirs"
+    );
 
     // The merged model is what the branch now serves, and it carries the rename.
     let tip = body["commit"]["hash"].as_str().unwrap().to_string();

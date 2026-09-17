@@ -218,3 +218,20 @@ fn a_different_project_name_conflicts() {
     assert!(outcome.merged.is_none());
     assert_eq!(outcome.conflicts[0].subject, "doc:project");
 }
+#[test]
+fn deleting_the_same_element_on_both_sides_merges_cleanly() {
+    // The both-delete path is what the merged key list relies on: a key present only in
+    // base never enters the list, so the element is dropped and no conflict is raised.
+    // Deleting the same thing on two branches is agreement, not disagreement.
+    let base = okf(model("Block", true));
+    let ours = okf(model("Block", false));
+    let theirs = okf(model("Block", false));
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(outcome.conflicts.is_empty(), "{:?}", outcome.conflicts);
+    let merged = outcome.merged.expect("a shared deletion merges cleanly");
+    assert_eq!(merged.requirements.len(), 1);
+    assert!(
+        merged.requirements.iter().all(|r| r.id != "r2"),
+        "the element both sides deleted must not come back"
+    );
+}

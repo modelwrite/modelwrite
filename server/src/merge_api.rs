@@ -20,10 +20,13 @@ pub struct MergeRequest {
 /// Every commit reachable from a tip, tip first. The walk stops at a commit already seen,
 /// so a malformed cycle in stored data cannot loop forever.
 fn ancestry(state: &ApiState, project: &str, tip: &str) -> Result<Vec<String>, ApiError> {
+    // Order matters (the first shared commit is the merge base), so the walk keeps a Vec;
+    // membership is a HashSet so the walk stays linear rather than quadratic in history.
     let mut seen: Vec<String> = Vec::new();
+    let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut stack: Vec<String> = vec![tip.to_string()];
     while let Some(hash) = stack.pop() {
-        if seen.contains(&hash) {
+        if !known.insert(hash.clone()) {
             continue;
         }
         if let Some(commit) = state
