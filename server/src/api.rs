@@ -16,9 +16,11 @@ pub struct ApiState {
     pub evidence_dir: std::path::PathBuf,
 }
 
-/// A name that is safe as a URL segment and as a file name component. Project and
-/// branch names end up in the evidence file path, so an unrestricted name could contain
-/// a separator and write outside the evidence directory.
+/// A name that is safe as a URL segment: letters, digits, dot, underscore and hyphen,
+/// at most 64 characters, and at least one letter or digit so that "." and ".." are
+/// rejected. The charset is deliberately narrow rather than merely path-safe, so names
+/// stay predictable in URLs and logs; it does mean a Git-style slashed branch name is
+/// not accepted, which is a deliberate restriction, not an oversight.
 pub fn validate_name(kind: &str, name: &str) -> Result<(), ApiError> {
     if name.is_empty() {
         return Err(ApiError::bad_request(format!("{} must not be empty", kind)));

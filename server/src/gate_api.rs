@@ -71,8 +71,10 @@ pub async fn run_gate(
     // chance of a separator escaping the evidence directory.
     let file_name = format!("server-{}-{}.json", body.reference, body.candidate);
     let path = state.evidence_dir.join(file_name);
-    gate::write_evidence(&path, &outcome.evidence)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    gate::write_evidence(&path, &outcome.evidence).map_err(|e| {
+        eprintln!("could not write evidence to {}: {}", path.display(), e);
+        ApiError::internal("the evidence record could not be exported")
+    })?;
 
     Ok(Json(outcome.evidence))
 }

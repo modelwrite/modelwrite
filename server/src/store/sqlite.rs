@@ -159,34 +159,6 @@ impl Store for SqliteStore {
         })
     }
 
-    fn append_commit(&self, commit: &Commit) -> Result<(), StoreError> {
-        let parents = serde_json::to_string(&commit.parents)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        // The commit row and the branch tip must move together. Two separate lock
-        // acquisitions would let two concurrent appends interleave, leaving the tip
-        // pointing at the earlier commit while the history lists both.
-        let guard = self
-            .connection
-            .lock()
-            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
-        let tx = guard
-            .unchecked_transaction()
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        tx.execute(
-            "INSERT OR IGNORE INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![commit.hash, commit.project, commit.branch, parents, commit.okf_hash, commit.author, commit.message, commit.created_at],
-        )
-        .map_err(|e| StoreError::Backend(e.to_string()))?;
-        tx.execute(
-            "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
-            params![commit.project, commit.branch, commit.hash],
-        )
-        .map_err(|e| StoreError::Backend(e.to_string()))?;
-        tx.commit()
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        Ok(())
-    }
-
     fn commit_model(
         &self,
         project: &str,
@@ -221,8 +193,10 @@ impl Store for SqliteStore {
         let parents_json =
             serde_json::to_string(&parents).map_err(|e| StoreError::Backend(e.to_string()))?;
 
+        // Plain INSERT, not OR IGNORE: a constraint failure must abort this transaction
+        // rather than move a branch tip to a hash that has no commit row.
         tx.execute(
-            "INSERT OR IGNORE INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![hash, project, branch, parents_json, okf_hash, author, message, created_at],
         )
         .map_err(|e| StoreError::Backend(e.to_string()))?;

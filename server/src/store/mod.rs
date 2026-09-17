@@ -98,7 +98,6 @@ pub trait Store: Send + Sync {
     fn list_projects(&self) -> Result<Vec<Project>, StoreError>;
     fn put_blob(&self, bytes: &[u8]) -> Result<String, StoreError>;
     fn blob(&self, hash: &str) -> Result<Option<Vec<u8>>, StoreError>;
-    fn append_commit(&self, commit: &Commit) -> Result<(), StoreError>;
 
     /// Commit a model onto a branch atomically: the tip is read, the parents and the
     /// commit hash are derived from it, and the commit row and the branch tip are written
