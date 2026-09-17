@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::store::{Commit, Store, StoreError};
+use crate::store::{now_epoch, Commit, Lock, Store, StoreError};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -91,6 +91,54 @@ pub fn load_model(
     })
 }
 
+/// The real clock in seconds, as the store requires it. The store itself never reads the
+/// clock: time is passed in so lock expiry is testable without sleeping.
+fn now_seconds() -> i64 {
+    now_epoch().parse().unwrap_or(0)
+}
+
+/// The elements a commit changes: every diff entry that names an element, plus the
+/// endpoints of changed edges. A lock protects an element from being CHANGED, so an
+/// untouched element elsewhere in the document does not block the commit.
+fn touched_elements(
+    reference: &okf::types::OkfRoot,
+    candidate: &okf::types::OkfRoot,
+) -> Vec<String> {
+    let report = okf::diff::diff(reference, candidate);
+    let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    // Element entries are keyed "<section>:<id>". Two kinds of key are skipped on purpose:
+    // "doc:" keys name document fields rather than elements, and the activity keys are list
+    // indices rather than ids, so neither could be the subject of a lock.
+    for key in report
+        .missing_elements
+        .iter()
+        .chain(report.extra_elements.iter())
+        .chain(report.changed_attributes.iter())
+    {
+        if let Some((section, id)) = key.split_once(':') {
+            if section != "doc" && section != "activity" {
+                ids.insert(id.to_string());
+            }
+        }
+    }
+
+    // An edge is a JSON array of source, target, kind and label, so changing one touches
+    // both of its endpoints.
+    for key in report.missing_edges.iter().chain(report.extra_edges.iter()) {
+        if let Ok(parts) = serde_json::from_str::<Vec<String>>(key) {
+            if let Some(source) = parts.first() {
+                ids.insert(source.clone());
+            }
+            if let Some(target) = parts.get(1) {
+                ids.insert(target.clone());
+            }
+        }
+    }
+
+    ids.into_iter().collect()
+}
+
 pub fn commit_json(commit: &Commit) -> Value {
     json!({
         "hash": commit.hash,
@@ -139,6 +187,7 @@ pub struct CreateCommit {
     pub author: String,
     pub message: String,
     pub okf: Value,
+    pub holder: Option<String>,
 }
 
 pub async fn create_commit(
@@ -167,6 +216,31 @@ pub async fn create_commit(
             "the model failed validation",
             report.errors,
         ));
+    }
+
+    // A holder that asks the commit to respect locks: refuse to change any element held by
+    // someone else. Absent, the commit behaves exactly as before - locks are opt-in.
+    if let Some(holder) = body.holder.as_deref() {
+        let tip_model = match state
+            .store
+            .branch_tip(&project, &body.branch)
+            .map_err(map_store_error)?
+        {
+            Some(tip) => load_model(&state, &project, &tip)?,
+            None => root.clone(),
+        };
+        let touched = touched_elements(&tip_model, &root);
+        let held = state
+            .store
+            .holders_of(&project, &touched, now_seconds())
+            .map_err(map_store_error)?;
+        let blocked: Vec<&Lock> = held.iter().filter(|l| l.holder != holder).collect();
+        if !blocked.is_empty() {
+            return Err(ApiError::conflict(format!(
+                "{} is locked by {} until {}",
+                blocked[0].element, blocked[0].holder, blocked[0].expires_at
+            )));
+        }
     }
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;

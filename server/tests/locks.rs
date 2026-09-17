@@ -323,3 +323,170 @@ async fn locks_can_be_released_with_delete_or_post() {
     let listed = router.oneshot(get("/projects/coffee/locks")).await.unwrap();
     assert!(json_body(listed).await.as_array().unwrap().is_empty());
 }
+
+fn model_with_nodes(ids: &[&str]) -> serde_json::Value {
+    let nodes: Vec<serde_json::Value> = ids
+        .iter()
+        .map(|id| serde_json::json!({ "id": id, "kind": "block", "name": id.to_uppercase() }))
+        .collect();
+    serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "graph": { "nodes": nodes, "edges": [] }
+    })
+}
+
+#[tokio::test]
+async fn a_commit_is_refused_when_another_holder_locks_a_touched_element() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    seed_project(&router).await;
+
+    // Establish the branch tip with two elements, so a later commit can change one while
+    // leaving the other - and its lock - untouched.
+    let seeded = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "alex",
+                "message": "seed",
+                "okf": model_with_nodes(&["b1", "b2"])
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(seeded.status(), StatusCode::CREATED);
+    let tip = json_body(seeded).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let locked = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({
+                "branch": "main",
+                "elements": ["b1"],
+                "holder": "alex",
+                "ttlSeconds": 300
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(locked.status(), StatusCode::CREATED);
+
+    // B renames b1: the locked element is the one being CHANGED, so the commit is refused.
+    let refused = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "bob",
+                "message": "rename b1",
+                "holder": "bob",
+                "okf": model_with_nodes(&["b1-renamed", "b2"])
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    let error = json_body(refused).await;
+    let message = error["error"].as_str().unwrap();
+    assert!(
+        message.contains("b1"),
+        "the 409 must name the locked element"
+    );
+    assert!(message.contains("alex"), "the 409 must name the holder");
+
+    // The refused commit must write NOTHING: the branch tip is unchanged.
+    let branches = router
+        .clone()
+        .oneshot(get("/projects/coffee/branches"))
+        .await
+        .unwrap();
+    let branches = json_body(branches).await;
+    let main = branches
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "main")
+        .unwrap();
+    assert_eq!(main["tip"].as_str().unwrap(), tip.as_str());
+
+    // A model that changes only b2 - an element nobody locked - succeeds even though the
+    // document still CONTAINS the locked b1: a lock guards change, not mere presence.
+    let ok = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "bob",
+                "message": "rename b2",
+                "holder": "bob",
+                "okf": model_with_nodes(&["b1", "b2-renamed"])
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn the_holder_may_commit_its_own_locked_element() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    seed_project(&router).await;
+
+    let seeded = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "alex",
+                "message": "seed",
+                "okf": model_with_nodes(&["b1"])
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(seeded.status(), StatusCode::CREATED);
+
+    let locked = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({
+                "branch": "main",
+                "elements": ["b1"],
+                "holder": "alex",
+                "ttlSeconds": 300
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(locked.status(), StatusCode::CREATED);
+
+    // The same holder that owns the lock may commit the change to that element.
+    let committed = router
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "alex",
+                "message": "rename b1",
+                "holder": "alex",
+                "okf": model_with_nodes(&["b1-renamed"])
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+}
