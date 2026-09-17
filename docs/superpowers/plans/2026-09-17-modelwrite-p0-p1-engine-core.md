@@ -1,4 +1,4 @@
-﻿# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
+# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
@@ -1417,7 +1417,7 @@ fn renamed_element_is_changed_attribute() {
 - [ ] **Step 12: Run the tests**
 
 Run: cargo test -p mw-okf
-Expected: all 13 tests pass. If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
+Expected: all 11 tests pass (7 in tests/okf_validation.rs, 4 in tests/okf_diff.rs). If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
 
 - [ ] **Step 13: Format and lint**
 
