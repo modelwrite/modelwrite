@@ -95,7 +95,7 @@ Legacy tools (CATIA Magic, Rhapsody, EA, DOORS, Excel)
   → Rust engine (AGPL): okf Â· graph Â· gate Â· twin Â· mcp — C ABI — MCP server
       ├─ Web portal (TS/React): explorer Â· twin Â· OEE Â· sensitivity Â· ontology Â· ask-the-model Â· diff Â· evidence
       ├─ AI layer (Python): copilot agents + rule packs Â· ML quality/pattern models Â· local-first, optional cloud
-      â””â”€ Exporters (Apache-2.0): OKF → ReqIF/XMI/Excel/Magic-macros/SysML v2
+      └─ Exporters (Apache-2.0): OKF → ReqIF/XMI/Excel/Magic-macros/SysML v2
 
 **OKF 1.0** (formalised from the collateral export): versioned JSON Schema; element kinds
 (block, requirement, state, activity, signal, interface, use case, actor, constraint block);
