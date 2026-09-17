@@ -92,7 +92,10 @@ Thumbs.db
 ```
 *.mdzip binary
 *.zip binary
+sample/demo/*.html binary
 ```
+
+The third line keeps the demo fixture byte-identical in the stored blob: without it, `core.autocrlf` normalises the CRLF HTML to LF in the repository, so a clone or CI runner with autocrlf off materialises a different byte count than the collateral source (a defect found by the Task 3 review and ruled on there). It is deliberately path-specific: a blanket `*.html binary` rule would mark future portal HTML sources binary and destroy their diffs.
 
 - [ ] **Step 6: Write LICENSE (AGPL-3.0-or-later)**
 
@@ -888,12 +891,21 @@ pub struct ActivityEdge {
     pub guard: String,
 }
 
+/// A swim-lane on an activity diagram. The fixture stores partitions as
+/// objects with a name and an optional represented element, not as plain strings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Partition {
+    pub name: String,
+    #[serde(default)]
+    pub represents: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Activity {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub partitions: Vec<String>,
+    pub partitions: Vec<Partition>,
     #[serde(default)]
     pub nodes: Vec<ActivityNode>,
     #[serde(default)]
@@ -926,7 +938,7 @@ pub struct Graph {
     pub edges: Vec<GraphEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Summary {
     #[serde(default)]
     pub blocks: u64,

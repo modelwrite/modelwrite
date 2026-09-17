@@ -129,9 +129,17 @@
       "type": "object",
       "properties": {
         "name": {"type": "string"},
-        "partitions": {"type": "array", "items": {"type": "string"}},
+        "partitions": {"type": "array", "items": {"$ref": "#/definitions/partition"}},
         "nodes": {"type": "array", "items": {"$ref": "#/definitions/activityNode"}},
         "edges": {"type": "array", "items": {"$ref": "#/definitions/activityEdge"}}
+      }
+    },
+    "partition": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "represents": {"type": ["string", "null"]}
       }
     },
     "graphNode": {

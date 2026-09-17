@@ -59,8 +59,9 @@ and exit fields reference behaviour names, not ids.
 
 StateMachine: name plus regions[]; each region holds states[].
 
-Activity: name, partitions[] (swim-lane names), nodes[] (each with id,
-type, name, partition) and edges[] (each with type, source, target,
+Activity: name, partitions[] (each an object with a name and an optional
+represents field naming the element the lane represents), nodes[] (each with
+id, type, name, partition) and edges[] (each with type, source, target,
 guard). Control edges may reference node ids or be empty.
 
 Graph node: id (required), kind, name, stereotypes[].
