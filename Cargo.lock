@@ -147,6 +147,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-mcp"
+version = "0.1.0"
+dependencies = [
+ "mw-gate",
+ "mw-graph",
+ "mw-okf",
+ "mw-test-support",
+ "serde_json",
+]
+
+[[package]]
 name = "mw-okf"
 version = "0.1.0"
 dependencies = [
