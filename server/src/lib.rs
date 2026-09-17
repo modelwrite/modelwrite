@@ -2,6 +2,7 @@
 pub mod api;
 pub mod error;
 pub mod gate_api;
+pub mod merge;
 pub mod store;
 
 pub use error::ApiError;

@@ -113,6 +113,18 @@ pub trait Store: Send + Sync {
         message: &str,
     ) -> Result<Commit, StoreError>;
 
+    /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
+    /// A merge commit has two parents, so the parent list cannot be derived from the tip.
+    fn commit_merge(
+        &self,
+        project: &str,
+        branch: &str,
+        parents: &[String],
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+    ) -> Result<Commit, StoreError>;
+
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError>;
     fn commits_on(&self, project: &str, branch: &str) -> Result<Vec<Commit>, StoreError>;
     fn branch_tip(&self, project: &str, branch: &str) -> Result<Option<String>, StoreError>;

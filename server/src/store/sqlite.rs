@@ -220,6 +220,71 @@ impl Store for SqliteStore {
         })
     }
 
+    fn commit_merge(
+        &self,
+        project: &str,
+        branch: &str,
+        parents: &[String],
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+    ) -> Result<Commit, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // Every parent must already exist: a merge commit can only cite ancestry that is
+        // really there, never invent it.
+        for parent in parents {
+            let exists: bool = (|| -> rusqlite::Result<bool> {
+                let mut stmt =
+                    tx.prepare("SELECT 1 FROM commits WHERE project = ?1 AND hash = ?2")?;
+                let mut rows = stmt.query(params![project, parent])?;
+                Ok(rows.next()?.is_some())
+            })()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if !exists {
+                return Err(StoreError::NotFound(format!("parent commit {}", parent)));
+            }
+        }
+
+        let parents: Vec<String> = parents.to_vec();
+        let created_at = now_epoch();
+        let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+        let parents_json =
+            serde_json::to_string(&parents).map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // Plain INSERT, not OR IGNORE: a constraint failure must abort this transaction
+        // rather than move a branch tip to a hash that has no commit row.
+        tx.execute(
+            "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![hash, project, branch, parents_json, okf_hash, author, message, created_at],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
+            params![project, branch, hash],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        Ok(Commit {
+            hash,
+            project: project.to_string(),
+            branch: branch.to_string(),
+            parents,
+            okf_hash: okf_hash.to_string(),
+            author: author.to_string(),
+            message: message.to_string(),
+            created_at,
+        })
+    }
+
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError> {
         // The row is read inside the lock and the parents column is parsed outside it, so
         // that corruption can surface as a storage error rather than a query error.
