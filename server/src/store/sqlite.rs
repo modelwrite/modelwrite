@@ -65,21 +65,45 @@ impl SqliteStore {
     }
 }
 
+/// One commit row exactly as stored: hash, project, branch, parents, okf_hash, author,
+/// message, created_at. Named so the query helpers stay readable and clippy-clean.
+type CommitRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+
+/// Parse the parents column, reporting corruption rather than hiding it: an empty list
+/// silently substituted here would change what commit_hash covers.
+fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
+    serde_json::from_str(raw).map_err(|e| {
+        StoreError::Backend(format!("corrupt parents column for commit {}: {}", hash, e))
+    })
+}
+
 impl Store for SqliteStore {
     fn create_project(&self, name: &str) -> Result<Project, StoreError> {
-        if self.project(name)?.is_some() {
+        // Check-then-insert would be a time-of-check window: two concurrent callers could
+        // both pass the check. The primary key settles it instead, and an insert that
+        // changed nothing is reported as the conflict it is.
+        let created_at = now_epoch();
+        let inserted = self.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO projects (name, created_at) VALUES (?1, ?2)",
+                params![name, created_at],
+            )
+        })?;
+        if inserted == 0 {
             return Err(StoreError::Conflict(format!(
                 "project {} already exists",
                 name
             )));
         }
-        let created_at = now_epoch();
-        self.with(|c| {
-            c.execute(
-                "INSERT INTO projects (name, created_at) VALUES (?1, ?2)",
-                params![name, created_at],
-            )
-        })?;
         Ok(Project {
             name: name.to_string(),
             created_at,
@@ -138,66 +162,108 @@ impl Store for SqliteStore {
     fn append_commit(&self, commit: &Commit) -> Result<(), StoreError> {
         let parents = serde_json::to_string(&commit.parents)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
-        self.with(|c| {
-            c.execute(
-                "INSERT OR IGNORE INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![commit.hash, commit.project, commit.branch, parents, commit.okf_hash, commit.author, commit.message, commit.created_at],
-            )
-        })?;
-        self.with(|c| {
-            c.execute(
-                "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
-                params![commit.project, commit.branch, commit.hash],
-            )
-        })?;
+        // The commit row and the branch tip must move together. Two separate lock
+        // acquisitions would let two concurrent appends interleave, leaving the tip
+        // pointing at the earlier commit while the history lists both.
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.execute(
+            "INSERT OR IGNORE INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![commit.hash, commit.project, commit.branch, parents, commit.okf_hash, commit.author, commit.message, commit.created_at],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
+            params![commit.project, commit.branch, commit.hash],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
         Ok(())
     }
 
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError> {
-        self.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT hash, project, branch, parents, okf_hash, author, message, created_at FROM commits WHERE project = ?1 AND hash = ?2",
-            )?;
-            let mut rows = stmt.query(params![project, hash])?;
-            match rows.next()? {
-                Some(row) => {
-                    let parents: String = row.get(3)?;
-                    Ok(Some(Commit {
-                        hash: row.get(0)?,
-                        project: row.get(1)?,
-                        branch: row.get(2)?,
-                        parents: serde_json::from_str(&parents).unwrap_or_default(),
-                        okf_hash: row.get(4)?,
-                        author: row.get(5)?,
-                        message: row.get(6)?,
-                        created_at: row.get(7)?,
-                    }))
+        // The row is read inside the lock and the parents column is parsed outside it, so
+        // that corruption can surface as a storage error rather than a query error.
+        let row: Option<CommitRow> = self.with(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT hash, project, branch, parents, okf_hash, author, message, created_at FROM commits WHERE project = ?1 AND hash = ?2",
+                )?;
+                let mut rows = stmt.query(params![project, hash])?;
+                match rows.next()? {
+                    Some(row) => Ok(Some((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))),
+                    None => Ok(None),
                 }
-                None => Ok(None),
+            })?;
+
+        match row {
+            None => Ok(None),
+            Some((hash, project, branch, parents, okf_hash, author, message, created_at)) => {
+                Ok(Some(Commit {
+                    parents: parse_parents(&hash, &parents)?,
+                    hash,
+                    project,
+                    branch,
+                    okf_hash,
+                    author,
+                    message,
+                    created_at,
+                }))
             }
-        })
+        }
     }
 
     fn commits_on(&self, project: &str, branch: &str) -> Result<Vec<Commit>, StoreError> {
-        self.with(|c| {
+        // Rows are collected first and the parents column is parsed afterwards, because a
+        // parse failure inside the query closure could only be reported as a rusqlite
+        // error; corruption must surface as a storage error instead.
+        let rows: Vec<CommitRow> = self.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT hash, project, branch, parents, okf_hash, author, message, created_at FROM commits WHERE project = ?1 AND branch = ?2 ORDER BY rowid",
             )?;
             let rows = stmt.query_map(params![project, branch], |row| {
-                let parents: String = row.get(3)?;
-                Ok(Commit {
-                    hash: row.get(0)?,
-                    project: row.get(1)?,
-                    branch: row.get(2)?,
-                    parents: serde_json::from_str(&parents).unwrap_or_default(),
-                    okf_hash: row.get(4)?,
-                    author: row.get(5)?,
-                    message: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
             })?;
             rows.collect()
-        })
+        })?;
+
+        let mut commits = Vec::with_capacity(rows.len());
+        for (hash, project, branch, parents, okf_hash, author, message, created_at) in rows {
+            commits.push(Commit {
+                parents: parse_parents(&hash, &parents)?,
+                hash,
+                project,
+                branch,
+                okf_hash,
+                author,
+                message,
+                created_at,
+            });
+        }
+        Ok(commits)
     }
 
     fn branch_tip(&self, project: &str, branch: &str) -> Result<Option<String>, StoreError> {
@@ -213,21 +279,22 @@ impl Store for SqliteStore {
     }
 
     fn create_branch(&self, project: &str, name: &str, from: &str) -> Result<(), StoreError> {
-        if self.branch_tip(project, name)?.is_some() {
+        if self.commit(project, from)?.is_none() {
+            return Err(StoreError::NotFound(format!("commit {}", from)));
+        }
+        // The composite primary key decides a duplicate branch, not a prior read.
+        let inserted = self.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO branches (project, name, tip) VALUES (?1, ?2, ?3)",
+                params![project, name, from],
+            )
+        })?;
+        if inserted == 0 {
             return Err(StoreError::Conflict(format!(
                 "branch {} already exists",
                 name
             )));
         }
-        if self.commit(project, from)?.is_none() {
-            return Err(StoreError::NotFound(format!("commit {}", from)));
-        }
-        self.with(|c| {
-            c.execute(
-                "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3)",
-                params![project, name, from],
-            )
-        })?;
         Ok(())
     }
 

@@ -782,6 +782,8 @@ git commit -m "feat: add the content-addressed model store"
 ```
 
 ---
+ROUTE SYNTAX: the workspace pins axum 0.7, which matches routes as :param, not {param}. The router lines above use :project and :hash accordingly; axum 0.8 syntax silently 404s on 0.7, which is how this was found. Prose endpoint descriptions elsewhere in this plan keep the readable {project} form.
+
 ### Task 3: The project and commit API
 
 **Files:**
@@ -1023,11 +1025,11 @@ pub fn app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/projects", post(api::create_project).get(api::list_projects))
         .route(
-            "/projects/{project}/commits",
+            "/projects/:project/commits",
             post(api::create_commit).get(api::list_commits),
         )
-        .route("/projects/{project}/commits/{hash}", get(api::get_commit))
-        .route("/projects/{project}/branches", post(api::create_branch))
+        .route("/projects/:project/commits/:hash", get(api::get_commit))
+        .route("/projects/:project/branches", post(api::create_branch))
         .with_state(api_state)
 }
 
@@ -1392,8 +1394,8 @@ Both map_store_error and ApiState are public in server/src/api.rs, so this modul
 In server/src/lib.rs add `pub mod gate_api;` and, before `.with_state(api_state)`:
 
 ```rust
-        .route("/projects/{project}/gate", post(gate_api::run_gate))
-        .route("/projects/{project}/gate-runs", get(gate_api::list_gate_runs))
+        .route("/projects/:project/gate", post(gate_api::run_gate))
+        .route("/projects/:project/gate-runs", get(gate_api::list_gate_runs))
 ```
 
 - [ ] **Step 3: Write server/tests/gate_api.rs**
