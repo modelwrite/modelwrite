@@ -1,8 +1,8 @@
-# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
+﻿# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
-**Goal:** Ship the modelwrite engine core: OKF 1.0 types, validation, hashing and diffing; graph analysis; the round-trip fidelity gate with evidence recording; the C ABI; the MCP server; and the judge harness — all proven against the coffee-machine corpus.
+**Goal:** Ship the modelwrite engine core: OKF 1.0 types, validation, hashing and diffing; graph analysis; the round-trip fidelity gate with evidence recording; the C ABI; the MCP server; and the judge harness â€” all proven against the coffee-machine corpus.
 
 **Architecture:** A Rust workspace under engine/ with five crates (okf, graph, gate, capi, mcp) plus a dev-only test-support crate. Everything speaks OKF JSON; the gate is the only authority on correctness. Python is used only for the judge harness and sample scripts, stdlib only.
 
@@ -239,7 +239,7 @@ about a model is proven by the gate, never by assertion.
 **The model you can prove.**
 
 Modelwrite is an open-source MBSE platform that turns legacy SysML models
-into portable, provable data — the Open Knowledge Format (OKF) — and
+into portable, provable data â€” the Open Knowledge Format (OKF) â€” and
 automates the skilled work of building and reviewing models with grounded
 AI.
 
@@ -279,7 +279,7 @@ Expected: the listing shows the ten created files plus docs/ and sample/; the co
 - [ ] **Step 1: Write docs/okf/okf-1.0-spec.md**
 
 ```markdown
-# OKF 1.0 — Open Knowledge Format
+# OKF 1.0 â€” Open Knowledge Format
 
 Status: normative, v1.0-draft
 
@@ -619,13 +619,13 @@ Expected: corpus pinned: 99 nodes, 165 edges, 25 requirements.
 The coffee-machine corpus: a complete SysML model and its OKF export,
 shared as the regression fixture for the whole project.
 
-- corpus/coffee-machine/okf/expected/ — the exported model (OKF), the
+- corpus/coffee-machine/okf/expected/ â€” the exported model (OKF), the
   reference snapshot the gate must accept unchanged.
-- corpus/coffee-machine/okf/corrupted/ — a deliberately broken copy the
+- corpus/coffee-machine/okf/corrupted/ â€” a deliberately broken copy the
   gate must reject (created by scripts/make_corrupted.py in Task 6).
-- corpus/coffee-machine/legacy/ — the CATIA Magic project (.mdzip).
-- demo/ — the standalone portal showcase from the knowledge pack.
-- scripts/ — fixture generators; never hand-edit a fixture.
+- corpus/coffee-machine/legacy/ â€” the CATIA Magic project (.mdzip).
+- demo/ â€” the standalone portal showcase from the knowledge pack.
+- scripts/ â€” fixture generators; never hand-edit a fixture.
 
 The corpus originates from the MEMKO MBSEF-SEng coffee machine course work
 by Alex Kovaceski (September 2026) and is shared with the permission of
@@ -666,7 +666,7 @@ git commit -m "chore: port coffee-machine corpus into sample/"
 
 ---
 
-### Task 4: engine/okf — types, validation, hashing, diffing
+### Task 4: engine/okf â€” types, validation, hashing, diffing
 
 **Files:**
 - Create: Cargo.toml (workspace root; members okf and test-support)
@@ -1208,34 +1208,40 @@ pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     keys
 }
 
-/// id -> canonical JSON of the section item, used for attribute equality.
+/// Section-scoped canonical JSON per element: "<section>:<id>" -> serialized item.
+/// Section scoping matters: the graph mirrors elements, so the same id appears both
+/// as a section item and as a graph node. Keying by id alone would let the graph
+/// entry mask a removal or a change in the section that owns the element.
 pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
+    let mut put = |section: &str, id: &str, json: String| {
+        map.insert(format!("{}:{}", section, id), json);
+    };
     for el in &root.structure {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("structure", &el.id, v);
         }
     }
     for el in &root.interfaces {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("interfaces", &el.id, v);
         }
     }
     for el in &root.signals {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("signals", &el.id, v);
         }
     }
     for r in &root.requirements {
         if let Ok(v) = serde_json::to_string(r) {
-            map.insert(r.id.clone(), v);
+            put("requirements", &r.id, v);
         }
     }
     if let Some(sm) = &root.state_machine {
         for region in &sm.regions {
             for s in &region.states {
                 if let Ok(v) = serde_json::to_string(s) {
-                    map.insert(s.id.clone(), v);
+                    put("state", &s.id, v);
                 }
             }
         }
@@ -1243,33 +1249,35 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     if let Some(graph) = &root.graph {
         for n in &graph.nodes {
             if let Ok(v) = serde_json::to_string(n) {
-                map.insert(n.id.clone(), v);
+                put("graphnode", &n.id, v);
             }
         }
     }
     map
 }
-
 pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
-    let ref_ids = element_ids(reference);
-    let cand_ids = element_ids(candidate);
-    let ref_edges = edge_keys(reference);
-    let cand_edges = edge_keys(candidate);
     let ref_attrs = attribute_keys(reference);
     let cand_attrs = attribute_keys(candidate);
+    let ref_edges = edge_keys(reference);
+    let cand_edges = edge_keys(candidate);
 
-    let mut missing_elements: Vec<String> = ref_ids.difference(&cand_ids).cloned().collect();
-    let mut extra_elements: Vec<String> = cand_ids.difference(&ref_ids).cloned().collect();
+    let mut missing_elements: Vec<String> = ref_attrs
+        .keys()
+        .filter(|k| !cand_attrs.contains_key(*k))
+        .cloned()
+        .collect();
+    let mut extra_elements: Vec<String> = cand_attrs
+        .keys()
+        .filter(|k| !ref_attrs.contains_key(*k))
+        .cloned()
+        .collect();
+    let mut changed_attributes: Vec<String> = ref_attrs
+        .iter()
+        .filter(|(k, v)| cand_attrs.get(*k).map(|c| c != *v).unwrap_or(false))
+        .map(|(k, _)| k.clone())
+        .collect();
     let mut missing_edges: Vec<String> = ref_edges.difference(&cand_edges).cloned().collect();
     let mut extra_edges: Vec<String> = cand_edges.difference(&ref_edges).cloned().collect();
-    let mut changed_attributes: Vec<String> = Vec::new();
-    for (id, ref_value) in &ref_attrs {
-        if let Some(cand_value) = cand_attrs.get(id) {
-            if cand_value != ref_value {
-                changed_attributes.push(id.clone());
-            }
-        }
-    }
     missing_elements.sort();
     extra_elements.sort();
     missing_edges.sort();
@@ -1445,7 +1453,7 @@ git commit -m "feat: add okf crate with types, validation, hashing and diffing"
 ```
 
 ---
-### Task 5: engine/graph — graph analysis and coverage
+### Task 5: engine/graph â€” graph analysis and coverage
 
 **Files:**
 - Create: engine/graph/Cargo.toml
@@ -1712,7 +1720,7 @@ git commit -m "feat: add graph crate with integration and coverage analysis"
 
 ---
 
-### Task 6: engine/gate — the round-trip fidelity gate
+### Task 6: engine/gate â€” the round-trip fidelity gate
 
 **Files:**
 - Create: engine/gate/Cargo.toml
@@ -2079,9 +2087,9 @@ all). Dates appear only in filenames, never inside records.
 
 Index:
 
-- 2026-09-17-roundtrip-self-pass.json — the corpus compared with itself:
+- 2026-09-17-roundtrip-self-pass.json â€” the corpus compared with itself:
   the gate passes. Proves the reference OKF is a fixed point of the gate.
-- 2026-09-17-roundtrip-corrupted-fail.json — the corpus compared with the
+- 2026-09-17-roundtrip-corrupted-fail.json â€” the corpus compared with the
   corrupted fixture: the gate fails on missing elements and isolated
   nodes. Proves the gate detects loss and fragmentation.
 ```
@@ -2096,7 +2104,7 @@ git commit -m "feat: add round-trip fidelity gate with evidence records"
 ```
 
 ---
-### Task 7: engine/capi — the C ABI
+### Task 7: engine/capi â€” the C ABI
 
 **Files:**
 - Create: engine/capi/Cargo.toml
@@ -2109,9 +2117,9 @@ git commit -m "feat: add round-trip fidelity gate with evidence records"
 - Consumes: okf::{types, validate}; gate::run.
 - Produces: four exported C symbols, stable from now on:
   - const char *modelwrite_version(void)
-  - char *modelwrite_validate(const unsigned char *json, size_t len) — returns a JSON ValidationReport string.
-  - char *modelwrite_gate(const unsigned char *reference, size_t reference_len, const unsigned char *candidate, size_t candidate_len) — returns the JSON gate evidence string.
-  - void modelwrite_free_string(char *ptr) — frees any string returned above.
+  - char *modelwrite_validate(const unsigned char *json, size_t len) â€” returns a JSON ValidationReport string.
+  - char *modelwrite_gate(const unsigned char *reference, size_t reference_len, const unsigned char *candidate, size_t candidate_len) â€” returns the JSON gate evidence string.
+  - void modelwrite_free_string(char *ptr) â€” frees any string returned above.
   All returned strings are owned by the caller and must be released with modelwrite_free_string.
 
 - [ ] **Step 1: Write engine/capi/Cargo.toml**
@@ -2314,7 +2322,7 @@ git commit -m "feat: add C ABI for validation and the gate"
 
 ---
 
-### Task 8: engine/mcp — the MCP server
+### Task 8: engine/mcp â€” the MCP server
 
 **Files:**
 - Create: engine/mcp/Cargo.toml
@@ -2328,7 +2336,7 @@ git commit -m "feat: add C ABI for validation and the gate"
 **Interfaces:**
 - Consumes: okf::{types, validate, diff}; graph::graph_stats; gate::run.
 - Produces:
-  - mcp::handle_request(line: &str) -> String — one JSON-RPC 2.0 request (a single line) in, one JSON-RPC response line out; an empty String for notifications.
+  - mcp::handle_request(line: &str) -> String â€” one JSON-RPC 2.0 request (a single line) in, one JSON-RPC response line out; an empty String for notifications.
   - Binary mw-mcp: reads JSON-RPC lines from stdin, writes responses to stdout. Tools: okf.validate, okf.diff, graph.stats, gate.run. Resources: mw://okf/1.0/spec (the specification text) and mw://evidence/latest.
   - The published tool manifest docs/agents/mcp-tools.json: the stable contract the modelwrite agent (Slice 5) and third-party agents bind to. Tool names and input schemas are additive and stable.
 
@@ -2861,7 +2869,7 @@ Expected: the first five lines match the file above. Note for the executor: the 
 
 ---
 
-### Task 10: judge/ — the gate-as-judge harness
+### Task 10: judge/ â€” the gate-as-judge harness
 
 **Files:**
 - Create: judge/judge.py
@@ -2869,7 +2877,7 @@ Expected: the first five lines match the file above. Note for the executor: the 
 
 **Interfaces:**
 - Consumes: the mw-gate binary (built by cargo build --workspace).
-- Produces: python judge/judge.py --ref-dir DIR --candidate-dir DIR [--gate-bin PATH] — pairs OKF files with matching filenames across the two directories, runs the gate on each pair with --json, prints one PASS/FAIL line per pair, exits 0 when all pass and 1 when any fails, 2 when no pairs are found.
+- Produces: python judge/judge.py --ref-dir DIR --candidate-dir DIR [--gate-bin PATH] â€” pairs OKF files with matching filenames across the two directories, runs the gate on each pair with --json, prints one PASS/FAIL line per pair, exits 0 when all pass and 1 when any fails, 2 when no pairs are found.
 
 - [ ] **Step 1: Write judge/judge.py**
 
@@ -3018,7 +3026,7 @@ git commit -m "feat: add gate-as-judge harness"
 
 ---
 
-### Task 11: Wrap-up — README, evidence index, full verification
+### Task 11: Wrap-up â€” README, evidence index, full verification
 
 **Files:**
 - Modify: README.md (replace the stub with the full quickstart)
@@ -3035,20 +3043,20 @@ git commit -m "feat: add gate-as-judge harness"
 **The model you can prove.**
 
 Modelwrite is an open-source MBSE platform that turns legacy SysML models
-into portable, provable data — the Open Knowledge Format (OKF) — and
+into portable, provable data â€” the Open Knowledge Format (OKF) â€” and
 automates the skilled work of building and reviewing models with grounded
 AI.
 
 ## What is in this repository
 
-- engine/ — the Rust engine (AGPL-3.0-or-later): okf types, validation,
+- engine/ â€” the Rust engine (AGPL-3.0-or-later): okf types, validation,
   hashing and diffing; graph analysis; the round-trip fidelity gate with
   evidence records; the C ABI; the MCP server
-- judge/ — the gate-as-judge harness for scoring model migrations
-- agents/ — rule packs for AI coding agents working against OKF
-- sample/ — the coffee-machine corpus: the legacy CATIA Magic model, its
+- judge/ â€” the gate-as-judge harness for scoring model migrations
+- agents/ â€” rule packs for AI coding agents working against OKF
+- sample/ â€” the coffee-machine corpus: the legacy CATIA Magic model, its
   OKF export, and the corrupted fixture the gate must reject
-- docs/ — the OKF 1.0 spec, the design documents, and the evidence annex
+- docs/ â€” the OKF 1.0 spec, the design documents, and the evidence annex
 
 ## Quickstart
 
