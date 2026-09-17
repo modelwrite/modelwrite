@@ -207,3 +207,117 @@ async fn merging_an_unknown_branch_is_not_found() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+/// Commit a document onto a branch and return the commit hash.
+async fn commit(router: &axum::Router, branch: &str, message: &str, okf: Value) -> String {
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": branch, "author": "alex", "message": message, "okf": okf }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED, "commit {}", message);
+    json_body(response).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_second_merge_uses_the_lowest_common_ancestor() {
+    // A merge base that is too OLD silently discards a change, and the change it discards
+    // is a revert - the most expensive kind to lose, because the model goes back to a value
+    // nobody chose. This is the scenario: once a merge commit exists, a walk can meet an
+    // older shared ancestor before the real one, and at that older base the reverted value
+    // looks unchanged, so ours wins and the revert disappears with no conflict reported.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    // R: the shared root, where the edge is labelled Satisfy.
+    let root = commit(&router, "main", "root", model("Block")).await;
+
+    // m1: main relabels the edge to Verify, and that becomes the true merge base later.
+    let mut verified = model("Block");
+    verified["graph"]["edges"][0]["label"] = json!("Verify");
+    let m1 = commit(&router, "main", "relabel", verified.clone()).await;
+
+    // A side branch from R, with a change that does not touch the edge.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            json!({ "name": "side", "from": root }),
+        ))
+        .await
+        .unwrap();
+    let mut side_model = model("Block");
+    side_model["requirements"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "r2", "name": "r2", "kind": "requirement",
+            "stereotypes": ["Requirement"], "attributes": [], "documentation": "",
+            "reqId": "1.2", "reqText": "added on the side"
+        }));
+    let _side = commit(&router, "side", "side change", side_model).await;
+
+    // X: the first merge, which is what makes an older base reachable.
+    let first_merge = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/merge",
+            json!({ "branch": "main", "other": "side", "author": "alex", "message": "merge side" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first_merge.status(), StatusCode::CREATED);
+
+    // feature: branched from m1, and it REVERTS the edge back to Satisfy.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            json!({ "name": "feature", "from": m1 }),
+        ))
+        .await
+        .unwrap();
+    let _revert_commit = commit(&router, "feature", "revert the relabel", model("Block")).await;
+
+    // The second merge. The base must be m1, not R.
+    let second_merge = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/merge",
+            json!({ "branch": "main", "other": "feature", "author": "alex", "message": "merge feature" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second_merge.status(), StatusCode::CREATED);
+    let body = json_body(second_merge).await;
+    assert_eq!(
+        body["base"],
+        json!(m1),
+        "the base must be the lowest common ancestor, not the older root"
+    );
+
+    // And the revert survives: the label is back to Satisfy, not still Verify.
+    let merged = router
+        .oneshot(get(&format!(
+            "/projects/coffee/commits/{}",
+            body["commit"]["hash"].as_str().unwrap()
+        )))
+        .await
+        .unwrap();
+    let served = json_body(merged).await;
+    assert_eq!(
+        served["graph"]["edges"][0]["label"],
+        json!("Satisfy"),
+        "an older base would have silently discarded the revert"
+    );
+}

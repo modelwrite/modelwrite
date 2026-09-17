@@ -246,6 +246,30 @@ impl Store for SqliteStore {
             .unchecked_transaction()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
+        // The first parent must still BE the branch tip. A merge is computed from tips read
+        // BEFORE this call, so if anything landed in between - another commit, a merge or a
+        // reset - writing this commit would move the branch off that work and leave it
+        // unreachable: a stored commit no branch explains, which is silent loss. Refusing
+        // with a conflict is the same check-then-write discipline commit_model applies.
+        let current_tip: Option<String> = (|| -> rusqlite::Result<Option<String>> {
+            let mut stmt =
+                tx.prepare("SELECT tip FROM branches WHERE project = ?1 AND name = ?2")?;
+            let mut rows = stmt.query(params![project, branch])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(row.get(0)?)),
+                None => Ok(None),
+            }
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if current_tip.as_deref() != Some(parents[0].as_str()) {
+            return Err(StoreError::Conflict(format!(
+                "branch {} moved while the merge was being prepared (expected {}, found {})",
+                branch,
+                parents[0],
+                current_tip.as_deref().unwrap_or("nothing")
+            )));
+        }
+
         // Every parent must already exist: a merge commit can only cite ancestry that is
         // really there, never invent it.
         for parent in parents {

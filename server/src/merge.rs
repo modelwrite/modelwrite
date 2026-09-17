@@ -74,7 +74,7 @@ fn merge_keyed<T, K, F>(
 ) -> Vec<T>
 where
     T: Clone + Serialize + serde::de::DeserializeOwned,
-    K: Ord + Clone + std::fmt::Debug,
+    K: Ord + Clone + std::fmt::Debug + std::hash::Hash + Eq,
     F: Fn(&T) -> K,
 {
     let to_map = |items: &[T]| -> BTreeMap<K, (String, T)> {
@@ -92,15 +92,16 @@ where
     // merge look like a rewrite. A key present only in base was deleted by both sides, so
     // it never appears here - which is exactly what should happen to it.
     let mut keys: Vec<K> = Vec::new();
+    let mut known: std::collections::HashSet<K> = std::collections::HashSet::new();
     for item in ours {
         let k = key(item);
-        if !keys.contains(&k) {
+        if known.insert(k.clone()) {
             keys.push(k);
         }
     }
     for item in theirs {
         let k = key(item);
-        if !keys.contains(&k) {
+        if known.insert(k.clone()) {
             keys.push(k);
         }
     }
@@ -148,14 +149,58 @@ where
     }
 }
 
-fn edge_key(edge: &GraphEdge) -> String {
-    let parts = [
-        edge.source.as_str(),
-        edge.target.as_str(),
-        edge.kind.as_str(),
-        edge.label.as_str(),
-    ];
-    serde_json::to_string(&parts).unwrap_or_default()
+/// One relationship as a unit: a source, a target, a kind, and the set of labels carried
+/// between them.
+///
+/// Keying an edge by ALL of its fields, label included, makes key-equality the same thing
+/// as content-equality - so the three-way rule's conflict branches can never fire for an
+/// edge, and an edit on one side looks like a delete plus an add. Concretely: if ours
+/// removes a Satisfy link while theirs relabels it Verify, both sides drop the old key and
+/// theirs adds a new one, so ours' deletion is silently discarded. Grouping by identity
+/// (source, target, kind) and comparing the label SET as content is what makes that case a
+/// modifiedVersusDeleted conflict, as it should be. The label set also means two edges
+/// sharing a triple are never collapsed into one.
+#[derive(Clone, Serialize, serde::Deserialize)]
+struct EdgeUnit {
+    source: String,
+    target: String,
+    kind: String,
+    labels: Vec<String>,
+}
+
+fn edge_units(edges: &[GraphEdge]) -> Vec<EdgeUnit> {
+    let mut grouped: BTreeMap<(String, String, String), std::collections::BTreeSet<String>> =
+        BTreeMap::new();
+    for edge in edges {
+        grouped
+            .entry((edge.source.clone(), edge.target.clone(), edge.kind.clone()))
+            .or_default()
+            .insert(edge.label.clone());
+    }
+    grouped
+        .into_iter()
+        .map(|((source, target, kind), labels)| EdgeUnit {
+            source,
+            target,
+            kind,
+            labels: labels.into_iter().collect(),
+        })
+        .collect()
+}
+
+fn edges_from_units(units: &[EdgeUnit]) -> Vec<GraphEdge> {
+    let mut edges = Vec::new();
+    for unit in units {
+        for label in &unit.labels {
+            edges.push(GraphEdge {
+                source: unit.source.clone(),
+                target: unit.target.clone(),
+                kind: unit.kind.clone(),
+                label: label.clone(),
+            });
+        }
+    }
+    edges
 }
 
 /// Recompute the derived counts so the merged document cannot contradict itself.
@@ -232,6 +277,9 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
         Some(&theirs.activities),
         &mut conflicts,
     )
+    // merge_unit returns None only when it pushed a conflict, and a conflict aborts the
+    // merge before this value is used; the fallback exists so the type checks out, not to
+    // silently prefer ours.
     .unwrap_or_else(|| ours.activities.clone());
 
     let base_nodes = base
@@ -273,14 +321,14 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
         .as_ref()
         .map(|g| g.edges.clone())
         .unwrap_or_default();
-    let edges = merge_keyed(
+    let edges = edges_from_units(&merge_keyed(
         "edge",
-        &base_edges,
-        &our_edges,
-        &their_edges,
-        edge_key,
+        &edge_units(&base_edges),
+        &edge_units(&our_edges),
+        &edge_units(&their_edges),
+        |unit: &EdgeUnit| format!("{}|{}|{}", unit.source, unit.target, unit.kind),
         &mut conflicts,
-    );
+    ));
 
     if !conflicts.is_empty() {
         return MergeOutcome {

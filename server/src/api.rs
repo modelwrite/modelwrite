@@ -81,8 +81,14 @@ pub fn load_model(
         .store
         .blob(&commit.okf_hash)
         .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::internal(format!("missing blob {}", commit.okf_hash)))?;
-    serde_json::from_slice(&bytes).map_err(|e| ApiError::internal(e.to_string()))
+        .ok_or_else(|| {
+            eprintln!("missing blob {}", commit.okf_hash);
+            ApiError::internal("the stored model is missing")
+        })?;
+    serde_json::from_slice(&bytes).map_err(|e| {
+        eprintln!("stored model is not readable: {}", e);
+        ApiError::internal("the stored model could not be read")
+    })
 }
 
 pub fn commit_json(commit: &Commit) -> Value {
@@ -297,6 +303,14 @@ pub async fn reset_branch(
     Json(body): Json<ResetBranch>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     validate_name("branch name", &name)?;
+    if state
+        .store
+        .project(&project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
     if state
         .store
         .branch_tip(&project, &name)

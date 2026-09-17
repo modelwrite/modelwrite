@@ -235,3 +235,37 @@ fn deleting_the_same_element_on_both_sides_merges_cleanly() {
         "the element both sides deleted must not come back"
     );
 }
+#[test]
+fn deleting_an_edge_while_the_other_relabels_it_conflicts() {
+    // The case the old keying could not see: keyed by every field, ours deleting the edge
+    // and theirs relabelling it looked like agreement to delete plus an addition, so ours'
+    // deletion was silently discarded. Identity (source, target, kind) makes it a conflict.
+    let base = okf(model("Block", false));
+    let mut our_value = model("Block", false);
+    our_value["graph"]["edges"] = json!([]);
+    let ours = okf(our_value);
+
+    let mut their_value = model("Block", false);
+    their_value["graph"]["edges"][0]["label"] = json!("Verify");
+    let theirs = okf(their_value);
+
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(
+        outcome.merged.is_none(),
+        "a relationship removed by one side and changed by the other must conflict"
+    );
+    assert_eq!(outcome.conflicts.len(), 1);
+    assert_eq!(outcome.conflicts[0].kind, "modifiedVersusDeleted");
+}
+
+#[test]
+fn two_different_relabels_of_one_edge_conflict() {
+    let base = okf(model("Block", false));
+    let mut our_value = model("Block", false);
+    our_value["graph"]["edges"][0]["label"] = json!("Verify");
+    let mut their_value = model("Block", false);
+    their_value["graph"]["edges"][0]["label"] = json!("Refine");
+    let outcome = merge(&base, &okf(our_value), &okf(their_value));
+    assert!(outcome.merged.is_none());
+    assert_eq!(outcome.conflicts[0].kind, "bothModified");
+}

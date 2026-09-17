@@ -155,3 +155,51 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
         "walking back from the tip must reach all eight commits"
     );
 }
+#[test]
+fn a_merge_refuses_when_the_branch_moved_under_it() {
+    // A merge is computed from tips read before the write. If a commit lands in between,
+    // writing the merge would move the branch off that commit and orphan it: stored, but
+    // unreachable from any branch. The store must refuse instead of losing it.
+    let (store, _dir) = store();
+    store.create_project("coffee").unwrap();
+    let root = store
+        .commit_model("coffee", "main", "okf-root", "alex", "root")
+        .unwrap();
+    store
+        .create_branch("coffee", "feature", &root.hash)
+        .unwrap();
+    let their_side = store
+        .commit_model("coffee", "feature", "okf-feature", "alex", "feature")
+        .unwrap();
+
+    // The concurrent commit: main moves AFTER the merge read its tips.
+    let concurrent = store
+        .commit_model("coffee", "main", "okf-concurrent", "alex", "concurrent")
+        .unwrap();
+
+    let refused = store.commit_merge(
+        "coffee",
+        "main",
+        &[root.hash.clone(), their_side.hash.clone()],
+        "okf-merged",
+        "alex",
+        "merge",
+    );
+    match refused {
+        Err(StoreError::Conflict(_)) => {}
+        other => panic!("expected a conflict, got {:?}", other.map(|c| c.hash)),
+    }
+
+    // Nothing moved, and the concurrent commit is still the tip.
+    assert_eq!(
+        store.branch_tip("coffee", "main").unwrap().unwrap(),
+        concurrent.hash
+    );
+    let merges: Vec<_> = store
+        .commits_on("coffee", "main")
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.parents.len() == 2)
+        .collect();
+    assert!(merges.is_empty(), "no merge commit may be written");
+}

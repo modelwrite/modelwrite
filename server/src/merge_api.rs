@@ -17,16 +17,17 @@ pub struct MergeRequest {
     pub message: String,
 }
 
-/// Every commit reachable from a tip, tip first. The walk stops at a commit already seen,
-/// so a malformed cycle in stored data cannot loop forever.
-fn ancestry(state: &ApiState, project: &str, tip: &str) -> Result<Vec<String>, ApiError> {
-    // Order matters (the first shared commit is the merge base), so the walk keeps a Vec;
-    // membership is a HashSet so the walk stays linear rather than quadratic in history.
-    let mut seen: Vec<String> = Vec::new();
-    let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+/// Every commit reachable from a tip, as a set. The walk stops at a commit already seen, so
+/// a malformed cycle in stored data cannot loop forever, and membership is constant time.
+fn ancestry_set(
+    state: &ApiState,
+    project: &str,
+    tip: &str,
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut stack: Vec<String> = vec![tip.to_string()];
     while let Some(hash) = stack.pop() {
-        if !known.insert(hash.clone()) {
+        if !seen.insert(hash.clone()) {
             continue;
         }
         if let Some(commit) = state
@@ -38,28 +39,61 @@ fn ancestry(state: &ApiState, project: &str, tip: &str) -> Result<Vec<String>, A
                 stack.push(parent.clone());
             }
         }
-        seen.push(hash);
     }
     Ok(seen)
 }
 
-/// The nearest commit both branches share, found by walking our ancestry and taking the
-/// first hash that theirs also reaches. With a linear history that is exactly the fork
-/// point; with merge commits it is an approximation, which is documented rather than
-/// hidden: a general lowest-common-ancestor is a later refinement.
+/// The LOWEST commit both branches share: a shared commit that is not an ancestor of any
+/// other shared commit.
+///
+/// Taking the first shared commit in walk order is not the same thing, and the difference
+/// is not cosmetic. Once a merge commit exists, a walk can meet an older common ancestor
+/// before the real one, and an older base silently DISCARDS a change: if theirs reverted a
+/// value that ours already carries, then at the older base theirs looks unchanged, so ours
+/// wins and the revert disappears with no conflict reported. When the search finds more
+/// than one lowest candidate - a criss-cross history - it refuses with a conflict rather
+/// than guessing, because either guess can lose work.
 fn common_ancestor(
     state: &ApiState,
     project: &str,
     ours: &str,
     theirs: &str,
 ) -> Result<String, ApiError> {
-    let our_side = ancestry(state, project, ours)?;
-    let their_side = ancestry(state, project, theirs)?;
-    our_side
-        .iter()
-        .find(|hash| their_side.contains(*hash))
-        .cloned()
-        .ok_or_else(|| ApiError::conflict("the branches share no common ancestor"))
+    let our_side = ancestry_set(state, project, ours)?;
+    let their_side = ancestry_set(state, project, theirs)?;
+    let mut shared: Vec<String> = our_side.intersection(&their_side).cloned().collect();
+    if shared.is_empty() {
+        return Err(ApiError::conflict("the branches share no common ancestor"));
+    }
+    shared.sort();
+
+    let mut lowest: Vec<String> = Vec::new();
+    for candidate in &shared {
+        let mut is_ancestor_of_another = false;
+        for other in &shared {
+            if other == candidate {
+                continue;
+            }
+            let other_side = ancestry_set(state, project, other)?;
+            if other_side.contains(candidate) {
+                is_ancestor_of_another = true;
+                break;
+            }
+        }
+        if !is_ancestor_of_another {
+            lowest.push(candidate.clone());
+        }
+    }
+
+    match lowest.len() {
+        1 => Ok(lowest.remove(0)),
+        0 => Err(ApiError::internal(
+            "no shared commit survived the merge base search",
+        )),
+        _ => Err(ApiError::conflict(
+            "the branches have more than one possible merge base, so the merge cannot be computed automatically",
+        )),
+    }
 }
 
 pub async fn merge_branches(
@@ -69,6 +103,14 @@ pub async fn merge_branches(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     validate_name("branch name", &body.branch)?;
     validate_name("branch name", &body.other)?;
+    if state
+        .store
+        .project(&project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
 
     let ours_tip = state
         .store
@@ -105,6 +147,18 @@ pub async fn merge_branches(
     let merged = outcome.merged.ok_or_else(|| {
         ApiError::internal("the merge reported no conflicts but produced nothing")
     })?;
+
+    // Every commit path validates before it stores. A merge must not be the one that skips
+    // it: if a future rule ever produced a document that contradicts itself, this turns a
+    // silent bad write into a loud failure.
+    let report = okf::validate::validate(&merged);
+    if !report.valid {
+        eprintln!("merged model failed validation: {:?}", report.errors);
+        return Err(ApiError::internal(
+            "the merged model failed validation and was not stored",
+        ));
+    }
+
     let bytes = serde_json::to_vec(&merged).map_err(|e| {
         eprintln!("merged model could not be serialised: {}", e);
         ApiError::internal("the merged model could not be stored")
