@@ -1,9 +1,9 @@
-# Modelwrite
+﻿# Modelwrite
 
 **The model you can prove.**
 
 Modelwrite is an open-source MBSE platform that turns legacy SysML models
-into portable, provable data â€” the Open Knowledge Format (OKF) â€” and
+into portable, provable data — the Open Knowledge Format (OKF) — and
 automates the skilled work of building and reviewing models with grounded
 AI.
 

@@ -1,7 +1,7 @@
-# Modelwrite — Design & Comprehensive Plan
+﻿# Modelwrite — Design & Comprehensive Plan
 
-Date: 2026-09-17 · Author: Alex Kovaceski · Status: draft for review
-Pattern source: bylazora (the-migration-you-can-prove) · Collateral: MEMKO MBSE Coffee-Machine Knowledge Pack
+Date: 2026-09-17 Â· Author: Alex Kovaceski Â· Status: draft for review
+Pattern source: bylazora (the-migration-you-can-prove) Â· Collateral: MEMKO MBSE Coffee-Machine Knowledge Pack
 
 > **Superseded by v2:** docs/superpowers/specs/2026-09-17-modelwrite-platform-design.md. This v1 framed the deliverable as a portal built over one exported model. The v2 design reframes modelwrite as the organisation-grade platform that replaces CATIA Magic, and keeps the coffee-machine corpus as the proof fixture. The OKF contract, the provable gate, the evidence annex and the grounded-AI decisions in this document still stand.
 
@@ -92,10 +92,10 @@ server, performance evidence, industrial deployment).
 Legacy tools (CATIA Magic, Rhapsody, EA, DOORS, Excel)
   → importers (Groovy OpenAPI kit, ReqIF, XMI, CSV)  [Apache-2.0]
   → OKF 1.0 — Open Knowledge Format: versioned JSON Schema — elements + graph + provenance
-  → Rust engine (AGPL): okf · graph · gate · twin · mcp — C ABI — MCP server
-      ├─ Web portal (TS/React): explorer · twin · OEE · sensitivity · ontology · ask-the-model · diff · evidence
-      ├─ AI layer (Python): copilot agents + rule packs · ML quality/pattern models · local-first, optional cloud
-      └─ Exporters (Apache-2.0): OKF → ReqIF/XMI/Excel/Magic-macros/SysML v2
+  → Rust engine (AGPL): okf Â· graph Â· gate Â· twin Â· mcp — C ABI — MCP server
+      ├─ Web portal (TS/React): explorer Â· twin Â· OEE Â· sensitivity Â· ontology Â· ask-the-model Â· diff Â· evidence
+      ├─ AI layer (Python): copilot agents + rule packs Â· ML quality/pattern models Â· local-first, optional cloud
+      â””â”€ Exporters (Apache-2.0): OKF → ReqIF/XMI/Excel/Magic-macros/SysML v2
 
 **OKF 1.0** (formalised from the collateral export): versioned JSON Schema; element kinds
 (block, requirement, state, activity, signal, interface, use case, actor, constraint block);
@@ -161,25 +161,25 @@ target lists never public).
 
 ### 4.3 Phased plan
 
-**Phase 0 — Foundations & corpus (weeks 1–2)**
+**Phase 0 — Foundations & corpus (weeks 1“2)**
 Scaffold the public repo (licence, CODE_OF_CONDUCT, CONTRIBUTING, SECURITY, NOTICE); write
 the OKF 1.0 spec + JSON Schema; port the collateral into sample/ (model, macros, exported
 JSON, app); CI skeleton; modelwrite.org landing page in modelwrite-site.
 
-**Phase 1 — Engine core (weeks 3–6)**
+**Phase 1 — Engine core (weeks 3“6)**
 okf + graph + gate crates; first gate run against the corpus recorded in docs/evidence;
 C ABI; MCP server; judge/ harness. TDD throughout; the corpus is the regression fixture.
 
-**Phase 2 — Portal productisation (weeks 7–10)**
+**Phase 2 — Portal productisation (weeks 7“10)**
 React portal over OKF: all collateral views plus diff and evidence views; import wizard;
 single-file standalone export (the showcase pattern) for zero-install demos.
 
-**Phase 3 — AI automation (weeks 11–16)**
+**Phase 3 — AI automation (weeks 11“16)**
 Model-edit API + copilot agents + agents/ rule packs; ML quality/gap models trained on the
 labelled corpus; MCP integration so coding agents can do MBSE tasks; judged agent loop
 (gate scores runs); local-first, optional cloud.
 
-**Phase 4 — Seamless interoperability (weeks 17–22)**
+**Phase 4 — Seamless interoperability (weeks 17“22)**
 CATIA Magic import/export kit + Teamwork Cloud adapter + watch-folder sync; ReqIF, Excel,
 XMI connectors; SysML v2 export path; round-trip gate as CI on every connector; evidence
 annex documenting measured fidelity for each legacy target.
@@ -217,7 +217,7 @@ evidence annex. Public claims trace to recorded runs — never percentages witho
 
 ## 7. Open questions
 
-- Confirm the seven decisions in §5 (the interactive question batch timed out unanswered).
+- Confirm the seven decisions in Â§5 (the interactive question batch timed out unanswered).
 - Exact GitHub org/repo names and who owns them (a GitHub search shows a pre-existing
   ModelWriter org with unrelated EU-research projects — is that org ours?).
 - Priority order for Phase 4 legacy targets beyond CATIA Magic.

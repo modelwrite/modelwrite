@@ -1,8 +1,8 @@
-# Modelwrite — Platform Design (v2): the open-source MBSE platform an organisation runs on
+﻿# Modelwrite — Platform Design (v2): the open-source MBSE platform an organisation runs on
 
-Date: 2026-09-17 · Author: Alex Kovaceski · Status: draft for review
+Date: 2026-09-17 Â· Author: Alex Kovaceski Â· Status: draft for review
 Supersedes: docs/superpowers/specs/2026-09-17-modelwrite-design.md (v1)
-Pattern source: bylazora · Collateral: MEMKO MBSE coffee-machine knowledge pack
+Pattern source: bylazora Â· Collateral: MEMKO MBSE coffee-machine knowledge pack
 
 ## 1. What modelwrite is
 
@@ -104,10 +104,10 @@ Platform services (Rust)
   reporting service (model reports, traceability packs, evidence bundles)
         |
 Engine crates (AGPL-3.0-or-later, shared by services and CLI)
-  okf · graph · gate · twin · rules · patterns · sysml2 · mcp · capi
+  okf Â· graph Â· gate Â· twin Â· rules Â· patterns Â· sysml2 Â· mcp Â· capi
         |
 Interchange layer (Apache-2.0)
-  magic-groovy-kit · teamwork-cloud adapter · reqif · xmi · excel · sysml-v2-api
+  magic-groovy-kit Â· teamwork-cloud adapter Â· reqif Â· xmi Â· excel Â· sysml-v2-api
         |
 Storage and deployment
   PostgreSQL (metadata, versions, audit, permissions) with an artefact store;

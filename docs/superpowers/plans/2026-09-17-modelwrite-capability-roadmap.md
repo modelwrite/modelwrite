@@ -1,4 +1,4 @@
-# Modelwrite Platform Capability Roadmap
+﻿# Modelwrite Platform Capability Roadmap
 
 > **For agentic workers:** this is the programme plan. Each slice gets its own
 > bite-sized implementation plan (superpowers:writing-plans) at the moment the
