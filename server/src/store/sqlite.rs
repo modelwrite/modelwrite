@@ -214,7 +214,7 @@ impl Store for SqliteStore {
         // The lock check happens HERE, inside the transaction that writes the commit. A
         // check performed by the caller before this call would leave a window in which
         // another holder takes the lock and the guarded commit lands regardless.
-        if let Some(guard) = guard {
+        if let Some(guard) = guard.as_ref() {
             for element in guard.elements {
                 let held: Option<(String, i64)> = (|| -> rusqlite::Result<Option<(String, i64)>> {
                     let mut stmt = tx.prepare(
@@ -249,6 +249,18 @@ impl Store for SqliteStore {
             }
         })()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
+        // A guard computed against a tip that has since moved describes a document that is
+        // no longer the branch's: enforcing it would check the wrong elements. Refuse, so
+        // the caller re-reads and retries rather than being told a stale answer.
+        if let Some(guard) = guard.as_ref() {
+            if guard.expected_tip != tip.as_deref() {
+                return Err(StoreError::Conflict(format!(
+                    "branch {} moved while the commit was being prepared; re-read and retry",
+                    branch
+                )));
+            }
+        }
+
         let parents: Vec<String> = tip.into_iter().collect();
         let created_at = now_epoch();
         let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);

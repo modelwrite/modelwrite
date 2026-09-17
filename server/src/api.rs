@@ -234,17 +234,31 @@ pub async fn create_commit(
     // someone else. Absent, the commit behaves exactly as before - locks are opt-in. The
     // check itself happens INSIDE the store's commit transaction, so a lock taken between
     // this point and the write cannot be bypassed.
+    let mut tip_hash: Option<String> = None;
     let touched: Vec<String> = match body.holder.as_deref() {
-        Some(_) => {
-            let tip_model = match state
+        Some(holder) => {
+            tip_hash = state
                 .store
                 .branch_tip(&project, &body.branch)
-                .map_err(map_store_error)?
-            {
-                Some(tip) => load_model(&state, &project, &tip)?,
+                .map_err(map_store_error)?;
+            let tip_model = match tip_hash.as_deref() {
+                Some(tip) => load_model(&state, &project, tip)?,
                 None => root.clone(),
             };
-            touched_elements(&tip_model, &root)
+            let touched = touched_elements(&tip_model, &root);
+            // Refuse BEFORE storing anything, so a rejected commit leaves no orphaned blob
+            // behind. The store checks again inside its transaction; this is the cheap path.
+            let held = state
+                .store
+                .holders_of(&project, &touched, now_seconds())
+                .map_err(map_store_error)?;
+            if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
+                return Err(ApiError::conflict(format!(
+                    "{} is locked by {} until {}",
+                    blocked.element, blocked.holder, blocked.expires_at
+                )));
+            }
+            touched
         }
         None => Vec::new(),
     };
@@ -252,6 +266,7 @@ pub async fn create_commit(
         holder,
         elements: &touched,
         now: now_seconds(),
+        expected_tip: tip_hash.as_deref(),
     });
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;

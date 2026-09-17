@@ -142,10 +142,22 @@ pub fn now_seconds() -> i64 {
 
 /// What a guarded commit must not change. The holder is the one asking; any element in
 /// `elements` held by a DIFFERENT holder with a live lease refuses the commit.
+///
+/// `expected_tip` is the branch tip the caller computed `elements` against. The guard is
+/// only meaningful for that tip: if the branch moved since, the touched set describes a
+/// document that is no longer there, and enforcing it would protect the wrong elements -
+/// a race that a fresh check cannot catch from outside the transaction. The store refuses
+/// instead, and the caller re-reads and retries.
+///
+/// Lock scope: a lock is keyed by project and element, NOT by branch. The branch is recorded
+/// as context for whoever looks at the lock table, but the protection is deliberately
+/// cross-branch - two people editing one element from two branches is exactly the overwrite
+/// this exists to prevent.
 pub struct CommitGuard<'a> {
     pub holder: &'a str,
     pub elements: &'a [String],
     pub now: i64,
+    pub expected_tip: Option<&'a str>,
 }
 
 pub trait Store: Send + Sync {

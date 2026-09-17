@@ -240,9 +240,10 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
 
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
-    store
+    let root = store
         .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
+    let root_hash = root.hash.clone();
 
     // Alex holds b1.
     store
@@ -261,6 +262,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             holder: "sam",
             elements: &touched,
             now: 1000,
+            expected_tip: Some(&root_hash),
         }),
         None,
     );
@@ -284,6 +286,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             holder: "sam",
             elements: &touched,
             now: 2000,
+            expected_tip: Some(&root_hash),
         }),
         None,
     );
@@ -295,6 +298,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
     store
         .acquire_locks("coffee", "main", &["b2".to_string()], "alex", 600, 1000)
         .unwrap();
+    let tip_now = store.branch_tip("coffee", "main").unwrap();
     let unrelated = store.commit_model(
         "coffee",
         "main",
@@ -305,8 +309,59 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             holder: "sam",
             elements: &elsewhere,
             now: 1000,
+            expected_tip: tip_now.as_deref(),
         }),
         None,
     );
     assert!(unrelated.is_ok(), "only the guarded elements are protected");
+}
+#[test]
+fn a_guard_computed_against_an_old_tip_is_refused() {
+    // The guard carries the touched element set, which was computed from a document. If the
+    // branch has moved since, that document is gone and the guard describes the WRONG
+    // elements: enforcing it would protect something nobody is editing while a locked
+    // element slips through. The store refuses rather than answering a stale question.
+    use server::store::CommitGuard;
+
+    let (store, _dir) = store();
+    store.create_project("coffee").unwrap();
+    let root = store
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .unwrap();
+
+    // A concurrent commit moves the branch after the caller read the tip.
+    store
+        .commit_model("coffee", "main", "okf-other", "alex", "moved", None, None)
+        .unwrap();
+
+    let touched = vec!["b1".to_string()];
+    let stale = store.commit_model(
+        "coffee",
+        "main",
+        "okf-sam",
+        "sam",
+        "sam commits against a stale view",
+        Some(CommitGuard {
+            holder: "sam",
+            elements: &touched,
+            now: 1000,
+            expected_tip: Some(&root.hash),
+        }),
+        None,
+    );
+    match stale {
+        Err(StoreError::Conflict(message)) => {
+            assert!(
+                message.contains("moved"),
+                "the refusal must say the branch moved: {}",
+                message
+            );
+        }
+        other => panic!("expected a conflict, got {:?}", other.map(|c| c.hash)),
+    }
+    assert_eq!(
+        store.commits_on("coffee", "main").unwrap().len(),
+        2,
+        "nothing may be written"
+    );
 }
