@@ -85,3 +85,45 @@ fn duplicate_projects_and_branches_are_conflicts() {
         other => panic!("expected not found, got {:?}", other),
     }
 }
+#[test]
+fn concurrent_commits_to_one_branch_form_a_linear_chain() {
+    // The store resolves the parents, hashes and appends inside one lock and transaction.
+    // If that atomicity were lost, two concurrent commits would both read the same tip
+    // and fork the history: both commits would land, but one would orphan the other and
+    // the chain would have two roots. This test fails loudly in that case.
+    let (store, _dir) = store();
+    store.create_project("coffee").unwrap();
+    let store = std::sync::Arc::new(store);
+
+    let mut handles = Vec::new();
+    for i in 0..8 {
+        let store = store.clone();
+        handles.push(std::thread::spawn(move || {
+            store
+                .commit_model(
+                    "coffee",
+                    "main",
+                    &format!("okf-{}", i),
+                    "alex",
+                    "concurrent",
+                )
+                .expect("commit model");
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("worker thread");
+    }
+
+    let history = store.commits_on("coffee", "main").unwrap();
+    assert_eq!(history.len(), 8, "every commit must land");
+    let roots = history.iter().filter(|c| c.parents.is_empty()).count();
+    assert_eq!(roots, 1, "exactly one commit may be rootless");
+    for commit in &history {
+        assert!(
+            commit.parents.len() <= 1,
+            "no commit may have two parents in this scenario"
+        );
+    }
+    let links: usize = history.iter().map(|c| c.parents.len()).sum();
+    assert_eq!(links, 7, "seven commits must link to their predecessor");
+}

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::store::{commit_hash, now_epoch, Commit, Store, StoreError};
+use crate::store::{Commit, Store, StoreError};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -16,11 +16,51 @@ pub struct ApiState {
     pub evidence_dir: std::path::PathBuf,
 }
 
+/// A name that is safe as a URL segment and as a file name component. Project and
+/// branch names end up in the evidence file path, so an unrestricted name could contain
+/// a separator and write outside the evidence directory.
+pub fn validate_name(kind: &str, name: &str) -> Result<(), ApiError> {
+    if name.is_empty() {
+        return Err(ApiError::bad_request(format!("{} must not be empty", kind)));
+    }
+    if name.len() > 64 {
+        return Err(ApiError::bad_request(format!(
+            "{} must be 64 characters or fewer",
+            kind
+        )));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(ApiError::bad_request(format!(
+            "{} may contain only letters, digits, dot, underscore and hyphen",
+            kind
+        )));
+    }
+    // Dots are allowed (coffee-machine.v2), which means ".." and "." pass the charset
+    // check while being the very thing a path must never contain. Requiring one letter or
+    // digit excludes them without narrowing the usable names.
+    if !name.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::bad_request(format!(
+            "{} must contain at least one letter or digit",
+            kind
+        )));
+    }
+    Ok(())
+}
+
+/// Storage failures are logged with their detail and reported to the caller as a generic
+/// internal error: the detail names schema objects and hashes, which is not the client's
+/// business once this stops binding to localhost.
 pub fn map_store_error(e: StoreError) -> ApiError {
     match e {
         StoreError::NotFound(m) => ApiError::not_found(m),
         StoreError::Conflict(m) => ApiError::conflict(m),
-        StoreError::Backend(m) => ApiError::internal(m),
+        StoreError::Backend(m) => {
+            eprintln!("storage error: {}", m);
+            ApiError::internal("internal storage error")
+        }
     }
 }
 
@@ -46,9 +86,7 @@ pub async fn create_project(
     State(state): State<ApiState>,
     Json(body): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    if body.name.trim().is_empty() {
-        return Err(ApiError::bad_request("project name must not be empty"));
-    }
+    validate_name("project name", &body.name)?;
     let project = state
         .store
         .create_project(&body.name)
@@ -89,9 +127,7 @@ pub async fn create_commit(
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    if body.branch.trim().is_empty() {
-        return Err(ApiError::bad_request("branch must not be empty"));
-    }
+    validate_name("branch name", &body.branch)?;
 
     // The document must be a valid OKF model before it is stored: a repository that
     // accepts invalid models cannot be gated meaningfully.
@@ -107,33 +143,18 @@ pub async fn create_commit(
     }
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
-    let parents: Vec<String> = state
+    // One call, one transaction: the parents come from the tip the store reads inside the
+    // same lock that writes the commit, so two concurrent commits to one branch chain
+    // instead of forking the history.
+    let commit = state
         .store
-        .branch_tip(&project, &body.branch)
-        .map_err(map_store_error)?
-        .into_iter()
-        .collect();
-    let hash = commit_hash(
-        &project,
-        &body.branch,
-        &parents,
-        &okf_hash,
-        &body.author,
-        &body.message,
-    );
-    let commit = Commit {
-        hash: hash.clone(),
-        project: project.clone(),
-        branch: body.branch.clone(),
-        parents: parents.clone(),
-        okf_hash,
-        author: body.author,
-        message: body.message,
-        created_at: now_epoch(),
-    };
-    state
-        .store
-        .append_commit(&commit)
+        .commit_model(
+            &project,
+            &body.branch,
+            &okf_hash,
+            &body.author,
+            &body.message,
+        )
         .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }
@@ -171,9 +192,14 @@ pub async fn get_commit(
         .store
         .blob(&commit.okf_hash)
         .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::internal(format!("missing blob {}", commit.okf_hash)))?;
-    let value: Value =
-        serde_json::from_slice(&bytes).map_err(|e| ApiError::internal(e.to_string()))?;
+        .ok_or_else(|| {
+            eprintln!("missing blob {}", commit.okf_hash);
+            ApiError::internal("stored model is missing")
+        })?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e| {
+        eprintln!("stored model is not valid JSON: {}", e);
+        ApiError::internal("stored model could not be read")
+    })?;
     Ok(Json(value))
 }
 
@@ -188,6 +214,7 @@ pub async fn create_branch(
     Path(project): Path<String>,
     Json(body): Json<CreateBranch>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_name("branch name", &body.name)?;
     state
         .store
         .create_branch(&project, &body.name, &body.from)

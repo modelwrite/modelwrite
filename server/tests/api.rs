@@ -260,3 +260,32 @@ async fn commits_can_be_listed_per_branch() {
         .unwrap();
     assert!(json_body(other).await.as_array().unwrap().is_empty());
 }
+#[tokio::test]
+async fn names_that_could_escape_a_path_are_rejected() {
+    // Project names reach the evidence file path, so the charset is closed rather than
+    // trusted: a separator or a drive letter must never be accepted.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    for name in ["..", "a/b", "a\\b", "has space", "colon:name", ""] {
+        let response = router
+            .clone()
+            .oneshot(post("/projects", serde_json::json!({ "name": name })))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "name {:?} must be rejected",
+            name
+        );
+    }
+
+    let accepted = router
+        .oneshot(post(
+            "/projects",
+            serde_json::json!({ "name": "coffee-machine.v2" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED);
+}

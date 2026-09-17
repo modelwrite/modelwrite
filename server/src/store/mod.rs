@@ -99,6 +99,21 @@ pub trait Store: Send + Sync {
     fn put_blob(&self, bytes: &[u8]) -> Result<String, StoreError>;
     fn blob(&self, hash: &str) -> Result<Option<Vec<u8>>, StoreError>;
     fn append_commit(&self, commit: &Commit) -> Result<(), StoreError>;
+
+    /// Commit a model onto a branch atomically: the tip is read, the parents and the
+    /// commit hash are derived from it, and the commit row and the branch tip are written
+    /// inside ONE lock and transaction. Resolving the parents a layer above would be a
+    /// read-modify-write race: two concurrent commits would both read the same tip and
+    /// fork the history, the later one orphaning the earlier while the branch lists both.
+    fn commit_model(
+        &self,
+        project: &str,
+        branch: &str,
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+    ) -> Result<Commit, StoreError>;
+
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError>;
     fn commits_on(&self, project: &str, branch: &str) -> Result<Vec<Commit>, StoreError>;
     fn branch_tip(&self, project: &str, branch: &str) -> Result<Option<String>, StoreError>;

@@ -66,10 +66,10 @@ pub async fn run_gate(
     // The name carries both FULL hashes. Truncating them would keep determinism but lose
     // uniqueness: two commit pairs sharing a prefix would overwrite each other's evidence
     // while both runs stayed recorded, so a run would cite a file it never wrote.
-    let file_name = format!(
-        "server-{}-{}-{}.json",
-        project, body.reference, body.candidate
-    );
+    // The name carries both FULL hashes and no project name: the hashes are globally
+    // unique, and keeping an unvalidated string out of a filesystem path removes any
+    // chance of a separator escaping the evidence directory.
+    let file_name = format!("server-{}-{}.json", body.reference, body.candidate);
     let path = state.evidence_dir.join(file_name);
     gate::write_evidence(&path, &outcome.evidence)
         .map_err(|e| ApiError::internal(e.to_string()))?;

@@ -187,6 +187,65 @@ impl Store for SqliteStore {
         Ok(())
     }
 
+    fn commit_model(
+        &self,
+        project: &str,
+        branch: &str,
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+    ) -> Result<Commit, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // The tip is read inside the same lock and transaction that writes the commit, so
+        // two concurrent commits to one branch chain rather than fork.
+        let tip: Option<String> = (|| -> rusqlite::Result<Option<String>> {
+            let mut stmt =
+                tx.prepare("SELECT tip FROM branches WHERE project = ?1 AND name = ?2")?;
+            let mut rows = stmt.query(params![project, branch])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(row.get(0)?)),
+                None => Ok(None),
+            }
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let parents: Vec<String> = tip.into_iter().collect();
+        let created_at = now_epoch();
+        let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+        let parents_json =
+            serde_json::to_string(&parents).map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        tx.execute(
+            "INSERT OR IGNORE INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![hash, project, branch, parents_json, okf_hash, author, message, created_at],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
+            params![project, branch, hash],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        Ok(Commit {
+            hash,
+            project: project.to_string(),
+            branch: branch.to_string(),
+            parents,
+            okf_hash: okf_hash.to_string(),
+            author: author.to_string(),
+            message: message.to_string(),
+            created_at,
+        })
+    }
+
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError> {
         // The row is read inside the lock and the parents column is parsed outside it, so
         // that corruption can surface as a storage error rather than a query error.
