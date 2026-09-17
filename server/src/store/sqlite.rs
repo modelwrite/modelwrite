@@ -3,7 +3,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
-use super::{now_epoch, Commit, GateRun, Project, Store, StoreError};
+use super::{now_epoch, Commit, GateRun, Lock, Project, Store, StoreError};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
@@ -41,6 +41,16 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     evidence TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS locks (
+    id TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    element TEXT NOT NULL,
+    holder TEXT NOT NULL,
+    acquired_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS locks_element ON locks(project, element);
 ";
 
 pub struct SqliteStore {
@@ -484,5 +494,212 @@ impl Store for SqliteStore {
             })?;
             rows.collect()
         })
+    }
+
+    fn acquire_locks(
+        &self,
+        project: &str,
+        branch: &str,
+        elements: &[String],
+        holder: &str,
+        ttl_seconds: i64,
+        now: i64,
+    ) -> Result<Vec<Lock>, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // Sweep dead leases first, so an expired lock never blocks a new holder.
+        tx.execute("DELETE FROM locks WHERE expires_at <= ?1", params![now])
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // All or nothing: refuse before writing anything if any requested element is
+        // held by a live lease owned by a different holder.
+        for element in elements {
+            let conflict: Option<(String, i64)> =
+                (|| -> rusqlite::Result<Option<(String, i64)>> {
+                    let mut stmt = tx.prepare(
+                        "SELECT holder, expires_at FROM locks WHERE project = ?1 AND element = ?2 AND holder != ?3",
+                    )?;
+                    let mut rows = stmt.query(params![project, element.as_str(), holder])?;
+                    match rows.next()? {
+                        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+                        None => Ok(None),
+                    }
+                })()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+            if let Some((other, expires_at)) = conflict {
+                return Err(StoreError::Conflict(format!(
+                    "element {} is held by {} (expires at {})",
+                    element, other, expires_at
+                )));
+            }
+        }
+
+        // Upsert this holder's rows: extend an existing lease, insert a new one otherwise.
+        let mut locks = Vec::with_capacity(elements.len());
+        for element in elements {
+            let existing: Option<(String, String, i64)> =
+                (|| -> rusqlite::Result<Option<(String, String, i64)>> {
+                    let mut stmt = tx.prepare(
+                        "SELECT id, branch, acquired_at FROM locks WHERE project = ?1 AND element = ?2 AND holder = ?3",
+                    )?;
+                    let mut rows = stmt.query(params![project, element.as_str(), holder])?;
+                    match rows.next()? {
+                        Some(row) => Ok(Some((row.get(0)?, row.get(1)?, row.get(2)?))),
+                        None => Ok(None),
+                    }
+                })()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+            let expires_at = now + ttl_seconds;
+            let (id, acquired_at) = match existing {
+                Some((id, _branch, acquired_at)) => {
+                    tx.execute(
+                        "UPDATE locks SET branch = ?1, expires_at = ?2 WHERE id = ?3",
+                        params![branch, expires_at, id],
+                    )
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                    (id, acquired_at)
+                }
+                None => {
+                    let id = super::lock_id(project, branch, element, holder, now);
+                    tx.execute(
+                        "INSERT INTO locks (id, project, branch, element, holder, acquired_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![id, project, branch, element.as_str(), holder, now, expires_at],
+                    )
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                    (id, now)
+                }
+            };
+
+            locks.push(Lock {
+                id,
+                project: project.to_string(),
+                branch: branch.to_string(),
+                element: element.clone(),
+                holder: holder.to_string(),
+                acquired_at,
+                expires_at,
+            });
+        }
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        Ok(locks)
+    }
+
+    fn release_locks(
+        &self,
+        project: &str,
+        holder: &str,
+        ids: &[String],
+    ) -> Result<usize, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // Only the listed holder may release, so holder and id are both pinned in the
+        // WHERE clause; any other holder's attempt deletes nothing.
+        let mut released = 0usize;
+        for id in ids {
+            released += tx
+                .execute(
+                    "DELETE FROM locks WHERE project = ?1 AND holder = ?2 AND id = ?3",
+                    params![project, holder, id],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(released)
+    }
+
+    fn locks(&self, project: &str, now: i64) -> Result<Vec<Lock>, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        let locks: Vec<Lock> = (|| -> rusqlite::Result<Vec<Lock>> {
+            let mut stmt = tx.prepare(
+                "SELECT id, project, branch, element, holder, acquired_at, expires_at FROM locks WHERE project = ?1 AND expires_at > ?2 ORDER BY element",
+            )?;
+            let rows = stmt.query_map(params![project, now], |row| {
+                Ok(Lock {
+                    id: row.get(0)?,
+                    project: row.get(1)?,
+                    branch: row.get(2)?,
+                    element: row.get(3)?,
+                    holder: row.get(4)?,
+                    acquired_at: row.get(5)?,
+                    expires_at: row.get(6)?,
+                })
+            })?;
+            rows.collect()
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(locks)
+    }
+
+    fn holders_of(
+        &self,
+        project: &str,
+        elements: &[String],
+        now: i64,
+    ) -> Result<Vec<Lock>, StoreError> {
+        let guard = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = guard
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        let locks: Vec<Lock> = (|| -> rusqlite::Result<Vec<Lock>> {
+            let mut locks = Vec::new();
+            for element in elements {
+                let mut stmt = tx.prepare(
+                    "SELECT id, project, branch, element, holder, acquired_at, expires_at FROM locks WHERE project = ?1 AND element = ?2 AND expires_at > ?3",
+                )?;
+                let rows = stmt.query_map(params![project, element.as_str(), now], |row| {
+                    Ok(Lock {
+                        id: row.get(0)?,
+                        project: row.get(1)?,
+                        branch: row.get(2)?,
+                        element: row.get(3)?,
+                        holder: row.get(4)?,
+                        acquired_at: row.get(5)?,
+                        expires_at: row.get(6)?,
+                    })
+                })?;
+                for row in rows {
+                    locks.push(row?);
+                }
+            }
+            Ok(locks)
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(locks)
     }
 }

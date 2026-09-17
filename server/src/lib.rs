@@ -2,6 +2,7 @@
 pub mod api;
 pub mod error;
 pub mod gate_api;
+pub mod locks_api;
 pub mod merge;
 pub mod merge_api;
 pub mod store;
@@ -60,6 +61,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/projects/:project/gate-runs",
             get(gate_api::list_gate_runs),
+        )
+        .route(
+            "/projects/:project/locks",
+            post(locks_api::acquire_locks).get(locks_api::list_locks),
+        )
+        .route(
+            "/projects/:project/locks/release",
+            post(locks_api::release_locks),
         )
         .with_state(api_state)
 }
