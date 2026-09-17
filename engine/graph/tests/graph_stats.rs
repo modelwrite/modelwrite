@@ -77,3 +77,32 @@ fn corpus_coverage_is_pinned() {
     assert_eq!(cov.covered, 15);
     assert_eq!(cov.uncovered.len(), 10);
 }
+/// Regression check for the coverage inflation bug: an allocate edge from a part to a
+/// requirement must cover the requirement and must NOT add the part to covered. The old
+/// unconditional insert would have reported covered = 2 for a single requirement.
+#[test]
+fn allocate_edge_counts_only_requirement_endpoints() {
+    const ALLOC: &str = r#"{
+  "project": "alloc",
+  "exportedAt": "2026-09-17T00:00:00Z",
+  "summary": {},
+  "stateMachine": {"name": "alloc sm", "regions": []},
+  "requirements": [
+    {"id": "r1", "name": "R1", "kind": "requirement", "stereotypes": ["Requirement"], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "allocated to a part"}
+  ],
+  "graph": {
+    "nodes": [
+      {"id": "p1", "kind": "block", "name": "P1"},
+      {"id": "r1", "kind": "requirement", "name": "R1"}
+    ],
+    "edges": [
+      {"source": "p1", "target": "r1", "kind": "dependency", "label": "Allocate"}
+    ]
+  }
+}"#;
+    let cov = requirement_coverage(&okf(ALLOC));
+    assert_eq!(cov.total, 1);
+    assert_eq!(cov.allocated, 1);
+    assert_eq!(cov.covered, 1);
+    assert!(cov.uncovered.is_empty());
+}
