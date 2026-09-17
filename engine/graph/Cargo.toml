@@ -1,0 +1,19 @@
+[package]
+name = "mw-graph"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "graph"
+
+[dependencies]
+mw-okf = { path = "../okf" }
+petgraph.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+mw-test-support = { path = "../test-support" }
+serde_json.workspace = true
