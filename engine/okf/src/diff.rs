@@ -5,7 +5,11 @@ use serde::Serialize;
 
 use crate::types::OkfRoot;
 
+/// The report's JSON contract is camelCase, matching every other contract the
+/// platform publishes (the OKF document itself, the gate evidence and the MCP tool
+/// results). A consumer must never have to special-case one payload's key style.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiffReport {
     pub equal: bool,
     pub missing_elements: Vec<String>,

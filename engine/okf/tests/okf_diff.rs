@@ -69,3 +69,19 @@ fn state_machine_change_is_a_difference() {
     assert!(!d.equal);
     assert!(d.changed_attributes.iter().any(|k| k == "doc:stateMachine"));
 }
+#[test]
+fn report_serializes_with_camel_case_keys() {
+    // The report is a published contract (the MCP okf.diff tool and any agent binding
+    // to it). Pin the key style so a serde rename cannot silently change the contract.
+    let report = diff::diff(&expected(), &expected());
+    let value = serde_json::to_value(&report).expect("report serializes");
+    let keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert!(keys.contains(&"missingElements"), "keys: {:?}", keys);
+    assert!(keys.contains(&"changedAttributes"), "keys: {:?}", keys);
+    assert!(!keys.contains(&"missing_elements"), "keys: {:?}", keys);
+}

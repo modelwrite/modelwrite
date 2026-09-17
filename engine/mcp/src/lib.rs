@@ -76,16 +76,10 @@ fn call_tool(msg: &Value) -> Value {
             match (parse(reference), parse(candidate)) {
                 (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
                 (Ok(reference), Ok(candidate)) => {
+                    // DiffReport already serializes as camelCase, so the report is the
+                    // payload: no hand-rolled key mapping can drift from the type.
                     let report = okf::diff::diff(&reference, &candidate);
-                    let payload = json!({
-                        "equal": report.equal,
-                        "missingElements": report.missing_elements,
-                        "extraElements": report.extra_elements,
-                        "missingEdges": report.missing_edges,
-                        "extraEdges": report.extra_edges,
-                        "changedAttributes": report.changed_attributes
-                    });
-                    tool_ok(serde_json::to_string_pretty(&payload).expect("diff serializes"))
+                    tool_ok(serde_json::to_string_pretty(&report).expect("diff serializes"))
                 }
             }
         }

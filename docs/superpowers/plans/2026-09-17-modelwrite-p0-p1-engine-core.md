@@ -1162,7 +1162,11 @@ use serde::Serialize;
 
 use crate::types::OkfRoot;
 
+/// The report's JSON contract is camelCase, matching every other contract the
+/// platform publishes (the OKF document itself, the gate evidence and the MCP tool
+/// results). A consumer must never have to special-case one payload's key style.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiffReport {
     pub equal: bool,
     pub missing_elements: Vec<String>,
@@ -1202,8 +1206,8 @@ pub fn element_ids(root: &OkfRoot) -> BTreeSet<String> {
     ids
 }
 
-/// Every relationship as a canonical key. The key is a JSON array, so a field that
-/// contains a separator character cannot alias two distinct edges.
+/// Every relationship as a canonical key: a JSON array of source, target, kind and
+/// label, so a separator character inside a field cannot alias two distinct edges.
 pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     if let Some(graph) = &root.graph {
@@ -1225,10 +1229,10 @@ pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
 /// Canonical JSON per comparable unit, keyed by "<section>:<id>".
 ///
 /// The universe covers the document-level fields, every element-bearing section, and
-/// the activities section (which carries its own nodes and edges and is otherwise easy
-/// to forget). Section scoping matters: the graph mirrors elements, so the same id
-/// appears both as a section item and as a graph node, and keying by id alone would let
-/// the graph entry mask a removal or a change in the section that owns the element.
+/// the activities section (which carries its own nodes and edges). Section scoping
+/// matters: the graph mirrors elements, so the same id appears both as a section item
+/// and as a graph node, and keying by id alone would let the graph entry mask a removal
+/// or a change in the section that owns the element.
 pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
 
@@ -1256,6 +1260,7 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut put = |section: &str, id: &str, json: String| {
         map.insert(format!("{}:{}", section, id), json);
     };
+
     for el in &root.structure {
         if let Ok(v) = serde_json::to_string(el) {
             put("structure", &el.id, v);
@@ -1316,13 +1321,40 @@ pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
         .filter(|k| !ref_attrs.contains_key(*k))
         .cloned()
         .collect();
-    let mut changed_attributes: Vec<String> = ref_attrs
-        .iter()
-        .filter(|(k, v)| cand_attrs.get(*k).map(|c| c != *v).unwrap_or(false))
-        .map(|(k, _)| k.clone())
-        .collect();
+
+    let mut changed_attributes: Vec<String> = Vec::new();
+    for (id, ref_value) in &ref_attrs {
+        if let Some(cand_value) = cand_attrs.get(id) {
+            if cand_value != ref_value {
+                changed_attributes.push(id.clone());
+            }
+        }
+    }
+
     let mut missing_edges: Vec<String> = ref_edges.difference(&cand_edges).cloned().collect();
     let mut extra_edges: Vec<String> = cand_edges.difference(&ref_edges).cloned().collect();
+
+    missing_elements.sort();
+    extra_elements.sort();
+    missing_edges.sort();
+    extra_edges.sort();
+    changed_attributes.sort();
+
+    let equal = missing_elements.is_empty()
+        && extra_elements.is_empty()
+        && missing_edges.is_empty()
+        && extra_edges.is_empty()
+        && changed_attributes.is_empty();
+
+    DiffReport {
+        equal,
+        missing_elements,
+        extra_elements,
+        missing_edges,
+        extra_edges,
+        changed_attributes,
+    }
+}
 ```
 
 - [ ] **Step 10: Write engine/okf/tests/okf_validation.rs**
@@ -1488,6 +1520,36 @@ fn document_level_change_is_a_difference() {
     let d = diff::diff(&expected(), &candidate);
     assert!(!d.equal);
     assert_eq!(d.changed_attributes.len(), 1);
+}
+
+#[test]
+fn state_machine_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate
+        .state_machine
+        .as_mut()
+        .expect("state machine present")
+        .name
+        .push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert!(d.changed_attributes.iter().any(|k| k == "doc:stateMachine"));
+}
+#[test]
+fn report_serializes_with_camel_case_keys() {
+    // The report is a published contract (the MCP okf.diff tool and any agent binding
+    // to it). Pin the key style so a serde rename cannot silently change the contract.
+    let report = diff::diff(&expected(), &expected());
+    let value = serde_json::to_value(&report).expect("report serializes");
+    let keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert!(keys.contains(&"missingElements"), "keys: {:?}", keys);
+    assert!(keys.contains(&"changedAttributes"), "keys: {:?}", keys);
+    assert!(!keys.contains(&"missing_elements"), "keys: {:?}", keys);
 }
 ```
 
@@ -2651,8 +2713,14 @@ fn tool_ok(text: String) -> Value {
 
 fn call_tool(msg: &Value) -> Value {
     let params = msg.get("params");
-    let name = params.and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("");
-    let args = params.and_then(|p| p.get("arguments")).cloned().unwrap_or_else(|| json!({}));
+    let name = params
+        .and_then(|p| p.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let args = params
+        .and_then(|p| p.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     match name {
         "okf.validate" => {
             let Some(okf) = args.get("okf").and_then(Value::as_str) else {
@@ -2681,7 +2749,10 @@ fn call_tool(msg: &Value) -> Value {
         "gate.run" => {
             let reference = args.get("reference").and_then(Value::as_str);
             let candidate = args.get("candidate").and_then(Value::as_str);
-            let strict = args.get("strictCoverage").and_then(Value::as_bool).unwrap_or(false);
+            let strict = args
+                .get("strictCoverage")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let (Some(reference), Some(candidate)) = (reference, candidate) else {
                 return tool_error("missing reference or candidate argument");
             };
@@ -2690,7 +2761,10 @@ fn call_tool(msg: &Value) -> Value {
                 (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
                 (Ok(reference), Ok(candidate)) => {
                     let outcome = gate::run(&reference, &candidate, strict);
-                    tool_ok(serde_json::to_string_pretty(&outcome.evidence).expect("evidence serializes"))
+                    tool_ok(
+                        serde_json::to_string_pretty(&outcome.evidence)
+                            .expect("evidence serializes"),
+                    )
                 }
             }
         }
@@ -2704,6 +2778,8 @@ fn call_tool(msg: &Value) -> Value {
             match (parse(reference), parse(candidate)) {
                 (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
                 (Ok(reference), Ok(candidate)) => {
+                    // DiffReport already serializes as camelCase, so the report is the
+                    // payload: no hand-rolled key mapping can drift from the type.
                     let report = okf::diff::diff(&reference, &candidate);
                     tool_ok(serde_json::to_string_pretty(&report).expect("diff serializes"))
                 }
@@ -2811,8 +2887,12 @@ pub fn handle_request(line: &str) -> String {
                 let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../docs/okf/okf-1.0-spec.md");
                 match std::fs::read_to_string(&path) {
-                    Ok(text) => json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] }),
-                    Err(e) => json!({ "contents": [], "error": format!("cannot read spec: {}", e) }),
+                    Ok(text) => {
+                        json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] })
+                    }
+                    Err(e) => {
+                        json!({ "contents": [], "error": format!("cannot read spec: {}", e) })
+                    }
                 }
             } else {
                 json!({ "contents": [] })
