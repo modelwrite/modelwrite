@@ -19,7 +19,7 @@ consumer: portals, analysis, AI, and the gate.
 |---|---|---|---|
 | okf | string | no | Version marker; exporters emit 1.0. Absent means legacy export. |
 | project | string | yes | Model or project name. |
-| exportedAt | string | yes | Export timestamp. Exporters SHOULD emit ISO-8601; legacy exports may be free text. |
+| exportedAt | string | no (expected: exporters emit it) | Export timestamp. Exporters SHOULD emit ISO-8601; legacy exports may be free text. |
 | provenance | object | no | sourceTool, exporter, exporterVersion strings. |
 | summary | object | yes | Counts used as a sanity cross-check (mismatches are warnings). |
 | structure | Element[] | no | Blocks and interface blocks. |
@@ -41,6 +41,10 @@ uses.
 
 Traceability lives on dependency edges in the label field with exactly
 these spellings: Satisfy, Refine, Verify, Allocate (capitalised).
+
+These spellings are the vocabulary the platform uses on dependency
+edges; they are checked by the coverage analysis, not by document
+validation.
 
 ## 4. Section item shapes
 
@@ -103,4 +107,6 @@ The reference corpus fixture
 (sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json) is a
 legacy export: no okf marker and a free text exportedAt. It is conformant
 with one warning. New exporters MUST emit okf 1.0 and an ISO-8601
-exportedAt.
+exportedAt. exportedAt is expected of every export and emitted by every
+exporter, but it is not a schema-required field; the runtime validator
+does not reject a document that omits it.
