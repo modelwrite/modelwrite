@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pub mod api;
 pub mod error;
+pub mod gate_api;
 pub mod store;
 
 pub use error::ApiError;
@@ -41,6 +42,11 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/projects/:project/commits/:hash", get(api::get_commit))
         .route("/projects/:project/branches", post(api::create_branch))
+        .route("/projects/:project/gate", post(gate_api::run_gate))
+        .route(
+            "/projects/:project/gate-runs",
+            get(gate_api::list_gate_runs),
+        )
         .with_state(api_state)
 }
 
