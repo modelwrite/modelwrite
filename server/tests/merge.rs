@@ -144,3 +144,77 @@ fn deleting_on_one_side_while_the_other_modifies_is_a_conflict() {
     assert_eq!(outcome.conflicts.len(), 1);
     assert_eq!(outcome.conflicts[0].kind, "modifiedVersusDeleted");
 }
+#[test]
+fn our_section_order_is_preserved() {
+    // A merge must not reshuffle a document: if it did, every merge would look like a
+    // rewrite and a reviewer could not see what actually changed. The ids here are
+    // deliberately NOT in sorted order, so a key-sorted merge fails this test.
+    let mut base_value = model("Block", false);
+    base_value["structure"] = json!([
+        {"id": "b2", "name": "Second", "kind": "block", "stereotypes": ["Block"], "attributes": [], "documentation": ""},
+        {"id": "b1", "name": "First", "kind": "block", "stereotypes": ["Block"], "attributes": [], "documentation": ""}
+    ]);
+    let base = okf(base_value.clone());
+    let ours = okf(base_value.clone());
+
+    // They add a third block, which must land AFTER our two, not sorted among them.
+    let mut their_value = base_value;
+    their_value["structure"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "b0", "name": "Added", "kind": "block",
+            "stereotypes": ["Block"], "attributes": [], "documentation": ""
+        }));
+    let theirs = okf(their_value);
+
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(outcome.conflicts.is_empty(), "{:?}", outcome.conflicts);
+    let names: Vec<String> = outcome
+        .merged
+        .expect("clean merge")
+        .structure
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    assert_eq!(names, vec!["Second", "First", "Added"]);
+}
+
+#[test]
+fn both_sides_adding_the_same_element_differently_conflicts() {
+    let base = okf(model("Block", false));
+    let mut our_value = model("Block", false);
+    our_value["requirements"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "r9", "name": "Ours", "kind": "requirement",
+            "stereotypes": ["Requirement"], "attributes": [], "documentation": "",
+            "reqId": "9.1", "reqText": "ours"
+        }));
+    let mut their_value = model("Block", false);
+    their_value["requirements"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "r9", "name": "Theirs", "kind": "requirement",
+            "stereotypes": ["Requirement"], "attributes": [], "documentation": "",
+            "reqId": "9.2", "reqText": "theirs"
+        }));
+    let outcome = merge(&base, &okf(our_value), &okf(their_value));
+    assert!(outcome.merged.is_none());
+    assert_eq!(outcome.conflicts.len(), 1);
+    assert_eq!(outcome.conflicts[0].kind, "bothAdded");
+}
+
+#[test]
+fn a_different_project_name_conflicts() {
+    let base = okf(model("Block", false));
+    let mut our_value = model("Block", false);
+    our_value["project"] = json!("one");
+    let mut their_value = model("Block", false);
+    their_value["project"] = json!("two");
+    let outcome = merge(&base, &okf(our_value), &okf(their_value));
+    assert!(outcome.merged.is_none());
+    assert_eq!(outcome.conflicts[0].subject, "doc:project");
+}

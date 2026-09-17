@@ -87,10 +87,21 @@ where
     let ours_map = to_map(ours);
     let theirs_map = to_map(theirs);
 
-    let mut keys: Vec<K> = ours_map.keys().cloned().collect();
-    for k in theirs_map.keys() {
-        if !keys.contains(k) {
-            keys.push(k.clone());
+    // Our order first, then what only theirs added, in their order. Iterating the maps
+    // would sort by key, and a merge that silently reshuffles a document makes every
+    // merge look like a rewrite. A key present only in base was deleted by both sides, so
+    // it never appears here - which is exactly what should happen to it.
+    let mut keys: Vec<K> = Vec::new();
+    for item in ours {
+        let k = key(item);
+        if !keys.contains(&k) {
+            keys.push(k);
+        }
+    }
+    for item in theirs {
+        let k = key(item);
+        if !keys.contains(&k) {
+            keys.push(k);
         }
     }
 
@@ -285,7 +296,13 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
     merged.requirements = requirements;
     merged.state_machine = state_machine;
     merged.activities = activities;
-    merged.graph = Some(okf::types::Graph { nodes, edges });
+    // A graph section is only emitted if some input had one: inventing an empty graph
+    // would turn a document that never had one into one that appears to.
+    merged.graph = if base.graph.is_some() || ours.graph.is_some() || theirs.graph.is_some() {
+        Some(okf::types::Graph { nodes, edges })
+    } else {
+        None
+    };
     recompute_summary(&mut merged);
 
     MergeOutcome {

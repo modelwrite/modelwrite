@@ -229,6 +229,15 @@ impl Store for SqliteStore {
         author: &str,
         message: &str,
     ) -> Result<Commit, StoreError> {
+        // A merge commit has exactly two parents. Anything else is a caller mistake, and it
+        // would quietly write a root commit or an ordinary single-parent commit under the
+        // name of a merge.
+        if parents.len() != 2 {
+            return Err(StoreError::Backend(format!(
+                "a merge commit needs exactly two parents, got {}",
+                parents.len()
+            )));
+        }
         let guard = self
             .connection
             .lock()
