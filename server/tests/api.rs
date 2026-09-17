@@ -473,3 +473,44 @@ async fn a_reset_appends_a_commit_and_keeps_the_old_tip_reachable() {
         .unwrap();
     assert_eq!(superseded.status(), StatusCode::OK);
 }
+#[tokio::test]
+async fn a_reset_reports_an_unknown_branch_or_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "one", "okf": tiny_okf() }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let unknown_branch = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches/nope/reset",
+            serde_json::json!({ "to": hash, "author": "alex", "message": "revert" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unknown_branch.status(), StatusCode::NOT_FOUND);
+
+    let unknown_target = router
+        .oneshot(post(
+            "/projects/coffee/branches/main/reset",
+            serde_json::json!({ "to": "no-such-commit", "author": "alex", "message": "revert" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unknown_target.status(), StatusCode::NOT_FOUND);
+}
