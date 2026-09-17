@@ -46,4 +46,5 @@ async fn version_names_the_service() {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["service"], "mw-server");
+    assert_eq!(value["server"], env!("CARGO_PKG_VERSION"));
 }
