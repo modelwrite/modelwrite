@@ -91,3 +91,37 @@ fn unknown_method_returns_error() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 5, "method": "nope", "params": {} }));
     assert_eq!(resp["error"]["code"], -32601);
 }
+#[test]
+fn notification_gets_no_response() {
+    // A JSON-RPC notification carries no id and must never be answered.
+    let out = mcp::handle_request(
+        &json!({ "jsonrpc": "2.0", "method": "initialize", "params": {} }).to_string(),
+    );
+    assert!(
+        out.is_empty(),
+        "notifications must not be answered: {}",
+        out
+    );
+}
+
+#[test]
+fn malformed_input_returns_a_parse_error() {
+    let resp: Value = serde_json::from_str(&mcp::handle_request("this is not json"))
+        .expect("a valid JSON-RPC error response");
+    assert_eq!(resp["error"]["code"], -32700);
+    assert!(resp["id"].is_null());
+}
+
+#[test]
+fn tool_error_is_reported_in_the_result_not_the_transport() {
+    // A missing argument is a tool failure, not a transport failure: the JSON-RPC
+    // envelope must stay a success so an agent can read the error and adapt.
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": { "name": "okf.validate", "arguments": {} }
+    }));
+    assert!(resp.get("error").is_none(), "unexpected error: {}", resp);
+    assert_eq!(resp["result"]["isError"], true);
+}
