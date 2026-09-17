@@ -164,6 +164,12 @@ where
 /// change of kind becomes a delete plus an add, so both the old and the new link survive and
 /// the graph claims a relationship nobody made.
 ///
+/// Known limit, stated rather than hidden: a link RE-POINTED to a different element on both
+/// sides is not detected as a disagreement, because with no rename detection each side's new
+/// pair is simply an addition and the two additions union. The merge keeps both relationships
+/// rather than inventing one; detecting the re-point would need identity tracking across an
+/// edit, which is a larger piece of work than this rule should attempt.
+///
 /// Identity is therefore the pair alone, and the key is the pair TUPLE rather than a joined
 /// string, because a joined string can collide on its separator and silently drop a unit.
 /// The identity is coarse on purpose: two independent edits between the same two elements

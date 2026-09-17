@@ -270,10 +270,11 @@ fn two_different_relabels_of_one_edge_conflict() {
     assert_eq!(outcome.conflicts[0].kind, "bothModified");
 }
 #[test]
-fn changing_an_edge_kind_on_one_side_does_not_duplicate_it() {
-    // With kind folded into identity, a kind edit became a delete plus an add, so the old
-    // and the new link BOTH survived and the merged graph claimed a relationship nobody
-    // made. Identity is the element pair, so this is an ordinary one-sided change.
+fn a_one_sided_kind_change_replaces_the_link() {
+    // Note this case alone does NOT discriminate between keyings: with ours unchanged and
+    // theirs changing the kind, the old (source, target, kind) keying also produced a single
+    // edge of the new kind, so it would pass either way. It is kept because it is the
+    // behaviour people expect, and the two tests below are the ones that pin the bug.
     let base = okf(model("Block", false));
     let ours = okf(model("Block", false));
     let mut their_value = model("Block", false);
@@ -285,4 +286,49 @@ fn changing_an_edge_kind_on_one_side_does_not_duplicate_it() {
     let edges = outcome.merged.expect("clean merge").graph.unwrap().edges;
     assert_eq!(edges.len(), 1, "the edited link must replace the old one");
     assert_eq!(edges[0].kind, "allocation");
+}
+
+#[test]
+fn deleting_a_link_while_the_other_changes_its_kind_conflicts() {
+    // The discriminating case. Under the old (source, target, kind) keying, ours deleting the
+    // dependency link and theirs retyping it as an allocation looked like agreement-to-delete
+    // plus an unrelated addition: the allocation survived and ours' deletion was discarded
+    // with no conflict. Identity is the element pair, so this is a deletion against a change.
+    let base = okf(model("Block", false));
+
+    let mut our_value = model("Block", false);
+    our_value["graph"]["edges"] = json!([]);
+    let ours = okf(our_value);
+
+    let mut their_value = model("Block", false);
+    their_value["graph"]["edges"][0]["kind"] = json!("allocation");
+    let theirs = okf(their_value);
+
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(
+        outcome.merged.is_none(),
+        "a link deleted by one side and retyped by the other must conflict"
+    );
+    assert_eq!(outcome.conflicts.len(), 1);
+    assert_eq!(outcome.conflicts[0].kind, "modifiedVersusDeleted");
+}
+
+#[test]
+fn two_divergent_kind_changes_to_one_link_conflict() {
+    // The other discriminating case: under the old keying both retyped links survived and the
+    // graph claimed two relationships between the same elements that neither person made.
+    let base = okf(model("Block", false));
+
+    let mut our_value = model("Block", false);
+    our_value["graph"]["edges"][0]["kind"] = json!("allocation");
+    let ours = okf(our_value);
+
+    let mut their_value = model("Block", false);
+    their_value["graph"]["edges"][0]["kind"] = json!("verification");
+    let theirs = okf(their_value);
+
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(outcome.merged.is_none());
+    assert_eq!(outcome.conflicts.len(), 1);
+    assert_eq!(outcome.conflicts[0].kind, "bothModified");
 }
