@@ -107,7 +107,14 @@ async fn a_commit_stores_the_model_and_moves_the_branch() {
         .await
         .unwrap();
     assert_eq!(fetched.status(), StatusCode::OK);
-    assert_eq!(json_body(fetched).await, tiny_okf());
+    // Byte for byte, not structurally: comparing two parsed values would let a
+    // key-reordering or reformatting regression pass unnoticed.
+    let bytes = fetched.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        bytes.as_ref(),
+        serde_json::to_vec(&tiny_okf()).unwrap().as_slice(),
+        "the stored model must come back byte for byte"
+    );
 }
 
 #[tokio::test]
@@ -159,4 +166,97 @@ async fn committing_an_unknown_project_is_not_found() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+#[tokio::test]
+async fn branch_creation_reports_unknown_commits_and_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "m", "okf": tiny_okf() }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let unknown = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "review", "from": "not-a-commit" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let created = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "review", "from": hash }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let duplicate = router
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "review", "from": hash }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn commits_can_be_listed_per_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "m", "okf": tiny_okf() }),
+        ))
+        .await
+        .unwrap();
+
+    let main = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/projects/coffee/commits?branch=main")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json_body(main).await.as_array().unwrap().len(), 1);
+
+    let other = router
+        .oneshot(
+            Request::builder()
+                .uri("/projects/coffee/commits?branch=nothing-here")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(json_body(other).await.as_array().unwrap().is_empty());
 }
