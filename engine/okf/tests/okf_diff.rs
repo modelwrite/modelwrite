@@ -55,3 +55,17 @@ fn document_level_change_is_a_difference() {
     assert!(!d.equal);
     assert_eq!(d.changed_attributes.len(), 1);
 }
+
+#[test]
+fn state_machine_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate
+        .state_machine
+        .as_mut()
+        .expect("state machine present")
+        .name
+        .push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert!(d.changed_attributes.iter().any(|k| k == "doc:stateMachine"));
+}

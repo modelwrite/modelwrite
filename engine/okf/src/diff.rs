@@ -45,7 +45,8 @@ pub fn element_ids(root: &OkfRoot) -> BTreeSet<String> {
     ids
 }
 
-/// Every relationship as a source|target|kind|label key.
+/// Every relationship as a canonical key: a JSON array of source, target, kind and
+/// label, so a separator character inside a field cannot alias two distinct edges.
 pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     if let Some(graph) = &root.graph {
