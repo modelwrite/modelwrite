@@ -5,7 +5,9 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 fn state(dir: &std::path::Path) -> server::AppState {
+    let store = server::store::sqlite::SqliteStore::open(&dir.join("mw.db")).unwrap();
     server::AppState {
+        store: std::sync::Arc::new(store),
         evidence_dir: dir.to_path_buf(),
     }
 }
