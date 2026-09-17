@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::store::{now_epoch, Commit, Lock, Store, StoreError};
+use crate::store::{now_epoch, Commit, CommitGuard, Store, StoreError};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -219,29 +219,28 @@ pub async fn create_commit(
     }
 
     // A holder that asks the commit to respect locks: refuse to change any element held by
-    // someone else. Absent, the commit behaves exactly as before - locks are opt-in.
-    if let Some(holder) = body.holder.as_deref() {
-        let tip_model = match state
-            .store
-            .branch_tip(&project, &body.branch)
-            .map_err(map_store_error)?
-        {
-            Some(tip) => load_model(&state, &project, &tip)?,
-            None => root.clone(),
-        };
-        let touched = touched_elements(&tip_model, &root);
-        let held = state
-            .store
-            .holders_of(&project, &touched, now_seconds())
-            .map_err(map_store_error)?;
-        let blocked: Vec<&Lock> = held.iter().filter(|l| l.holder != holder).collect();
-        if !blocked.is_empty() {
-            return Err(ApiError::conflict(format!(
-                "{} is locked by {} until {}",
-                blocked[0].element, blocked[0].holder, blocked[0].expires_at
-            )));
+    // someone else. Absent, the commit behaves exactly as before - locks are opt-in. The
+    // check itself happens INSIDE the store's commit transaction, so a lock taken between
+    // this point and the write cannot be bypassed.
+    let touched: Vec<String> = match body.holder.as_deref() {
+        Some(_) => {
+            let tip_model = match state
+                .store
+                .branch_tip(&project, &body.branch)
+                .map_err(map_store_error)?
+            {
+                Some(tip) => load_model(&state, &project, &tip)?,
+                None => root.clone(),
+            };
+            touched_elements(&tip_model, &root)
         }
-    }
+        None => Vec::new(),
+    };
+    let guard = body.holder.as_deref().map(|holder| CommitGuard {
+        holder,
+        elements: &touched,
+        now: now_seconds(),
+    });
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
     // One call, one transaction: the parents come from the tip the store reads inside the
@@ -255,6 +254,7 @@ pub async fn create_commit(
             &okf_hash,
             &body.author,
             &body.message,
+            guard,
         )
         .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
@@ -408,6 +408,7 @@ pub async fn reset_branch(
             &target.okf_hash,
             &body.author,
             &body.message,
+            None,
         )
         .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))

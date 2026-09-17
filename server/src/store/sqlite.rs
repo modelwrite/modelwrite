@@ -3,7 +3,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
-use super::{now_epoch, Commit, GateRun, Lock, Project, Store, StoreError};
+use super::{now_epoch, Commit, CommitGuard, GateRun, Lock, Project, Store, StoreError};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
@@ -176,14 +176,41 @@ impl Store for SqliteStore {
         okf_hash: &str,
         author: &str,
         message: &str,
+        guard: Option<CommitGuard<'_>>,
     ) -> Result<Commit, StoreError> {
-        let guard = self
+        let connection = self
             .connection
             .lock()
             .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
-        let tx = guard
+        let tx = connection
             .unchecked_transaction()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // The lock check happens HERE, inside the transaction that writes the commit. A
+        // check performed by the caller before this call would leave a window in which
+        // another holder takes the lock and the guarded commit lands regardless.
+        if let Some(guard) = guard {
+            for element in guard.elements {
+                let held: Option<(String, i64)> = (|| -> rusqlite::Result<Option<(String, i64)>> {
+                    let mut stmt = tx.prepare(
+                        "SELECT holder, expires_at FROM locks WHERE project = ?1 AND element = ?2 AND expires_at > ?3 AND holder != ?4 LIMIT 1",
+                    )?;
+                    let mut rows =
+                        stmt.query(params![project, element, guard.now, guard.holder])?;
+                    match rows.next()? {
+                        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+                        None => Ok(None),
+                    }
+                })()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+                if let Some((holder, expires_at)) = held {
+                    return Err(StoreError::Conflict(format!(
+                        "{} is locked by {} until {}",
+                        element, holder, expires_at
+                    )));
+                }
+            }
+        }
 
         // The tip is read inside the same lock and transaction that writes the commit, so
         // two concurrent commits to one branch chain rather than fork.

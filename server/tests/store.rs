@@ -33,7 +33,7 @@ fn commits_land_on_a_branch_and_move_its_tip() {
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
     let first = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit")
+        .commit_model("coffee", "main", "okf1", "alex", "first commit", None)
         .unwrap();
     assert_eq!(
         store.branch_tip("coffee", "main").unwrap().unwrap(),
@@ -41,7 +41,7 @@ fn commits_land_on_a_branch_and_move_its_tip() {
     );
 
     let second = store
-        .commit_model("coffee", "main", "okf2", "alex", "second commit")
+        .commit_model("coffee", "main", "okf2", "alex", "second commit", None)
         .unwrap();
     assert_eq!(
         store.branch_tip("coffee", "main").unwrap().unwrap(),
@@ -63,7 +63,7 @@ fn duplicate_projects_and_branches_are_conflicts() {
         other => panic!("expected a conflict, got {:?}", other),
     }
     let commit = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit")
+        .commit_model("coffee", "main", "okf1", "alex", "first commit", None)
         .unwrap();
     store
         .create_branch("coffee", "review", &commit.hash)
@@ -100,6 +100,7 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
                     &format!("okf-{}", i),
                     "alex",
                     "concurrent",
+                    None,
                 )
                 .expect("commit model");
         }));
@@ -163,18 +164,25 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
     let (store, _dir) = store();
     store.create_project("coffee").unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root")
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None)
         .unwrap();
     store
         .create_branch("coffee", "feature", &root.hash)
         .unwrap();
     let their_side = store
-        .commit_model("coffee", "feature", "okf-feature", "alex", "feature")
+        .commit_model("coffee", "feature", "okf-feature", "alex", "feature", None)
         .unwrap();
 
     // The concurrent commit: main moves AFTER the merge read its tips.
     let concurrent = store
-        .commit_model("coffee", "main", "okf-concurrent", "alex", "concurrent")
+        .commit_model(
+            "coffee",
+            "main",
+            "okf-concurrent",
+            "alex",
+            "concurrent",
+            None,
+        )
         .unwrap();
 
     let refused = store.commit_merge(
@@ -202,4 +210,81 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
         .filter(|c| c.parents.len() == 2)
         .collect();
     assert!(merges.is_empty(), "no merge commit may be written");
+}
+#[test]
+fn a_guarded_commit_is_refused_inside_the_transaction() {
+    // The guard has to be enforced by the store, not by the caller. A check performed
+    // before the write leaves a window in which another holder takes the lock and the
+    // guarded commit lands anyway - a lock that looks enforced and is not. This test drives
+    // the store directly, with no API layer to do the checking for it.
+    use server::store::CommitGuard;
+
+    let (store, _dir) = store();
+    store.create_project("coffee").unwrap();
+    store
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None)
+        .unwrap();
+
+    // Alex holds b1.
+    store
+        .acquire_locks("coffee", "main", &["b1".to_string()], "alex", 600, 1000)
+        .unwrap();
+
+    // Sam's commit touches b1: the store must refuse it, with nothing written.
+    let touched = vec!["b1".to_string()];
+    let refused = store.commit_model(
+        "coffee",
+        "main",
+        "okf-sam",
+        "sam",
+        "sam edits a locked element",
+        Some(CommitGuard {
+            holder: "sam",
+            elements: &touched,
+            now: 1000,
+        }),
+    );
+    match refused {
+        Err(StoreError::Conflict(message)) => {
+            assert!(message.contains("b1"), "the refusal must name the element");
+            assert!(message.contains("alex"), "the refusal must name the holder");
+        }
+        other => panic!("expected a conflict, got {:?}", other.map(|c| c.hash)),
+    }
+    assert_eq!(store.commits_on("coffee", "main").unwrap().len(), 1);
+
+    // An expired lease is not a lock: the same commit succeeds once the lease lapses.
+    let allowed = store.commit_model(
+        "coffee",
+        "main",
+        "okf-sam",
+        "sam",
+        "sam edits after the lease lapsed",
+        Some(CommitGuard {
+            holder: "sam",
+            elements: &touched,
+            now: 2000,
+        }),
+    );
+    assert!(allowed.is_ok(), "an expired lease must not block a commit");
+
+    // A guard for an element nobody holds blocks nothing, even while a DIFFERENT element is
+    // locked: a lock protects the elements it names, not the document around them.
+    let elsewhere = vec!["b3".to_string()];
+    store
+        .acquire_locks("coffee", "main", &["b2".to_string()], "alex", 600, 1000)
+        .unwrap();
+    let unrelated = store.commit_model(
+        "coffee",
+        "main",
+        "okf-other",
+        "sam",
+        "sam edits something else",
+        Some(CommitGuard {
+            holder: "sam",
+            elements: &elsewhere,
+            now: 1000,
+        }),
+    );
+    assert!(unrelated.is_ok(), "only the guarded elements are protected");
 }

@@ -118,6 +118,14 @@ pub fn now_epoch() -> String {
     }
 }
 
+/// What a guarded commit must not change. The holder is the one asking; any element in
+/// `elements` held by a DIFFERENT holder with a live lease refuses the commit.
+pub struct CommitGuard<'a> {
+    pub holder: &'a str,
+    pub elements: &'a [String],
+    pub now: i64,
+}
+
 pub trait Store: Send + Sync {
     fn create_project(&self, name: &str) -> Result<Project, StoreError>;
     fn project(&self, name: &str) -> Result<Option<Project>, StoreError>;
@@ -130,6 +138,12 @@ pub trait Store: Send + Sync {
     /// inside ONE lock and transaction. Resolving the parents a layer above would be a
     /// read-modify-write race: two concurrent commits would both read the same tip and
     /// fork the history, the later one orphaning the earlier while the branch lists both.
+    ///
+    /// An optional guard says "refuse this commit if any of these elements is locked by
+    /// somebody else". The check runs INSIDE the transaction, not before it: checking first
+    /// and writing afterwards leaves a window in which another holder acquires the lock and
+    /// the guarded commit lands anyway, which would make a lock advisory in the worst way -
+    /// it would look enforced and not be.
     fn commit_model(
         &self,
         project: &str,
@@ -137,6 +151,7 @@ pub trait Store: Send + Sync {
         okf_hash: &str,
         author: &str,
         message: &str,
+        guard: Option<CommitGuard<'_>>,
     ) -> Result<Commit, StoreError>;
 
     /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
