@@ -1,0 +1,12 @@
+[package]
+name = "mw-test-support"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "test_support"
+
+[dependencies]
