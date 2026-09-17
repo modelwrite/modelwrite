@@ -1,4 +1,4 @@
-# Evidence annex
+﻿# Evidence annex
 
 Every public claim about modelwrite traces to a recorded gate run in this
 directory. Records are append-only: never rewrite an existing record.

@@ -1,4 +1,4 @@
-# OKF 1.0 — Open Knowledge Format
+﻿# OKF 1.0 — Open Knowledge Format
 
 Status: normative, v1.0-draft
 
