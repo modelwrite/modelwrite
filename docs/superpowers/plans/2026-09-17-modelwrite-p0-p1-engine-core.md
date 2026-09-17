@@ -1921,17 +1921,43 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
         }
     }
 
-    let stats = graph_stats(candidate);
-    if !stats.isolated.is_empty() {
-        failures.push(format!("integration: {} isolated nodes", stats.isolated.len()));
-    }
-    if stats.component_count != 1 {
-        failures.push(format!("integration: {} connected components", stats.component_count));
+    // A candidate can lose its graph section entirely. Validation already records that
+    // as an error, so the gate must report a failure rather than panic inside the graph
+    // helpers, which require a graph to exist. Exit code 1 is the contract for a lossy
+    // candidate; a crash would be neither a pass nor a failure.
+    let stats = if candidate.graph.is_some() {
+        Some(graph_stats(candidate))
+    } else {
+        failures.push("integration: candidate has no graph section".to_string());
+        None
+    };
+    if let Some(stats) = &stats {
+        if !stats.isolated.is_empty() {
+            failures.push(format!(
+                "integration: {} isolated nodes",
+                stats.isolated.len()
+            ));
+        }
+        if stats.component_count != 1 {
+            failures.push(format!(
+                "integration: {} connected components",
+                stats.component_count
+            ));
+        }
     }
 
-    let cov = requirement_coverage(candidate);
-    if strict_coverage && !cov.uncovered.is_empty() {
-        failures.push(format!("coverage: {} uncovered requirements", cov.uncovered.len()));
+    let cov = if candidate.graph.is_some() {
+        Some(requirement_coverage(candidate))
+    } else {
+        None
+    };
+    if let Some(cov) = &cov {
+        if strict_coverage && !cov.uncovered.is_empty() {
+            failures.push(format!(
+                "coverage: {} uncovered requirements",
+                cov.uncovered.len()
+            ));
+        }
     }
 
     let evidence = json!({
@@ -1947,19 +1973,39 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
             "extraEdges": d.extra_edges,
             "changedAttributes": d.changed_attributes
         },
-        "integration": {
-            "isolated": stats.isolated,
-            "componentCount": stats.component_count,
-            "componentSizes": stats.component_sizes
+        // The schema stays stable when the candidate has no graph: the keys are always
+        // present, with empty values, so a consumer never has to handle a missing object.
+        "integration": match &stats {
+            Some(s) => json!({
+                "isolated": s.isolated,
+                "componentCount": s.component_count,
+                "componentSizes": s.component_sizes
+            }),
+            None => json!({
+                "isolated": [],
+                "componentCount": 0,
+                "componentSizes": []
+            })
         },
-        "coverage": {
-            "total": cov.total,
-            "satisfied": cov.satisfied,
-            "refined": cov.refined,
-            "verified": cov.verified,
-            "allocated": cov.allocated,
-            "covered": cov.covered,
-            "uncovered": cov.uncovered
+        "coverage": match &cov {
+            Some(c) => json!({
+                "total": c.total,
+                "satisfied": c.satisfied,
+                "refined": c.refined,
+                "verified": c.verified,
+                "allocated": c.allocated,
+                "covered": c.covered,
+                "uncovered": c.uncovered
+            }),
+            None => json!({
+                "total": 0,
+                "satisfied": 0,
+                "refined": 0,
+                "verified": 0,
+                "allocated": 0,
+                "covered": 0,
+                "uncovered": []
+            })
         },
         "strictCoverage": strict_coverage,
         "validationErrors": v.errors,
@@ -2000,9 +2046,27 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--reference" => reference = args.next().map(PathBuf::from),
-            "--candidate" => candidate = args.next().map(PathBuf::from),
-            "--evidence" => evidence = args.next().map(PathBuf::from),
+            "--reference" => match args.next() {
+                Some(v) => reference = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--reference requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--candidate" => match args.next() {
+                Some(v) => candidate = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--candidate requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--evidence" => match args.next() {
+                Some(v) => evidence = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--evidence requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
             "--json" => json_output = true,
             "--strict-coverage" => strict_coverage = true,
             _ => {
@@ -2034,7 +2098,10 @@ fn main() -> ExitCode {
         }
     }
     if json_output {
-        println!("{}", serde_json::to_string(&outcome.evidence).expect("evidence serializes"));
+        println!(
+            "{}",
+            serde_json::to_string(&outcome.evidence).expect("evidence serializes")
+        );
     } else if outcome.passed {
         println!("GATE PASS");
     } else {
@@ -2137,9 +2204,16 @@ const TINY_GATE: &str = r#"{
 fn self_roundtrip_passes() {
     let r = expected();
     let outcome = gate::run(&r, &r, false);
-    assert!(outcome.passed, "unexpected failures: {:?}", outcome.failures);
+    assert!(
+        outcome.passed,
+        "unexpected failures: {:?}",
+        outcome.failures
+    );
     assert_eq!(outcome.evidence["passed"], true);
-    assert_eq!(outcome.evidence["referenceHash"], outcome.evidence["candidateHash"]);
+    assert_eq!(
+        outcome.evidence["referenceHash"],
+        outcome.evidence["candidateHash"]
+    );
 }
 
 #[test]
@@ -2149,7 +2223,10 @@ fn corrupted_corpus_fails() {
         serde_json::from_str(&test_support::load_okf_broken()).expect("broken fixture parses");
     let outcome = gate::run(&reference, &candidate, false);
     assert!(!outcome.passed);
-    assert!(outcome.failures.iter().any(|f| f.contains("missing elements")));
+    assert!(outcome
+        .failures
+        .iter()
+        .any(|f| f.contains("missing elements")));
     assert!(outcome.failures.iter().any(|f| f.contains("isolated")));
 }
 
@@ -2157,10 +2234,37 @@ fn corrupted_corpus_fails() {
 fn strict_coverage_fails_on_uncovered() {
     let r = okf(TINY_GATE);
     let lenient = gate::run(&r, &r, false);
-    assert!(lenient.passed, "unexpected failures: {:?}", lenient.failures);
+    assert!(
+        lenient.passed,
+        "unexpected failures: {:?}",
+        lenient.failures
+    );
     let strict = gate::run(&r, &r, true);
     assert!(!strict.passed);
-    assert!(strict.failures.iter().any(|f| f.contains("uncovered requirements")));
+    assert!(strict
+        .failures
+        .iter()
+        .any(|f| f.contains("uncovered requirements")));
+}
+#[test]
+fn candidate_without_a_graph_fails_instead_of_panicking() {
+    // A lossy candidate can lose its graph section outright. The gate must report a
+    // failure with exit-code-1 semantics, never panic inside the graph helpers.
+    let reference = expected();
+    let candidate = okf(r#"{
+  "project": "no graph",
+  "exportedAt": "2026-09-17T00:00:00Z",
+  "summary": {},
+  "stateMachine": {"name": "sm", "regions": []},
+  "graph": null
+}"#);
+    let outcome = gate::run(&reference, &candidate, false);
+    assert!(!outcome.passed);
+    assert!(outcome
+        .failures
+        .iter()
+        .any(|f| f.contains("no graph section")));
+    assert_eq!(outcome.evidence["integration"]["componentCount"], 0);
 }
 ```
 
