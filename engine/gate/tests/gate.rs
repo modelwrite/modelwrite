@@ -87,6 +87,9 @@ fn candidate_without_a_graph_fails_instead_of_panicking() {
   "exportedAt": "2026-09-17T00:00:00Z",
   "summary": {},
   "stateMachine": {"name": "sm", "regions": []},
+  "requirements": [
+    {"id": "r1", "name": "R1", "kind": "requirement", "stereotypes": ["Requirement"], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "no graph to trace through"}
+  ],
   "graph": null
 }"#);
     let outcome = gate::run(&reference, &candidate, false);
@@ -96,4 +99,14 @@ fn candidate_without_a_graph_fails_instead_of_panicking() {
         .iter()
         .any(|f| f.contains("no graph section")));
     assert_eq!(outcome.evidence["integration"]["componentCount"], 0);
+    // Coverage must not understate the model: the retained requirement is reported as
+    // uncovered rather than the total being reported as zero.
+    assert_eq!(outcome.evidence["coverage"]["total"], 1);
+    assert_eq!(
+        outcome.evidence["coverage"]["uncovered"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }

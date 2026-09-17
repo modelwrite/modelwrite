@@ -110,15 +110,24 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
                 "covered": c.covered,
                 "uncovered": c.uncovered
             }),
-            None => json!({
-                "total": 0,
-                "satisfied": 0,
-                "refined": 0,
-                "verified": 0,
-                "allocated": 0,
-                "covered": 0,
-                "uncovered": []
-            })
+            // Without a graph nothing can be shown to be covered, but the requirement
+            // count is still known: reporting total 0 would understate the model. Every
+            // requirement the candidate retains is reported as uncovered, which is the
+            // truthful reading and keeps the evidence schema stable.
+            None => {
+                let mut uncovered: Vec<String> =
+                    candidate.requirements.iter().map(|r| r.id.clone()).collect();
+                uncovered.sort();
+                json!({
+                    "total": candidate.requirements.len(),
+                    "satisfied": 0,
+                    "refined": 0,
+                    "verified": 0,
+                    "allocated": 0,
+                    "covered": 0,
+                    "uncovered": uncovered
+                })
+            }
         },
         "strictCoverage": strict_coverage,
         "validationErrors": v.errors,
