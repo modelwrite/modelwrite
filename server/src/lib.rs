@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pub mod api;
 pub mod audit_api;
+pub mod auth;
 pub mod error;
 pub mod gate_api;
 pub mod locks_api;
@@ -20,6 +21,7 @@ use serde_json::json;
 pub struct AppState {
     pub store: Arc<dyn store::Store>,
     pub evidence_dir: std::path::PathBuf,
+    pub auth: auth::AuthConfig,
 }
 
 impl AppState {
@@ -27,6 +29,7 @@ impl AppState {
         api::ApiState {
             store: self.store.clone(),
             evidence_dir: self.evidence_dir.clone(),
+            auth: self.auth.clone(),
         }
     }
 }

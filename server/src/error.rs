@@ -48,6 +48,23 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    /// A request with no bearer token, or one that does not match the configured
+    /// authentication. The token itself is never echoed.
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
+    /// An authenticated caller whose roles do not grant the required permission.
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {

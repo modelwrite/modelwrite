@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use server::auth::AuthConfig;
 use server::store::sqlite::SqliteStore;
 use server::{app, AppState};
 
@@ -17,6 +18,18 @@ async fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("docs/evidence"));
 
+    // Authentication is opt-in. With no token configured the service runs in OPEN mode:
+    // every request is accepted as an anonymous admin. That keeps pilots and air-gapped
+    // installs working, so the warning is deliberate and loud, not an error.
+    let auth = AuthConfig::from_env();
+    if matches!(&auth, AuthConfig::Open) {
+        eprintln!(
+            "WARNING: mw-server is running WITHOUT authentication (open mode); \
+             every request is accepted as an anonymous admin. Set MW_AUTH_TOKEN to \
+             require a bearer token."
+        );
+    }
+
     let store = Arc::new(SqliteStore::open(std::path::Path::new(&db_path))?);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -26,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         app(AppState {
             store,
             evidence_dir,
+            auth,
         }),
     )
     .await?;

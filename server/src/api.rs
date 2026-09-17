@@ -7,6 +7,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::auth::AuthConfig;
 use crate::error::ApiError;
 use crate::store::{
     is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError,
@@ -16,6 +17,7 @@ use crate::store::{
 pub struct ApiState {
     pub store: Arc<dyn Store>,
     pub evidence_dir: std::path::PathBuf,
+    pub auth: AuthConfig,
 }
 
 /// A name that is safe as a URL segment: letters, digits, dot, underscore and hyphen,

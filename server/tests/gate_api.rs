@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -9,6 +9,7 @@ fn state(dir: &std::path::Path) -> server::AppState {
     server::AppState {
         store: std::sync::Arc::new(store),
         evidence_dir: dir.to_path_buf(),
+        auth: server::auth::AuthConfig::Open,
     }
 }
 
