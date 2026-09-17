@@ -37,3 +37,21 @@ fn renamed_element_is_changed_attribute() {
     assert!(!d.equal);
     assert_eq!(d.changed_attributes.len(), 1);
 }
+
+#[test]
+fn activity_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.activities[0].name.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}
+
+#[test]
+fn document_level_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.project.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}

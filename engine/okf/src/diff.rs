@@ -50,18 +50,51 @@ pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     if let Some(graph) = &root.graph {
         for e in &graph.edges {
-            keys.insert(format!("{}|{}|{}|{}", e.source, e.target, e.kind, e.label));
+            let parts = [
+                e.source.as_str(),
+                e.target.as_str(),
+                e.kind.as_str(),
+                e.label.as_str(),
+            ];
+            if let Ok(key) = serde_json::to_string(&parts) {
+                keys.insert(key);
+            }
         }
     }
     keys
 }
 
-/// Section-scoped canonical JSON per element: "<section>:<id>" -> serialized item.
-/// Section scoping matters: the graph mirrors elements, so the same id appears both
-/// as a section item and as a graph node. Keying by id alone would let the graph
-/// entry mask a removal or a change in the section that owns the element.
+/// Canonical JSON per comparable unit, keyed by "<section>:<id>".
+///
+/// The universe covers the document-level fields, every element-bearing section, and
+/// the activities section (which carries its own nodes and edges). Section scoping
+/// matters: the graph mirrors elements, so the same id appears both as a section item
+/// and as a graph node, and keying by id alone would let the graph entry mask a removal
+/// or a change in the section that owns the element.
 pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
+
+    if let Ok(v) = serde_json::to_string(&root.project) {
+        map.insert("doc:project".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.okf) {
+        map.insert("doc:okf".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.exported_at) {
+        map.insert("doc:exportedAt".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.summary) {
+        map.insert("doc:summary".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.provenance) {
+        map.insert("doc:provenance".to_string(), v);
+    }
+    if let Some(sm) = &root.state_machine {
+        if let Ok(v) = serde_json::to_string(sm) {
+            map.insert("doc:stateMachine".to_string(), v);
+        }
+    }
+
     let mut put = |section: &str, id: &str, json: String| {
         map.insert(format!("{}:{}", section, id), json);
     };
@@ -93,6 +126,11 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
                     put("state", &s.id, v);
                 }
             }
+        }
+    }
+    for (i, a) in root.activities.iter().enumerate() {
+        if let Ok(v) = serde_json::to_string(a) {
+            put("activity", &i.to_string(), v);
         }
     }
     if let Some(graph) = &root.graph {
