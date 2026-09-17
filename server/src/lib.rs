@@ -51,6 +51,10 @@ pub fn app(state: AppState) -> Router {
             "/projects/:project/branches/:name",
             axum::routing::delete(api::delete_branch),
         )
+        .route(
+            "/projects/:project/branches/:name/reset",
+            post(api::reset_branch),
+        )
         .route("/projects/:project/gate", post(gate_api::run_gate))
         .route("/projects/:project/merge", post(merge_api::merge_branches))
         .route(

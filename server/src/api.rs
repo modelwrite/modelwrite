@@ -280,3 +280,47 @@ pub async fn delete_branch(
         .map_err(map_store_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Deserialize)]
+pub struct ResetBranch {
+    pub to: String,
+    pub author: String,
+    pub message: String,
+}
+
+/// Restore a branch to the CONTENT of an earlier commit by appending a new commit. The
+/// history is never rewritten: the old tip stays reachable, and the revert is itself a
+/// commit with an author and a message.
+pub async fn reset_branch(
+    State(state): State<ApiState>,
+    Path((project, name)): Path<(String, String)>,
+    Json(body): Json<ResetBranch>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_name("branch name", &name)?;
+    if state
+        .store
+        .branch_tip(&project, &name)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("branch {}", name)));
+    }
+    let target = state
+        .store
+        .commit(&project, &body.to)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("commit {}", body.to)))?;
+    // The target's model is already stored, so this reuses its blob rather than copying
+    // the bytes: the restored content is byte-identical to the original by construction.
+    let commit = state
+        .store
+        .commit_model(
+            &project,
+            &name,
+            &target.okf_hash,
+            &body.author,
+            &body.message,
+        )
+        .map_err(map_store_error)?;
+    Ok((StatusCode::CREATED, Json(commit_json(&commit))))
+}

@@ -401,3 +401,75 @@ async fn branch_routes_report_an_unknown_project() {
         .unwrap();
     assert_eq!(deleted.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn a_reset_appends_a_commit_and_keeps_the_old_tip_reachable() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let first = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "one", "okf": tiny_okf() }),
+        ))
+        .await
+        .unwrap();
+    let first_hash = json_body(first).await["hash"].as_str().unwrap().to_string();
+
+    let mut second_model = tiny_okf();
+    second_model["project"] = serde_json::json!("changed");
+    let second = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "two", "okf": second_model }),
+        ))
+        .await
+        .unwrap();
+    let second_hash = json_body(second).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let reset = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches/main/reset",
+            serde_json::json!({ "to": first_hash, "author": "alex", "message": "revert to one" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reset.status(), StatusCode::CREATED);
+    let revert = json_body(reset).await;
+    assert_eq!(revert["parents"], serde_json::json!([second_hash]));
+
+    // The reverted content matches the target, and the superseded commit is still there.
+    let tip = revert["hash"].as_str().unwrap().to_string();
+    let fetched = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/projects/coffee/commits/{}", tip))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json_body(fetched).await, tiny_okf());
+
+    let superseded = router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/projects/coffee/commits/{}", second_hash))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(superseded.status(), StatusCode::OK);
+}
