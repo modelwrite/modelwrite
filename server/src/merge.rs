@@ -149,41 +149,60 @@ where
     }
 }
 
-/// One relationship as a unit: a source, a target, a kind, and the set of labels carried
-/// between them.
+/// One relationship as a unit: the PAIR of elements is the identity, and the links carried
+/// between them - each a kind and a label - are the content.
 ///
-/// Keying an edge by ALL of its fields, label included, makes key-equality the same thing
-/// as content-equality - so the three-way rule's conflict branches can never fire for an
-/// edge, and an edit on one side looks like a delete plus an add. Concretely: if ours
-/// removes a Satisfy link while theirs relabels it Verify, both sides drop the old key and
-/// theirs adds a new one, so ours' deletion is silently discarded. Grouping by identity
-/// (source, target, kind) and comparing the label SET as content is what makes that case a
-/// modifiedVersusDeleted conflict, as it should be. The label set also means two edges
-/// sharing a triple are never collapsed into one.
+/// Two earlier keyings were wrong in the same way, and the difference matters because each
+/// failed silently rather than loudly.
+///
+/// Keying an edge by every field including the label makes key-equality the same thing as
+/// content-equality, so the three-way rule's conflict branches can never fire: ours deleting
+/// a Satisfy link while theirs relabels it Verify reads as agreement-to-delete plus an
+/// addition, and our deletion disappears.
+///
+/// Keying it by (source, target, kind) fixes that and moves the same failure onto kind: a
+/// change of kind becomes a delete plus an add, so both the old and the new link survive and
+/// the graph claims a relationship nobody made.
+///
+/// Identity is therefore the pair alone, and the key is the pair TUPLE rather than a joined
+/// string, because a joined string can collide on its separator and silently drop a unit.
+/// The identity is coarse on purpose: two independent edits between the same two elements
+/// conflict instead of merging, and a visible conflict is resolvable while a silently
+/// duplicated or discarded relationship is not.
 #[derive(Clone, Serialize, serde::Deserialize)]
 struct EdgeUnit {
     source: String,
     target: String,
-    kind: String,
-    labels: Vec<String>,
+    /// Sorted (kind, label) pairs, so a unit is order-insensitive and deterministic.
+    links: Vec<(String, String)>,
 }
 
 fn edge_units(edges: &[GraphEdge]) -> Vec<EdgeUnit> {
-    let mut grouped: BTreeMap<(String, String, String), std::collections::BTreeSet<String>> =
+    // First appearance decides the order, so merging does not reshuffle graph.edges.
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut grouped: BTreeMap<(String, String), std::collections::BTreeSet<(String, String)>> =
         BTreeMap::new();
     for edge in edges {
+        let pair = (edge.source.clone(), edge.target.clone());
+        if !grouped.contains_key(&pair) {
+            order.push(pair.clone());
+        }
         grouped
-            .entry((edge.source.clone(), edge.target.clone(), edge.kind.clone()))
+            .entry(pair)
             .or_default()
-            .insert(edge.label.clone());
+            .insert((edge.kind.clone(), edge.label.clone()));
     }
-    grouped
+    order
         .into_iter()
-        .map(|((source, target, kind), labels)| EdgeUnit {
-            source,
-            target,
-            kind,
-            labels: labels.into_iter().collect(),
+        .map(|(source, target)| {
+            let links = grouped.get(&(source.clone(), target.clone()));
+            EdgeUnit {
+                source,
+                target,
+                links: links
+                    .map(|set| set.iter().cloned().collect())
+                    .unwrap_or_default(),
+            }
         })
         .collect()
 }
@@ -191,11 +210,11 @@ fn edge_units(edges: &[GraphEdge]) -> Vec<EdgeUnit> {
 fn edges_from_units(units: &[EdgeUnit]) -> Vec<GraphEdge> {
     let mut edges = Vec::new();
     for unit in units {
-        for label in &unit.labels {
+        for (kind, label) in &unit.links {
             edges.push(GraphEdge {
                 source: unit.source.clone(),
                 target: unit.target.clone(),
-                kind: unit.kind.clone(),
+                kind: kind.clone(),
                 label: label.clone(),
             });
         }
@@ -326,7 +345,7 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
         &edge_units(&base_edges),
         &edge_units(&our_edges),
         &edge_units(&their_edges),
-        |unit: &EdgeUnit| format!("{}|{}|{}", unit.source, unit.target, unit.kind),
+        |unit: &EdgeUnit| (unit.source.clone(), unit.target.clone()),
         &mut conflicts,
     ));
 

@@ -269,3 +269,20 @@ fn two_different_relabels_of_one_edge_conflict() {
     assert!(outcome.merged.is_none());
     assert_eq!(outcome.conflicts[0].kind, "bothModified");
 }
+#[test]
+fn changing_an_edge_kind_on_one_side_does_not_duplicate_it() {
+    // With kind folded into identity, a kind edit became a delete plus an add, so the old
+    // and the new link BOTH survived and the merged graph claimed a relationship nobody
+    // made. Identity is the element pair, so this is an ordinary one-sided change.
+    let base = okf(model("Block", false));
+    let ours = okf(model("Block", false));
+    let mut their_value = model("Block", false);
+    their_value["graph"]["edges"][0]["kind"] = json!("allocation");
+    let theirs = okf(their_value);
+
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(outcome.conflicts.is_empty(), "{:?}", outcome.conflicts);
+    let edges = outcome.merged.expect("clean merge").graph.unwrap().edges;
+    assert_eq!(edges.len(), 1, "the edited link must replace the old one");
+    assert_eq!(edges[0].kind, "allocation");
+}

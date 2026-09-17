@@ -67,19 +67,24 @@ fn common_ancestor(
     }
     shared.sort();
 
+    // Each candidate's ancestry is computed ONCE. The comparison below is quadratic in the
+    // number of candidates, and recomputing a whole history walk inside that loop turned a
+    // quadratic into something much worse for no reason.
+    let mut ancestries: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    for candidate in &shared {
+        ancestries.insert(candidate.clone(), ancestry_set(state, project, candidate)?);
+    }
+
     let mut lowest: Vec<String> = Vec::new();
     for candidate in &shared {
-        let mut is_ancestor_of_another = false;
-        for other in &shared {
-            if other == candidate {
-                continue;
-            }
-            let other_side = ancestry_set(state, project, other)?;
-            if other_side.contains(candidate) {
-                is_ancestor_of_another = true;
-                break;
-            }
-        }
+        let is_ancestor_of_another = shared.iter().any(|other| {
+            other != candidate
+                && ancestries
+                    .get(other)
+                    .map(|side| side.contains(candidate))
+                    .unwrap_or(false)
+        });
         if !is_ancestor_of_another {
             lowest.push(candidate.clone());
         }
@@ -87,6 +92,9 @@ fn common_ancestor(
 
     match lowest.len() {
         1 => Ok(lowest.remove(0)),
+        // Unreachable in a finite history: the reachability relation is a partial order, so
+        // a non-empty set of shared commits always has a maximal element. Kept as a refusal
+        // rather than a panic, in case the data ever stops being a finite history.
         0 => Err(ApiError::internal(
             "no shared commit survived the merge base search",
         )),
