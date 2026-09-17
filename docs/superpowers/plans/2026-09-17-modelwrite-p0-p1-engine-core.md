@@ -1202,23 +1202,57 @@ pub fn element_ids(root: &OkfRoot) -> BTreeSet<String> {
     ids
 }
 
-/// Every relationship as a source|target|kind|label key.
+/// Every relationship as a canonical key. The key is a JSON array, so a field that
+/// contains a separator character cannot alias two distinct edges.
 pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     if let Some(graph) = &root.graph {
         for e in &graph.edges {
-            keys.insert(format!("{}|{}|{}|{}", e.source, e.target, e.kind, e.label));
+            let parts = [
+                e.source.as_str(),
+                e.target.as_str(),
+                e.kind.as_str(),
+                e.label.as_str(),
+            ];
+            if let Ok(key) = serde_json::to_string(&parts) {
+                keys.insert(key);
+            }
         }
     }
     keys
 }
 
-/// Section-scoped canonical JSON per element: "<section>:<id>" -> serialized item.
-/// Section scoping matters: the graph mirrors elements, so the same id appears both
-/// as a section item and as a graph node. Keying by id alone would let the graph
-/// entry mask a removal or a change in the section that owns the element.
+/// Canonical JSON per comparable unit, keyed by "<section>:<id>".
+///
+/// The universe covers the document-level fields, every element-bearing section, and
+/// the activities section (which carries its own nodes and edges and is otherwise easy
+/// to forget). Section scoping matters: the graph mirrors elements, so the same id
+/// appears both as a section item and as a graph node, and keying by id alone would let
+/// the graph entry mask a removal or a change in the section that owns the element.
 pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
+
+    if let Ok(v) = serde_json::to_string(&root.project) {
+        map.insert("doc:project".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.okf) {
+        map.insert("doc:okf".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.exported_at) {
+        map.insert("doc:exportedAt".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.summary) {
+        map.insert("doc:summary".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.provenance) {
+        map.insert("doc:provenance".to_string(), v);
+    }
+    if let Some(sm) = &root.state_machine {
+        if let Ok(v) = serde_json::to_string(sm) {
+            map.insert("doc:stateMachine".to_string(), v);
+        }
+    }
+
     let mut put = |section: &str, id: &str, json: String| {
         map.insert(format!("{}:{}", section, id), json);
     };
@@ -1251,6 +1285,11 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
             }
         }
     }
+    for (i, a) in root.activities.iter().enumerate() {
+        if let Ok(v) = serde_json::to_string(a) {
+            put("activity", &i.to_string(), v);
+        }
+    }
     if let Some(graph) = &root.graph {
         for n in &graph.nodes {
             if let Ok(v) = serde_json::to_string(n) {
@@ -1260,6 +1299,7 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     }
     map
 }
+
 pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
     let ref_attrs = attribute_keys(reference);
     let cand_attrs = attribute_keys(candidate);
@@ -1283,26 +1323,6 @@ pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
         .collect();
     let mut missing_edges: Vec<String> = ref_edges.difference(&cand_edges).cloned().collect();
     let mut extra_edges: Vec<String> = cand_edges.difference(&ref_edges).cloned().collect();
-    missing_elements.sort();
-    extra_elements.sort();
-    missing_edges.sort();
-    extra_edges.sort();
-    changed_attributes.sort();
-
-    let equal = missing_elements.is_empty()
-        && extra_elements.is_empty()
-        && missing_edges.is_empty()
-        && extra_edges.is_empty()
-        && changed_attributes.is_empty();
-    DiffReport {
-        equal,
-        missing_elements,
-        extra_elements,
-        missing_edges,
-        extra_edges,
-        changed_attributes,
-    }
-}
 ```
 
 - [ ] **Step 10: Write engine/okf/tests/okf_validation.rs**
@@ -1451,12 +1471,30 @@ fn renamed_element_is_changed_attribute() {
     assert!(!d.equal);
     assert_eq!(d.changed_attributes.len(), 1);
 }
+
+#[test]
+fn activity_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.activities[0].name.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}
+
+#[test]
+fn document_level_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.project.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}
 ```
 
 - [ ] **Step 12: Run the tests**
 
 Run: cargo test -p mw-okf
-Expected: all 11 tests pass (7 in tests/okf_validation.rs, 4 in tests/okf_diff.rs). If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
+Expected: all 13 tests pass (7 in tests/okf_validation.rs, 6 in tests/okf_diff.rs). If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
 
 - [ ] **Step 13: Format and lint**
 
