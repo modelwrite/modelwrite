@@ -8,7 +8,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::store::{now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError};
+use crate::store::{
+    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError,
+};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -48,6 +50,27 @@ pub fn validate_name(kind: &str, name: &str) -> Result<(), ApiError> {
             "{} must contain at least one letter or digit",
             kind
         )));
+    }
+    Ok(())
+}
+
+/// Validate an element id taken from an OKF document. This is deliberately wider than
+/// `validate_name`: element ids come from the model itself, and their charset may include
+/// characters `validate_name` rejects. An element that can be CHANGED must also be LOCKED,
+/// so the only requirements are non-empty, no control characters, and at most 256 bytes.
+pub fn validate_element_name(name: &str) -> Result<(), ApiError> {
+    if name.is_empty() {
+        return Err(ApiError::bad_request("element name must not be empty"));
+    }
+    if name.len() > 256 {
+        return Err(ApiError::bad_request(
+            "element name must be 256 bytes or fewer",
+        ));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(ApiError::bad_request(
+            "element name must not contain control characters",
+        ));
     }
     Ok(())
 }
@@ -97,10 +120,66 @@ fn now_seconds() -> i64 {
     now_epoch().parse().unwrap_or(0)
 }
 
+/// Record a refusal - an action that was ATTEMPTED but refused - in the audit log. A
+/// refusal is not a mutation, so it appends directly rather than riding a transaction; the
+/// event matters even though nothing changed.
+pub fn record_refusal(
+    store: &dyn Store,
+    project: &str,
+    actor: &str,
+    action: &str,
+    subject: &str,
+    detail: &str,
+) -> Result<(), ApiError> {
+    store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.to_string(),
+            at: now_seconds(),
+            actor: actor.to_string(),
+            action: action.to_string(),
+            subject: subject.to_string(),
+            detail: detail.to_string(),
+        })
+        .map(|_| ())
+        .map_err(map_store_error)
+}
+
+/// Call a commit-producing store method and, if it is refused because an element is
+/// locked, record commit.refused before surfacing the 409. A lock refusal is the
+/// highest-value event this feature produces: it is the overwrite the lock prevented.
+pub fn commit_refusal_guard(
+    state: &ApiState,
+    project: &str,
+    branch: &str,
+    author: &str,
+    result: Result<Commit, StoreError>,
+) -> Result<Commit, ApiError> {
+    match result {
+        Ok(commit) => Ok(commit),
+        Err(error) if is_lock_refusal(&error) => {
+            let detail = match &error {
+                StoreError::Conflict(message) => message.clone(),
+                _ => unreachable!("is_lock_refusal implies a Conflict"),
+            };
+            record_refusal(
+                state.store.as_ref(),
+                project,
+                author,
+                "commit.refused",
+                branch,
+                &detail,
+            )?;
+            Err(map_store_error(error))
+        }
+        Err(error) => Err(map_store_error(error)),
+    }
+}
+
 /// The elements a commit changes: every diff entry that names an element, plus the
 /// endpoints of changed edges. A lock protects an element from being CHANGED, so an
 /// untouched element elsewhere in the document does not block the commit.
-fn touched_elements(
+pub fn touched_elements(
     reference: &okf::types::OkfRoot,
     candidate: &okf::types::OkfRoot,
 ) -> Vec<String> {
@@ -162,21 +241,18 @@ pub async fn create_project(
     Json(body): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     validate_name("project name", &body.name)?;
+    let audit = AuditEntry {
+        id: 0,
+        project: body.name.clone(),
+        at: now_seconds(),
+        actor: "unknown".to_string(),
+        action: "project.create".to_string(),
+        subject: body.name.clone(),
+        detail: "project created".to_string(),
+    };
     let project = state
         .store
-        .create_project(&body.name)
-        .map_err(map_store_error)?;
-    state
-        .store
-        .append_audit(&AuditEntry {
-            id: 0,
-            project: project.name.clone(),
-            at: now_seconds(),
-            actor: "unknown".to_string(),
-            action: "project.create".to_string(),
-            subject: project.name.clone(),
-            detail: "project created".to_string(),
-        })
+        .create_project(&body.name, Some(&audit))
         .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
@@ -230,44 +306,27 @@ pub async fn create_commit(
         ));
     }
 
-    // A holder that asks the commit to respect locks: refuse to change any element held by
-    // someone else. Absent, the commit behaves exactly as before - locks are opt-in. The
-    // check itself happens INSIDE the store's commit transaction, so a lock taken between
-    // this point and the write cannot be bypassed.
-    let mut tip_hash: Option<String> = None;
-    let touched: Vec<String> = match body.holder.as_deref() {
-        Some(holder) => {
-            tip_hash = state
-                .store
-                .branch_tip(&project, &body.branch)
-                .map_err(map_store_error)?;
-            let tip_model = match tip_hash.as_deref() {
-                Some(tip) => load_model(&state, &project, tip)?,
-                None => root.clone(),
-            };
-            let touched = touched_elements(&tip_model, &root);
-            // Refuse BEFORE storing anything, so a rejected commit leaves no orphaned blob
-            // behind. The store checks again inside its transaction; this is the cheap path.
-            let held = state
-                .store
-                .holders_of(&project, &touched, now_seconds())
-                .map_err(map_store_error)?;
-            if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
-                return Err(ApiError::conflict(format!(
-                    "{} is locked by {} until {}",
-                    blocked.element, blocked.holder, blocked.expires_at
-                )));
-            }
-            touched
-        }
-        None => Vec::new(),
+    // Locks are enforced by default, not by opt-in. Every commit computes the elements it
+    // would change and refuses to change any element with a live lease held by a different
+    // holder. A missing holder is still checked: it cannot be the holder, so a live lease
+    // on a touched element refuses it too. The authoritative check runs inside the store's
+    // commit transaction, so a lock taken after this point cannot be bypassed.
+    let now = now_seconds();
+    let tip_hash = state
+        .store
+        .branch_tip(&project, &body.branch)
+        .map_err(map_store_error)?;
+    let tip_model = match tip_hash.as_deref() {
+        Some(tip) => load_model(&state, &project, tip)?,
+        None => root.clone(),
     };
-    let guard = body.holder.as_deref().map(|holder| CommitGuard {
-        holder,
+    let touched = touched_elements(&tip_model, &root);
+    let guard = CommitGuard {
+        holder: body.holder.as_deref().unwrap_or(""),
         elements: &touched,
-        now: now_seconds(),
+        now,
         expected_tip: tip_hash.as_deref(),
-    });
+    };
 
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
     // One call, one transaction: the parents come from the tip the store reads inside the
@@ -277,24 +336,27 @@ pub async fn create_commit(
     let audit = AuditEntry {
         id: 0,
         project: project.clone(),
-        at: now_seconds(),
+        at: now,
         actor: body.author.clone(),
         action: "commit.create".to_string(),
         subject: body.branch.clone(),
         detail: body.message.clone(),
     };
-    let commit = state
-        .store
-        .commit_model(
+    let commit = commit_refusal_guard(
+        &state,
+        &project,
+        &body.branch,
+        &body.author,
+        state.store.commit_model(
             &project,
             &body.branch,
             &okf_hash,
             &body.author,
             &body.message,
-            guard,
+            Some(guard),
             Some(&audit),
-        )
-        .map_err(map_store_error)?;
+        ),
+    )?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }
 
@@ -354,21 +416,18 @@ pub async fn create_branch(
     Json(body): Json<CreateBranch>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     validate_name("branch name", &body.name)?;
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: "unknown".to_string(),
+        action: "branch.create".to_string(),
+        subject: body.name.clone(),
+        detail: format!("from {}", body.from),
+    };
     state
         .store
-        .create_branch(&project, &body.name, &body.from)
-        .map_err(map_store_error)?;
-    state
-        .store
-        .append_audit(&AuditEntry {
-            id: 0,
-            project: project.clone(),
-            at: now_seconds(),
-            actor: "unknown".to_string(),
-            action: "branch.create".to_string(),
-            subject: body.name.clone(),
-            detail: format!("from {}", body.from),
-        })
+        .create_branch(&project, &body.name, &body.from, Some(&audit))
         .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
@@ -404,21 +463,18 @@ pub async fn delete_branch(
     Path((project, name)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     validate_name("branch name", &name)?;
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: "unknown".to_string(),
+        action: "branch.delete".to_string(),
+        subject: name.clone(),
+        detail: "branch deleted".to_string(),
+    };
     state
         .store
-        .delete_branch(&project, &name)
-        .map_err(map_store_error)?;
-    state
-        .store
-        .append_audit(&AuditEntry {
-            id: 0,
-            project: project.clone(),
-            at: now_seconds(),
-            actor: "unknown".to_string(),
-            action: "branch.delete".to_string(),
-            subject: name.clone(),
-            detail: "branch deleted".to_string(),
-        })
+        .delete_branch(&project, &name, Some(&audit))
         .map_err(map_store_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -447,19 +503,29 @@ pub async fn reset_branch(
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    if state
+    let tip_hash = state
         .store
         .branch_tip(&project, &name)
         .map_err(map_store_error)?
-        .is_none()
-    {
-        return Err(ApiError::not_found(format!("branch {}", name)));
-    }
+        .ok_or_else(|| ApiError::not_found(format!("branch {}", name)))?;
     let target = state
         .store
         .commit(&project, &body.to)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", body.to)))?;
+    // A reset is a write path like any other: it refuses to change an element another
+    // holder has locked. The touched set is the difference between the CURRENT tip model
+    // and the TARGET model. A reset has no holder field, so it can never be the holder,
+    // and any live lease on a changed element refuses it.
+    let tip_model = load_model(&state, &project, &tip_hash)?;
+    let target_model = load_model(&state, &project, &body.to)?;
+    let touched = touched_elements(&tip_model, &target_model);
+    let guard = CommitGuard {
+        holder: "",
+        elements: &touched,
+        now: now_seconds(),
+        expected_tip: Some(&tip_hash),
+    };
     // The target's model is already stored, so this reuses its blob rather than copying
     // the bytes: the restored content is byte-identical to the original by construction.
     let audit = AuditEntry {
@@ -471,17 +537,20 @@ pub async fn reset_branch(
         subject: name.clone(),
         detail: format!("reset to {}", body.to),
     };
-    let commit = state
-        .store
-        .commit_model(
+    let commit = commit_refusal_guard(
+        &state,
+        &project,
+        &name,
+        &body.author,
+        state.store.commit_model(
             &project,
             &name,
             &target.okf_hash,
             &body.author,
             &body.message,
-            None,
+            Some(guard),
             Some(&audit),
-        )
-        .map_err(map_store_error)?;
+        ),
+    )?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-use server::store::{commit_hash, sqlite::SqliteStore, Store, StoreError};
+use server::store::{commit_hash, sqlite::SqliteStore, AuditEntry, GateRun, Store, StoreError};
 
 fn store() -> (SqliteStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -31,7 +31,7 @@ fn a_commit_hash_ignores_time_but_not_content() {
 #[test]
 fn commits_land_on_a_branch_and_move_its_tip() {
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
+    store.create_project("coffee", None).unwrap();
     let first = store
         .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
         .unwrap();
@@ -65,8 +65,8 @@ fn commits_land_on_a_branch_and_move_its_tip() {
 #[test]
 fn duplicate_projects_and_branches_are_conflicts() {
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
-    match store.create_project("coffee") {
+    store.create_project("coffee", None).unwrap();
+    match store.create_project("coffee", None) {
         Err(StoreError::Conflict(_)) => {}
         other => panic!("expected a conflict, got {:?}", other),
     }
@@ -74,13 +74,13 @@ fn duplicate_projects_and_branches_are_conflicts() {
         .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
         .unwrap();
     store
-        .create_branch("coffee", "review", &commit.hash)
+        .create_branch("coffee", "review", &commit.hash, None)
         .unwrap();
-    match store.create_branch("coffee", "review", &commit.hash) {
+    match store.create_branch("coffee", "review", &commit.hash, None) {
         Err(StoreError::Conflict(_)) => {}
         other => panic!("expected a conflict, got {:?}", other),
     }
-    match store.create_branch("coffee", "other", "missing-commit") {
+    match store.create_branch("coffee", "other", "missing-commit", None) {
         Err(StoreError::NotFound(_)) => {}
         other => panic!("expected not found, got {:?}", other),
     }
@@ -94,7 +94,7 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
     // that catches it: by counting each commit's children and by walking the parents
     // from the tip back to the root.
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
+    store.create_project("coffee", None).unwrap();
     let store = std::sync::Arc::new(store);
 
     let mut handles = Vec::new();
@@ -171,12 +171,12 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
     // writing the merge would move the branch off that commit and orphan it: stored, but
     // unreachable from any branch. The store must refuse instead of losing it.
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
+    store.create_project("coffee", None).unwrap();
     let root = store
         .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
     store
-        .create_branch("coffee", "feature", &root.hash)
+        .create_branch("coffee", "feature", &root.hash, None)
         .unwrap();
     let their_side = store
         .commit_model(
@@ -211,6 +211,7 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
         "alex",
         "merge",
         None,
+        None,
     );
     match refused {
         Err(StoreError::Conflict(_)) => {}
@@ -239,7 +240,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
     use server::store::CommitGuard;
 
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
+    store.create_project("coffee", None).unwrap();
     let root = store
         .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
@@ -247,7 +248,15 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
 
     // Alex holds b1.
     store
-        .acquire_locks("coffee", "main", &["b1".to_string()], "alex", 600, 1000)
+        .acquire_locks(
+            "coffee",
+            "main",
+            &["b1".to_string()],
+            "alex",
+            600,
+            1000,
+            None,
+        )
         .unwrap();
 
     // Sam's commit touches b1: the store must refuse it, with nothing written.
@@ -296,7 +305,15 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
     // locked: a lock protects the elements it names, not the document around them.
     let elsewhere = vec!["b3".to_string()];
     store
-        .acquire_locks("coffee", "main", &["b2".to_string()], "alex", 600, 1000)
+        .acquire_locks(
+            "coffee",
+            "main",
+            &["b2".to_string()],
+            "alex",
+            600,
+            1000,
+            None,
+        )
         .unwrap();
     let tip_now = store.branch_tip("coffee", "main").unwrap();
     let unrelated = store.commit_model(
@@ -324,7 +341,7 @@ fn a_guard_computed_against_an_old_tip_is_refused() {
     use server::store::CommitGuard;
 
     let (store, _dir) = store();
-    store.create_project("coffee").unwrap();
+    store.create_project("coffee", None).unwrap();
     let root = store
         .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
         .unwrap();
@@ -363,5 +380,126 @@ fn a_guard_computed_against_an_old_tip_is_refused() {
         store.commits_on("coffee", "main").unwrap().len(),
         2,
         "nothing may be written"
+    );
+}
+
+#[test]
+fn audit_rows_ride_each_mutation_transaction() {
+    // Every mutation method takes an optional audit entry and writes it inside its OWN
+    // transaction. This drives the store directly so a mutation and its row are seen to
+    // land together, with no HTTP layer in between to append the row afterwards.
+    let (store, _dir) = store();
+    let entry = |action: &str| AuditEntry {
+        id: 0,
+        project: "coffee".to_string(),
+        at: 1,
+        actor: "alex".to_string(),
+        action: action.to_string(),
+        subject: "s".to_string(),
+        detail: "d".to_string(),
+    };
+
+    store
+        .create_project("coffee", Some(&entry("project.create")))
+        .unwrap();
+    let root = store
+        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .unwrap();
+    store
+        .create_branch(
+            "coffee",
+            "feature",
+            &root.hash,
+            Some(&entry("branch.create")),
+        )
+        .unwrap();
+    store
+        .acquire_locks(
+            "coffee",
+            "main",
+            &["b1".to_string()],
+            "alex",
+            600,
+            1000,
+            Some(&entry("lock.acquire")),
+        )
+        .unwrap();
+    let ids: Vec<String> = store
+        .locks("coffee", 1000)
+        .unwrap()
+        .into_iter()
+        .map(|l| l.id)
+        .collect();
+    store
+        .release_locks("coffee", "alex", &ids, Some(&entry("lock.release")))
+        .unwrap();
+    store
+        .record_gate_run(
+            &GateRun {
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                reference_hash: "r".to_string(),
+                candidate_hash: "c".to_string(),
+                passed: true,
+                evidence: "{}".to_string(),
+                created_at: "1".to_string(),
+            },
+            Some(&entry("gate.run")),
+        )
+        .unwrap();
+    store
+        .delete_branch("coffee", "feature", Some(&entry("branch.delete")))
+        .unwrap();
+
+    let actions: Vec<String> = store
+        .audit("coffee", 1000)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.action)
+        .collect();
+    for action in [
+        "project.create",
+        "branch.create",
+        "lock.acquire",
+        "lock.release",
+        "gate.run",
+        "branch.delete",
+    ] {
+        assert!(
+            actions.contains(&action.to_string()),
+            "missing audit action {}",
+            action
+        );
+    }
+}
+
+#[test]
+fn the_audit_table_refuses_update_and_delete() {
+    // Append-only is a DATABASE property now, not a trait convention: triggers make UPDATE
+    // and DELETE fail outright, so a written entry can never be rewritten or removed even by
+    // a caller with raw SQL access to the same file.
+    let (store, dir) = store();
+    store.create_project("coffee", None).unwrap();
+    store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: "coffee".to_string(),
+            at: 1,
+            actor: "a".to_string(),
+            action: "x".to_string(),
+            subject: "s".to_string(),
+            detail: "d".to_string(),
+        })
+        .unwrap();
+
+    let conn = rusqlite::Connection::open(dir.path().join("mw.db")).unwrap();
+    assert!(
+        conn.execute("UPDATE audit SET detail = 'rewritten' WHERE id = 1", [])
+            .is_err(),
+        "UPDATE on the audit table must be refused by the trigger"
+    );
+    assert!(
+        conn.execute("DELETE FROM audit WHERE id = 1", []).is_err(),
+        "DELETE on the audit table must be refused by the trigger"
     );
 }

@@ -42,26 +42,26 @@ pub async fn run_gate(
         evidence: outcome.evidence.to_string(),
         created_at: now_epoch(),
     };
-    state.store.record_gate_run(&run).map_err(map_store_error)?;
-
     // The audit entry records what was ATTEMPTED, so a FAILED gate is recorded too: the
     // verdict is part of the detail, and the log exists to show what happened, not only
-    // what succeeded.
+    // what succeeded. The entry rides the same transaction as the run row, so a recorded
+    // run always has its record and vice versa.
     let verdict = if outcome.passed { "passed" } else { "failed" };
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: "unknown".to_string(),
+        action: "gate.run".to_string(),
+        subject: body.candidate.clone(),
+        detail: format!(
+            "{}: candidate {} against reference {}",
+            verdict, body.candidate, body.reference
+        ),
+    };
     state
         .store
-        .append_audit(&AuditEntry {
-            id: 0,
-            project: project.clone(),
-            at: now_seconds(),
-            actor: "unknown".to_string(),
-            action: "gate.run".to_string(),
-            subject: body.candidate.clone(),
-            detail: format!(
-                "{}: candidate {} against reference {}",
-                verdict, body.candidate, body.reference
-            ),
-        })
+        .record_gate_run(&run, Some(&audit))
         .map_err(map_store_error)?;
 
     // The name carries both FULL hashes. Truncating them would keep determinism but lose

@@ -5,14 +5,29 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{map_store_error, validate_name, ApiState};
+use crate::api::{map_store_error, record_refusal, validate_element_name, validate_name, ApiState};
 use crate::error::ApiError;
-use crate::store::{now_epoch, AuditEntry, Lock};
+use crate::store::{now_epoch, AuditEntry, Lock, StoreError};
 
 /// The real clock in seconds, as the store requires it. The store itself never reads the
 /// clock: time is passed in so lock expiry is testable without sleeping.
 fn now_seconds() -> i64 {
     now_epoch().parse().unwrap_or(0)
+}
+
+/// A holder must be a real, bounded name. An empty holder could acquire a lease that blocks
+/// everyone — it can never be the holder on a later write — so it is rejected outright.
+/// 128 characters is ample for a username or an agent id.
+fn validate_holder(holder: &str) -> Result<(), ApiError> {
+    if holder.is_empty() {
+        return Err(ApiError::bad_request("holder must not be empty"));
+    }
+    if holder.chars().count() > 128 {
+        return Err(ApiError::bad_request(
+            "holder must be 128 characters or fewer",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -30,11 +45,12 @@ pub async fn acquire_locks(
     Json(body): Json<AcquireLocks>,
 ) -> Result<(StatusCode, Json<Vec<Lock>>), ApiError> {
     validate_name("branch name", &body.branch)?;
+    validate_holder(&body.holder)?;
     if body.elements.is_empty() {
         return Err(ApiError::bad_request("at least one element is required"));
     }
     for element in &body.elements {
-        validate_name("element name", element)?;
+        validate_element_name(element)?;
     }
     // A repeated element would acquire one lease but be reported twice, which reads as two
     // leases for one element. Deduplicate before anything is written.
@@ -60,35 +76,47 @@ pub async fn acquire_locks(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
 
-    let locks = state
-        .store
-        .acquire_locks(
-            &project,
-            &body.branch,
-            &elements,
-            &body.holder,
-            body.ttl_seconds,
-            now_seconds(),
-        )
-        .map_err(map_store_error)?;
-    let expiry = locks.first().map(|l| l.expires_at).unwrap_or(0);
-    state
-        .store
-        .append_audit(&AuditEntry {
-            id: 0,
-            project: project.clone(),
-            at: now_seconds(),
-            actor: body.holder.clone(),
-            action: "lock.acquire".to_string(),
-            subject: elements.join(","),
-            detail: format!(
-                "{} element(s) by {} until {}",
-                locks.len(),
-                body.holder,
-                expiry
-            ),
-        })
-        .map_err(map_store_error)?;
+    let now = now_seconds();
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now,
+        actor: body.holder.clone(),
+        action: "lock.acquire".to_string(),
+        subject: elements.join(","),
+        detail: format!(
+            "{} element(s) by {} until {}",
+            elements.len(),
+            body.holder,
+            now + body.ttl_seconds
+        ),
+    };
+    let locks = match state.store.acquire_locks(
+        &project,
+        &body.branch,
+        &elements,
+        &body.holder,
+        body.ttl_seconds,
+        now,
+        Some(&audit),
+    ) {
+        Ok(locks) => locks,
+        Err(error) => {
+            // A refused acquire is a refusal worth recording: another holder's lease denied
+            // this one. Nothing was written, so the entry appends on its own.
+            if let StoreError::Conflict(message) = &error {
+                record_refusal(
+                    state.store.as_ref(),
+                    &project,
+                    &body.holder,
+                    "lock.denied",
+                    &elements.join(","),
+                    message,
+                )?;
+            }
+            return Err(map_store_error(error));
+        }
+    };
     Ok((StatusCode::CREATED, Json(locks)))
 }
 
@@ -130,25 +158,20 @@ pub async fn release_locks(
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
+    // A release that removes nothing is not a mutation (a foreign holder, or already
+    // released ids), so the store writes the audit row only when it actually removed one.
+    let audit = AuditEntry {
+        id: 0,
+        project: project.clone(),
+        at: now_seconds(),
+        actor: body.holder.clone(),
+        action: "lock.release".to_string(),
+        subject: body.ids.join(","),
+        detail: "released lock(s)".to_string(),
+    };
     let released = state
         .store
-        .release_locks(&project, &body.holder, &body.ids)
+        .release_locks(&project, &body.holder, &body.ids, Some(&audit))
         .map_err(map_store_error)?;
-    // A release that removes nothing is not a mutation (a foreign holder, or already
-    // released ids), so it writes no audit entry.
-    if released > 0 {
-        state
-            .store
-            .append_audit(&AuditEntry {
-                id: 0,
-                project: project.clone(),
-                at: now_seconds(),
-                actor: body.holder.clone(),
-                action: "lock.release".to_string(),
-                subject: body.ids.join(","),
-                detail: format!("released {} lock(s)", released),
-            })
-            .map_err(map_store_error)?;
-    }
     Ok(Json(json!({ "released": released })))
 }

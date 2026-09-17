@@ -5,10 +5,13 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{commit_json, load_model, map_store_error, validate_name, ApiState};
+use crate::api::{
+    commit_json, commit_refusal_guard, load_model, map_store_error, touched_elements,
+    validate_name, ApiState,
+};
 use crate::error::ApiError;
 use crate::merge::merge;
-use crate::store::{now_seconds, AuditEntry};
+use crate::store::{now_seconds, AuditEntry, CommitGuard};
 
 #[derive(Deserialize)]
 pub struct MergeRequest {
@@ -186,6 +189,18 @@ pub async fn merge_branches(
         ApiError::internal("the merged model could not be stored")
     })?;
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
+    // A merge is a write path like any other: it refuses to change an element another
+    // holder has locked. The touched set is the difference between OUR tip model and the
+    // MERGED model. A merge has no holder field, so it can never be the holder, and any
+    // live lease on a changed element refuses it.
+    let touched = touched_elements(&ours, &merged);
+    let parents = vec![ours_tip, theirs_tip];
+    let guard = CommitGuard {
+        holder: "",
+        elements: &touched,
+        now: now_seconds(),
+        expected_tip: Some(&parents[0]),
+    };
     let audit = AuditEntry {
         id: 0,
         project: project.clone(),
@@ -195,18 +210,22 @@ pub async fn merge_branches(
         subject: body.branch.clone(),
         detail: format!("merged {} into {}", body.other, body.branch),
     };
-    let commit = state
-        .store
-        .commit_merge(
+    let commit = commit_refusal_guard(
+        &state,
+        &project,
+        &body.branch,
+        &body.author,
+        state.store.commit_merge(
             &project,
             &body.branch,
-            &[ours_tip, theirs_tip],
+            &parents,
             &okf_hash,
             &body.author,
             &body.message,
+            Some(guard),
             Some(&audit),
-        )
-        .map_err(map_store_error)?;
+        ),
+    )?;
 
     Ok((
         StatusCode::CREATED,

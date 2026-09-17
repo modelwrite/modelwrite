@@ -140,8 +140,12 @@ pub fn now_seconds() -> i64 {
     now_epoch().parse().unwrap_or(0)
 }
 
-/// What a guarded commit must not change. The holder is the one asking; any element in
-/// `elements` held by a DIFFERENT holder with a live lease refuses the commit.
+/// What a guarded commit must not change. Any element in `elements` held by a DIFFERENT
+/// holder with a live lease refuses the commit. The holder is the one asking; an empty
+/// holder is a request that supplied none, so it can never be the holder and any live
+/// lease on a touched element refuses it. Locks are therefore enforced by default: every
+/// write path passes a guard, and a writer that omits the holder is refused, not let
+/// through.
 ///
 /// `expected_tip` is the branch tip the caller computed `elements` against. The guard is
 /// only meaningful for that tip: if the branch moved since, the touched set describes a
@@ -160,8 +164,28 @@ pub struct CommitGuard<'a> {
     pub expected_tip: Option<&'a str>,
 }
 
+/// The refusal every guarded write path produces when it would change a locked element.
+/// It names the element, the holder and the lease expiry, and tells a caller who IS the
+/// holder to supply the holder field: a request without a holder cannot be the holder, so
+/// a live lease on a touched element refuses it too.
+pub fn lock_refusal(element: &str, holder: &str, expires_at: i64) -> String {
+    format!(
+        "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
+        element, holder, expires_at
+    )
+}
+
+/// True when a store conflict is the lock refusal above. The branch-moved conflict is a
+/// stale-tip refusal, not a lock refusal, and must not be recorded as `commit.refused`.
+pub fn is_lock_refusal(error: &StoreError) -> bool {
+    matches!(error, StoreError::Conflict(message) if message.contains("is locked by"))
+}
+
 pub trait Store: Send + Sync {
-    fn create_project(&self, name: &str) -> Result<Project, StoreError>;
+    /// Create a project and, when `audit` is supplied, write its audit row inside the
+    /// same transaction, so a durable project always has a record and vice versa.
+    fn create_project(&self, name: &str, audit: Option<&AuditEntry>)
+        -> Result<Project, StoreError>;
     fn project(&self, name: &str) -> Result<Option<Project>, StoreError>;
     fn list_projects(&self) -> Result<Vec<Project>, StoreError>;
     fn put_blob(&self, bytes: &[u8]) -> Result<String, StoreError>;
@@ -192,6 +216,9 @@ pub trait Store: Send + Sync {
 
     /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
     /// A merge commit has two parents, so the parent list cannot be derived from the tip.
+    /// The optional guard is checked inside that transaction, exactly as `commit_model`
+    /// does: a merge that would change a locked element is refused rather than overwriting
+    /// the holder's work.
     #[allow(clippy::too_many_arguments)]
     fn commit_merge(
         &self,
@@ -201,26 +228,40 @@ pub trait Store: Send + Sync {
         okf_hash: &str,
         author: &str,
         message: &str,
+        guard: Option<CommitGuard<'_>>,
         audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError>;
 
     fn commit(&self, project: &str, hash: &str) -> Result<Option<Commit>, StoreError>;
     fn commits_on(&self, project: &str, branch: &str) -> Result<Vec<Commit>, StoreError>;
     fn branch_tip(&self, project: &str, branch: &str) -> Result<Option<String>, StoreError>;
-    fn create_branch(&self, project: &str, name: &str, from: &str) -> Result<(), StoreError>;
+    fn create_branch(
+        &self,
+        project: &str,
+        name: &str,
+        from: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError>;
 
     /// Remove a branch pointer. This never deletes commits: the objects a branch pointed
     /// at stay in the store, so a deleted branch can be recreated at the same hash and no
-    /// history is ever lost.
-    fn delete_branch(&self, project: &str, name: &str) -> Result<(), StoreError>;
+    /// history is ever lost. The audit row, when supplied, is written in the same
+    /// transaction as the deletion.
+    fn delete_branch(
+        &self,
+        project: &str,
+        name: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError>;
     fn list_branches(&self, project: &str) -> Result<Vec<(String, String)>, StoreError>;
-    fn record_gate_run(&self, run: &GateRun) -> Result<(), StoreError>;
+    fn record_gate_run(&self, run: &GateRun, audit: Option<&AuditEntry>) -> Result<(), StoreError>;
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError>;
 
     /// Acquire a lease on each of `elements`, all or nothing. If any element is held by a
     /// live lease owned by a DIFFERENT holder, nothing is acquired and a Conflict is
     /// returned naming the holder and the expiry. Re-acquiring an element the same holder
     /// already holds extends the lease rather than failing.
+    #[allow(clippy::too_many_arguments)]
     fn acquire_locks(
         &self,
         project: &str,
@@ -229,15 +270,19 @@ pub trait Store: Send + Sync {
         holder: &str,
         ttl_seconds: i64,
         now: i64,
+        audit: Option<&AuditEntry>,
     ) -> Result<Vec<Lock>, StoreError>;
 
     /// Release locks by id; only the listed holder may release them. Returns how many
-    /// rows were actually removed.
+    /// rows were actually removed. The audit row, when supplied, is written inside the
+    /// same transaction, and only when at least one row was actually removed: a no-op
+    /// release is not a mutation and writes no entry.
     fn release_locks(
         &self,
         project: &str,
         holder: &str,
         ids: &[String],
+        audit: Option<&AuditEntry>,
     ) -> Result<usize, StoreError>;
 
     /// Live locks on a project: expired rows are reported as gone.

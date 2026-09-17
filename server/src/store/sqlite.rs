@@ -62,6 +62,19 @@ CREATE TABLE IF NOT EXISTS audit (
     subject TEXT NOT NULL,
     detail TEXT NOT NULL
 );
+-- Append-only is a property of the DATABASE, not a convention of the trait: these
+-- triggers make UPDATE and DELETE on the audit table fail outright, so a written entry
+-- can never be rewritten or removed by any code path that reaches SQLite.
+CREATE TRIGGER IF NOT EXISTS audit_no_update
+BEFORE UPDATE ON audit
+BEGIN
+    SELECT RAISE(ABORT, 'audit entries are append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete
+BEFORE DELETE ON audit
+BEGIN
+    SELECT RAISE(ABORT, 'audit entries are append-only');
+END;
 ";
 
 pub struct SqliteStore {
@@ -109,8 +122,8 @@ fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
 
 /// Insert one audit row and return its AUTOINCREMENT id. The caller's `id` field is
 /// ignored: the store assigns ids, and no update or delete path ever reuses or rewrites one.
-/// Shared by `append_audit` and by the commit/merge transactions that must write the audit
-/// row atomically with the mutation it describes.
+/// Shared by `append_audit` and by the transactions that must write the audit row
+/// atomically with the mutation it describes.
 fn insert_audit(c: &Connection, entry: &AuditEntry) -> rusqlite::Result<i64> {
     c.execute(
         "INSERT INTO audit (project, at, actor, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -119,24 +132,87 @@ fn insert_audit(c: &Connection, entry: &AuditEntry) -> rusqlite::Result<i64> {
     Ok(c.last_insert_rowid())
 }
 
-impl Store for SqliteStore {
-    fn create_project(&self, name: &str) -> Result<Project, StoreError> {
-        // Check-then-insert would be a time-of-check window: two concurrent callers could
-        // both pass the check. The primary key settles it instead, and an insert that
-        // changed nothing is reported as the conflict it is.
-        let created_at = now_epoch();
-        let inserted = self.with(|c| {
-            c.execute(
-                "INSERT OR IGNORE INTO projects (name, created_at) VALUES (?1, ?2)",
-                params![name, created_at],
-            )
-        })?;
-        if inserted == 0 {
-            return Err(StoreError::Conflict(format!(
-                "project {} already exists",
-                name
+/// Run a closure inside ONE write transaction, committing only when it succeeds. On
+/// failure the transaction is dropped, which rolls back every statement the closure ran.
+/// This is what makes a mutation and its audit row land together or not at all.
+fn with_tx<T>(
+    connection: &std::sync::Mutex<Connection>,
+    f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, StoreError>,
+) -> Result<T, StoreError> {
+    let guard = connection
+        .lock()
+        .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+    let tx = guard
+        .unchecked_transaction()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    let result = f(&tx);
+    if result.is_ok() {
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    result
+}
+
+/// Refuse a guarded write when any element carries a live lease owned by a different
+/// holder. Every write path — commit, merge and reset — funnels through this one rule, so
+/// a lock protects an element from being changed no matter which path is used. An empty
+/// holder cannot own a lease, so any live lease on a touched element refuses it: a request
+/// without a holder is checked, not exempted.
+fn enforce_guard(
+    tx: &rusqlite::Transaction<'_>,
+    project: &str,
+    guard: &CommitGuard<'_>,
+) -> Result<(), StoreError> {
+    for element in guard.elements {
+        let held: Option<(String, i64)> = (|| -> rusqlite::Result<Option<(String, i64)>> {
+            let mut stmt = tx.prepare(
+                "SELECT holder, expires_at FROM locks WHERE project = ?1 AND element = ?2 AND expires_at > ?3 AND holder != ?4 LIMIT 1",
+            )?;
+            let mut rows = stmt.query(params![project, element, guard.now, guard.holder])?;
+            match rows.next()? {
+                Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+                None => Ok(None),
+            }
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if let Some((holder, expires_at)) = held {
+            return Err(StoreError::Conflict(super::lock_refusal(
+                element, &holder, expires_at,
             )));
         }
+    }
+    Ok(())
+}
+
+impl Store for SqliteStore {
+    fn create_project(
+        &self,
+        name: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<Project, StoreError> {
+        // Check-then-insert would be a time-of-check window: two concurrent callers could
+        // both pass the check. The primary key settles it instead, and an insert that
+        // changed nothing is reported as the conflict it is. The audit row, when supplied,
+        // rides the same transaction, so a project and its record land together.
+        let created_at = now_epoch();
+        with_tx(&self.connection, |tx| {
+            let inserted = tx
+                .execute(
+                    "INSERT OR IGNORE INTO projects (name, created_at) VALUES (?1, ?2)",
+                    params![name, created_at],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if inserted == 0 {
+                return Err(StoreError::Conflict(format!(
+                    "project {} already exists",
+                    name
+                )));
+            }
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })?;
         Ok(Project {
             name: name.to_string(),
             created_at,
@@ -215,26 +291,7 @@ impl Store for SqliteStore {
         // check performed by the caller before this call would leave a window in which
         // another holder takes the lock and the guarded commit lands regardless.
         if let Some(guard) = guard.as_ref() {
-            for element in guard.elements {
-                let held: Option<(String, i64)> = (|| -> rusqlite::Result<Option<(String, i64)>> {
-                    let mut stmt = tx.prepare(
-                        "SELECT holder, expires_at FROM locks WHERE project = ?1 AND element = ?2 AND expires_at > ?3 AND holder != ?4 LIMIT 1",
-                    )?;
-                    let mut rows =
-                        stmt.query(params![project, element, guard.now, guard.holder])?;
-                    match rows.next()? {
-                        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
-                        None => Ok(None),
-                    }
-                })()
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-                if let Some((holder, expires_at)) = held {
-                    return Err(StoreError::Conflict(format!(
-                        "{} is locked by {} until {}",
-                        element, holder, expires_at
-                    )));
-                }
-            }
+            enforce_guard(&tx, project, guard)?;
         }
 
         // The tip is read inside the same lock and transaction that writes the commit, so
@@ -306,6 +363,7 @@ impl Store for SqliteStore {
         okf_hash: &str,
         author: &str,
         message: &str,
+        guard: Option<CommitGuard<'_>>,
         audit: Option<&AuditEntry>,
     ) -> Result<Commit, StoreError> {
         // A merge commit has exactly two parents. Anything else is a caller mistake, and it
@@ -317,11 +375,11 @@ impl Store for SqliteStore {
                 parents.len()
             )));
         }
-        let guard = self
+        let connection = self
             .connection
             .lock()
             .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
-        let tx = guard
+        let tx = connection
             .unchecked_transaction()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -347,6 +405,12 @@ impl Store for SqliteStore {
                 parents[0],
                 current_tip.as_deref().unwrap_or("nothing")
             )));
+        }
+
+        // The merge's guard runs inside the transaction that writes it, so a lock taken
+        // between the caller's read and this write cannot be bypassed.
+        if let Some(guard) = guard.as_ref() {
+            enforce_guard(&tx, project, guard)?;
         }
 
         // Every parent must already exist: a merge commit can only cite ancestry that is
@@ -491,42 +555,64 @@ impl Store for SqliteStore {
         })
     }
 
-    fn create_branch(&self, project: &str, name: &str, from: &str) -> Result<(), StoreError> {
+    fn create_branch(
+        &self,
+        project: &str,
+        name: &str,
+        from: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError> {
         if self.commit(project, from)?.is_none() {
             return Err(StoreError::NotFound(format!("commit {}", from)));
         }
-        // The composite primary key decides a duplicate branch, not a prior read.
-        let inserted = self.with(|c| {
-            c.execute(
-                "INSERT OR IGNORE INTO branches (project, name, tip) VALUES (?1, ?2, ?3)",
-                params![project, name, from],
-            )
-        })?;
-        if inserted == 0 {
-            return Err(StoreError::Conflict(format!(
-                "branch {} already exists",
-                name
-            )));
-        }
-        Ok(())
+        // The composite primary key decides a duplicate branch, not a prior read. The
+        // audit row rides the same transaction as the branch insert.
+        with_tx(&self.connection, |tx| {
+            let inserted = tx
+                .execute(
+                    "INSERT OR IGNORE INTO branches (project, name, tip) VALUES (?1, ?2, ?3)",
+                    params![project, name, from],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if inserted == 0 {
+                return Err(StoreError::Conflict(format!(
+                    "branch {} already exists",
+                    name
+                )));
+            }
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })
     }
 
-    fn delete_branch(&self, project: &str, name: &str) -> Result<(), StoreError> {
+    fn delete_branch(
+        &self,
+        project: &str,
+        name: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError> {
         // Ask which thing is missing, so the 404 says so: a delete on an unknown project
         // would otherwise report a branch that was never the problem.
         if self.project(project)?.is_none() {
             return Err(StoreError::NotFound(format!("project {}", project)));
         }
-        let removed = self.with(|c| {
-            c.execute(
-                "DELETE FROM branches WHERE project = ?1 AND name = ?2",
-                params![project, name],
-            )
-        })?;
-        if removed == 0 {
-            return Err(StoreError::NotFound(format!("branch {}", name)));
-        }
-        Ok(())
+        with_tx(&self.connection, |tx| {
+            let removed = tx
+                .execute(
+                    "DELETE FROM branches WHERE project = ?1 AND name = ?2",
+                    params![project, name],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if removed == 0 {
+                return Err(StoreError::NotFound(format!("branch {}", name)));
+            }
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })
     }
 
     fn list_branches(&self, project: &str) -> Result<Vec<(String, String)>, StoreError> {
@@ -538,14 +624,18 @@ impl Store for SqliteStore {
         })
     }
 
-    fn record_gate_run(&self, run: &GateRun) -> Result<(), StoreError> {
-        self.with(|c| {
-            c.execute(
+    fn record_gate_run(&self, run: &GateRun, audit: Option<&AuditEntry>) -> Result<(), StoreError> {
+        with_tx(&self.connection, |tx| {
+            tx.execute(
                 "INSERT INTO gate_runs (project, branch, reference_hash, candidate_hash, passed, evidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![run.project, run.branch, run.reference_hash, run.candidate_hash, run.passed as i64, run.evidence, run.created_at],
             )
-        })?;
-        Ok(())
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })
     }
 
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError> {
@@ -593,6 +683,7 @@ impl Store for SqliteStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn acquire_locks(
         &self,
         project: &str,
@@ -601,6 +692,7 @@ impl Store for SqliteStore {
         holder: &str,
         ttl_seconds: i64,
         now: i64,
+        audit: Option<&AuditEntry>,
     ) -> Result<Vec<Lock>, StoreError> {
         let guard = self
             .connection
@@ -686,6 +778,9 @@ impl Store for SqliteStore {
             });
         }
 
+        if let Some(audit) = audit {
+            insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
         tx.commit()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -697,6 +792,7 @@ impl Store for SqliteStore {
         project: &str,
         holder: &str,
         ids: &[String],
+        audit: Option<&AuditEntry>,
     ) -> Result<usize, StoreError> {
         let guard = self
             .connection
@@ -716,6 +812,14 @@ impl Store for SqliteStore {
                     params![project, holder, id],
                 )
                 .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+
+        // A release that removes nothing is not a mutation and writes no audit entry. The
+        // entry, when written, rides this transaction so it cannot outlive its rows.
+        if released > 0 {
+            if let Some(audit) = audit {
+                insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
         }
 
         tx.commit()
