@@ -162,3 +162,20 @@ fn graph_stats_tool_errors_on_a_graph_less_document() {
         .unwrap()
         .contains("no graph section"));
 }
+#[test]
+fn graph_stats_tool_errors_when_the_graph_key_is_absent() {
+    // An absent key and an explicit null must behave identically: serde deserialises a
+    // missing Option field to None, so both reach the guard rather than a panic.
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": { "name": "graph.stats", "arguments": { "okf": "{\"project\":\"x\",\"summary\":{},\"stateMachine\":{\"name\":\"sm\",\"regions\":[]}}" } }
+    }));
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected transport error: {}",
+        resp
+    );
+    assert_eq!(resp["result"]["isError"], true);
+}

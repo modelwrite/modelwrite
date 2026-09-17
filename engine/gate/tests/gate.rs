@@ -125,5 +125,8 @@ fn evidence_is_identical_across_runs() {
 
     let reparsed = expected();
     let third = gate::run(&reparsed, &reparsed, false);
-    assert_eq!(first.evidence, third.evidence);
+    assert_eq!(
+        serde_json::to_string(&first.evidence).unwrap(),
+        serde_json::to_string(&third.evidence).unwrap()
+    );
 }
