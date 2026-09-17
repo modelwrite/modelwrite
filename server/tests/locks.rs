@@ -272,3 +272,54 @@ async fn only_the_holder_can_release() {
     assert_eq!(locks.len(), 1);
     assert_eq!(locks[0]["holder"], "alex");
 }
+#[tokio::test]
+async fn locks_can_be_released_with_delete_or_post() {
+    // The interface promises both: DELETE is the HTTP verb for removing a claim, and POST
+    // exists because a request body on DELETE is unusual. Both must be wired and both must
+    // release exactly the same way.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    // DELETE with a body.
+    let acquired = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({ "branch": "main", "elements": ["b1", "b1"], "holder": "alex", "ttlSeconds": 600 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(acquired.status(), StatusCode::CREATED);
+    let locks = json_body(acquired).await;
+    assert_eq!(
+        locks.as_array().unwrap().len(),
+        1,
+        "a repeated element is one lease, not two"
+    );
+    let id = locks[0]["id"].as_str().unwrap().to_string();
+
+    let released = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/projects/coffee/locks")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "holder": "alex", "ids": [id] }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(released.status(), StatusCode::OK);
+    assert_eq!(json_body(released).await["released"], 1);
+
+    let listed = router.oneshot(get("/projects/coffee/locks")).await.unwrap();
+    assert!(json_body(listed).await.as_array().unwrap().is_empty());
+}

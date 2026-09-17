@@ -64,7 +64,9 @@ pub fn app(state: AppState) -> Router {
         )
         .route(
             "/projects/:project/locks",
-            post(locks_api::acquire_locks).get(locks_api::list_locks),
+            post(locks_api::acquire_locks)
+                .get(locks_api::list_locks)
+                .delete(locks_api::release_locks),
         )
         .route(
             "/projects/:project/locks/release",

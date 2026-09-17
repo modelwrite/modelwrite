@@ -122,19 +122,50 @@ Expected: 47 service tests pass (42 plus the five lock tests).
 
 - [ ] **Step 1: Compute the touched element ids.** Add a helper in api.rs:
 
+The engine's real contract, which this helper must match: `okf::diff::diff(reference, candidate)`
+returns a `DiffReport` with `equal`, `missing_elements`, `extra_elements`, `missing_edges`,
+`extra_edges` and `changed_attributes`. The three ELEMENT fields hold section-scoped keys of
+the form `<section>:<id>` (for example `structure:b1`, `graphnode:b1`, `state:s1`, `doc:project`,
+`activity:0`). The two EDGE fields hold canonical JSON arrays `["source","target","kind","label"]`,
+not section-scoped keys. There is no `changes` field and no per-change `key`.
+
 ```rust
-/// The elements a commit changes: everything the diff reports for any section, plus the
+/// The elements a commit changes: every diff entry that names an element, plus the
 /// endpoints of changed edges. A lock protects an element from being CHANGED, so an
 /// untouched element elsewhere in the document does not block the commit.
 fn touched_elements(reference: &okf::types::OkfRoot, candidate: &okf::types::OkfRoot) -> Vec<String> {
     let report = okf::diff::diff(reference, candidate);
     let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for change in report.changes {
-        // The engine already keys changes as "<section>:<id>"; the id is what a lock names.
-        if let Some((_, id)) = change.key.split_once(':') {
-            ids.insert(id.trim_matches('"').to_string());
+
+    // Element entries are keyed "<section>:<id>". Two kinds of key are skipped on purpose:
+    // "doc:" keys name document fields rather than elements, and the activity keys are list
+    // indices rather than ids, so neither could be the subject of a lock.
+    for key in report
+        .missing_elements
+        .iter()
+        .chain(report.extra_elements.iter())
+        .chain(report.changed_attributes.iter())
+    {
+        if let Some((section, id)) = key.split_once(':') {
+            if section != "doc" && section != "activity" {
+                ids.insert(id.to_string());
+            }
         }
     }
+
+    // An edge is a JSON array of source, target, kind and label, so changing one touches
+    // both of its endpoints.
+    for key in report.missing_edges.iter().chain(report.extra_edges.iter()) {
+        if let Ok(parts) = serde_json::from_str::<Vec<String>>(key) {
+            if let Some(source) = parts.first() {
+                ids.insert(source.clone());
+            }
+            if let Some(target) = parts.get(1) {
+                ids.insert(target.clone());
+            }
+        }
+    }
+
     ids.into_iter().collect()
 }
 ```

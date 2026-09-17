@@ -36,6 +36,16 @@ pub async fn acquire_locks(
     for element in &body.elements {
         validate_name("element name", element)?;
     }
+    // A repeated element would acquire one lease but be reported twice, which reads as two
+    // leases for one element. Deduplicate before anything is written.
+    let elements: Vec<String> = {
+        let mut seen = std::collections::BTreeSet::new();
+        body.elements
+            .iter()
+            .filter(|e| seen.insert((*e).clone()))
+            .cloned()
+            .collect()
+    };
     if !(30..=86400).contains(&body.ttl_seconds) {
         return Err(ApiError::bad_request(
             "ttlSeconds must be between 30 and 86400",
@@ -55,7 +65,7 @@ pub async fn acquire_locks(
         .acquire_locks(
             &project,
             &body.branch,
-            &body.elements,
+            &elements,
             &body.holder,
             body.ttl_seconds,
             now_seconds(),
