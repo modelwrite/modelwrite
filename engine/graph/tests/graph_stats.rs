@@ -62,3 +62,18 @@ fn coverage_counts_traceability() {
     assert_eq!(cov.covered, 1);
     assert_eq!(cov.uncovered, vec!["r2"]);
 }
+
+/// The reference model carries 20 Satisfy, 3 Refine, 1 Verify and 3 Allocate edges,
+/// and 15 of its 25 requirements are covered by at least one of them. Pinning the
+/// coverage keeps this measured claim honest: it is the number the gate reports.
+#[test]
+fn corpus_coverage_is_pinned() {
+    let cov = requirement_coverage(&expected());
+    assert_eq!(cov.total, 25);
+    assert_eq!(cov.satisfied, 20);
+    assert_eq!(cov.refined, 3);
+    assert_eq!(cov.verified, 1);
+    assert_eq!(cov.allocated, 0);
+    assert_eq!(cov.covered, 15);
+    assert_eq!(cov.uncovered.len(), 10);
+}

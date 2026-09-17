@@ -104,8 +104,15 @@ pub fn requirement_coverage(root: &OkfRoot) -> CoverageReport {
             }
             "Allocate" if req_ids.contains(t) || req_ids.contains(s) => {
                 allocated += 1;
-                covered.insert(t);
-                covered.insert(s);
+                // Count only endpoints that really are requirements. An allocate edge
+                // can connect a function to a part, and inserting a non-requirement id
+                // here would inflate the covered count reported in the gate evidence.
+                if req_ids.contains(t) {
+                    covered.insert(t);
+                }
+                if req_ids.contains(s) {
+                    covered.insert(s);
+                }
             }
             _ => {}
         }
