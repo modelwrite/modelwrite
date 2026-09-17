@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::api::{map_store_error, record_refusal, validate_element_name, validate_name, ApiState};
 use crate::error::ApiError;
-use crate::store::{now_epoch, AuditEntry, Lock, StoreError};
+use crate::store::{now_epoch, AuditEntry, Lock};
 
 /// The real clock in seconds, as the store requires it. The store itself never reads the
 /// clock: time is passed in so lock expiry is testable without sleeping.
@@ -104,14 +104,14 @@ pub async fn acquire_locks(
         Err(error) => {
             // A refused acquire is a refusal worth recording: another holder's lease denied
             // this one. Nothing was written, so the entry appends on its own.
-            if let StoreError::Conflict(message) = &error {
+            if crate::store::is_lock_refusal(&error) {
                 record_refusal(
                     state.store.as_ref(),
                     &project,
                     &body.holder,
                     "lock.denied",
                     &elements.join(","),
-                    message,
+                    &error.to_string(),
                 )?;
             }
             return Err(map_store_error(error));

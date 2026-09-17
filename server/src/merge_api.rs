@@ -19,6 +19,10 @@ pub struct MergeRequest {
     pub other: String,
     pub author: String,
     pub message: String,
+    /// Who is merging. Supplying it lets a caller proceed on elements it holds a lease on;
+    /// omitting it means the caller cannot be the holder, so any live lease on a changed
+    /// element refuses the merge rather than overwriting somebody else's work.
+    pub holder: Option<String>,
 }
 
 /// Every commit reachable from a tip, as a set. The walk stops at a commit already seen, so
@@ -191,12 +195,11 @@ pub async fn merge_branches(
     let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
     // A merge is a write path like any other: it refuses to change an element another
     // holder has locked. The touched set is the difference between OUR tip model and the
-    // MERGED model. A merge has no holder field, so it can never be the holder, and any
-    // live lease on a changed element refuses it.
+    // MERGED model. A caller that holds the leases passes its holder and proceeds.
     let touched = touched_elements(&ours, &merged);
     let parents = vec![ours_tip, theirs_tip];
     let guard = CommitGuard {
-        holder: "",
+        holder: body.holder.as_deref().unwrap_or(""),
         elements: &touched,
         now: now_seconds(),
         expected_tip: Some(&parents[0]),

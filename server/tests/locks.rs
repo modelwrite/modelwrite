@@ -227,8 +227,10 @@ fn an_expired_lease_stops_blocking() {
 
     // Still inside the lease: a second holder is refused.
     match store.acquire_locks("coffee", "main", &["b1".to_string()], "bob", 30, 1000, None) {
-        Err(StoreError::Conflict(_)) => {}
-        other => panic!("expected a conflict at now=1000, got {:?}", other),
+        Err(StoreError::Locked { holder, .. }) => {
+            assert_eq!(holder, "alex", "the refusal must name the holder");
+        }
+        other => panic!("expected a lock refusal at now=1000, got {:?}", other),
     }
 
     // Past the lease (1030): the lease is dead and the second holder succeeds.
@@ -849,4 +851,103 @@ async fn locks_validate_the_holder_and_allow_okf_element_ids() {
         .await
         .unwrap();
     assert_eq!(control.status(), StatusCode::BAD_REQUEST);
+}
+#[tokio::test]
+async fn the_holder_may_finish_its_own_work_through_merge_and_reset() {
+    // Enforcing locks on every write path is only useful if the person holding the lock can
+    // still do their job. A holder must be able to commit, merge and revert the elements it
+    // holds; everyone else must be refused. This test drives both halves.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    seed_project(&router).await;
+
+    let base = model_with_nodes(&["b1"]);
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "base", "okf": base, "holder": "alex" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    let base_hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Alex takes the element and works on a branch.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({ "branch": "main", "elements": ["b1"], "holder": "alex", "ttlSeconds": 600 }),
+        ))
+        .await
+        .unwrap();
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": base_hash }),
+        ))
+        .await
+        .unwrap();
+
+    // model_with_nodes builds a graph-only document, so the change is to the graph node.
+    let mut changed = model_with_nodes(&["b1"]);
+    changed["graph"]["nodes"][0]["name"] = serde_json::json!("Renamed");
+    let on_feature = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "feature", "author": "alex", "message": "rename", "okf": changed, "holder": "alex" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        on_feature.status(),
+        StatusCode::CREATED,
+        "the holder may change what it holds"
+    );
+
+    // Sam tries to merge that in and is refused: alex holds b1.
+    let refused = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/merge",
+            serde_json::json!({ "branch": "main", "other": "feature", "author": "sam", "message": "merge", "holder": "sam" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+
+    // Alex merges its own work and succeeds.
+    let merged = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/merge",
+            serde_json::json!({ "branch": "main", "other": "feature", "author": "alex", "message": "merge", "holder": "alex" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        merged.status(),
+        StatusCode::CREATED,
+        "the holder may merge what it holds"
+    );
+
+    // And alex may revert its own branch back, again because it holds the element.
+    let reverted = router
+        .oneshot(post(
+            "/projects/coffee/branches/main/reset",
+            serde_json::json!({ "to": base_hash, "author": "alex", "message": "revert", "holder": "alex" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        reverted.status(),
+        StatusCode::CREATED,
+        "the holder may revert what it holds"
+    );
 }

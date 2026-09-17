@@ -176,9 +176,7 @@ fn enforce_guard(
         })()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
         if let Some((holder, expires_at)) = held {
-            return Err(StoreError::Conflict(super::lock_refusal(
-                element, &holder, expires_at,
-            )));
+            return Err(super::lock_refusal(element, &holder, expires_at));
         }
     }
     Ok(())
@@ -723,10 +721,7 @@ impl Store for SqliteStore {
                 .map_err(|e| StoreError::Backend(e.to_string()))?;
 
             if let Some((other, expires_at)) = conflict {
-                return Err(StoreError::Conflict(format!(
-                    "element {} is held by {} (expires at {})",
-                    element, other, expires_at
-                )));
+                return Err(super::lock_refusal(element, &other, expires_at));
             }
         }
 

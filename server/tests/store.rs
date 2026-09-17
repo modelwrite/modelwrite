@@ -276,9 +276,11 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
         None,
     );
     match refused {
-        Err(StoreError::Conflict(message)) => {
-            assert!(message.contains("b1"), "the refusal must name the element");
-            assert!(message.contains("alex"), "the refusal must name the holder");
+        Err(StoreError::Locked {
+            element, holder, ..
+        }) => {
+            assert_eq!(element, "b1", "the refusal must name the element");
+            assert_eq!(holder, "alex", "the refusal must name the holder");
         }
         other => panic!("expected a conflict, got {:?}", other.map(|c| c.hash)),
     }

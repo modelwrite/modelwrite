@@ -82,6 +82,14 @@ pub fn map_store_error(e: StoreError) -> ApiError {
     match e {
         StoreError::NotFound(m) => ApiError::not_found(m),
         StoreError::Conflict(m) => ApiError::conflict(m),
+        StoreError::Locked {
+            element,
+            holder,
+            expires_at,
+        } => ApiError::conflict(format!(
+            "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
+            element, holder, expires_at
+        )),
         StoreError::Backend(m) => {
             eprintln!("storage error: {}", m);
             ApiError::internal("internal storage error")
@@ -158,10 +166,7 @@ pub fn commit_refusal_guard(
     match result {
         Ok(commit) => Ok(commit),
         Err(error) if is_lock_refusal(&error) => {
-            let detail = match &error {
-                StoreError::Conflict(message) => message.clone(),
-                _ => unreachable!("is_lock_refusal implies a Conflict"),
-            };
+            let detail = error.to_string();
             record_refusal(
                 state.store.as_ref(),
                 project,
@@ -484,6 +489,9 @@ pub struct ResetBranch {
     pub to: String,
     pub author: String,
     pub message: String,
+    /// Who is reverting. As with a commit, supplying the holder lets the lease holder
+    /// proceed; omitting it means any live lease on a changed element refuses the reset.
+    pub holder: Option<String>,
 }
 
 /// Restore a branch to the CONTENT of an earlier commit by appending a new commit. The
@@ -515,13 +523,13 @@ pub async fn reset_branch(
         .ok_or_else(|| ApiError::not_found(format!("commit {}", body.to)))?;
     // A reset is a write path like any other: it refuses to change an element another
     // holder has locked. The touched set is the difference between the CURRENT tip model
-    // and the TARGET model. A reset has no holder field, so it can never be the holder,
-    // and any live lease on a changed element refuses it.
+    // and the TARGET model. A caller that holds the leases passes its holder and proceeds;
+    // a caller that does not is refused, because an absent holder cannot be the holder.
     let tip_model = load_model(&state, &project, &tip_hash)?;
     let target_model = load_model(&state, &project, &body.to)?;
     let touched = touched_elements(&tip_model, &target_model);
     let guard = CommitGuard {
-        holder: "",
+        holder: body.holder.as_deref().unwrap_or(""),
         elements: &touched,
         now: now_seconds(),
         expected_tip: Some(&tip_hash),

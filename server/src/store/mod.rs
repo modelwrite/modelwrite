@@ -69,6 +69,18 @@ pub enum StoreError {
     NotFound(String),
     Conflict(String),
     Backend(String),
+    /// A guarded write would change an element somebody else holds a live lease on.
+    ///
+    /// This is its own variant rather than a `Conflict` with particular wording, because
+    /// the caller must tell a LOCKED refusal from a stale-tip refusal: the first is
+    /// recorded as an attempt to overwrite someone's work, the second is an ordinary
+    /// retry. Deciding that by searching the message for a phrase would make a record of
+    /// who tried to overwrite whom depend on the wording of an error string.
+    Locked {
+        element: String,
+        holder: String,
+        expires_at: i64,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -77,6 +89,11 @@ impl std::fmt::Display for StoreError {
             StoreError::NotFound(m) => write!(f, "not found: {}", m),
             StoreError::Conflict(m) => write!(f, "conflict: {}", m),
             StoreError::Backend(m) => write!(f, "storage error: {}", m),
+            StoreError::Locked {
+                element,
+                holder,
+                expires_at,
+            } => write!(f, "{} is held by {} until {}", element, holder, expires_at),
         }
     }
 }
@@ -168,17 +185,17 @@ pub struct CommitGuard<'a> {
 /// It names the element, the holder and the lease expiry, and tells a caller who IS the
 /// holder to supply the holder field: a request without a holder cannot be the holder, so
 /// a live lease on a touched element refuses it too.
-pub fn lock_refusal(element: &str, holder: &str, expires_at: i64) -> String {
-    format!(
-        "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
-        element, holder, expires_at
-    )
+pub fn lock_refusal(element: &str, holder: &str, expires_at: i64) -> StoreError {
+    StoreError::Locked {
+        element: element.to_string(),
+        holder: holder.to_string(),
+        expires_at,
+    }
 }
 
-/// True when a store conflict is the lock refusal above. The branch-moved conflict is a
-/// stale-tip refusal, not a lock refusal, and must not be recorded as `commit.refused`.
+/// True when the store refused because somebody else holds the element.
 pub fn is_lock_refusal(error: &StoreError) -> bool {
-    matches!(error, StoreError::Conflict(message) if message.contains("is locked by"))
+    matches!(error, StoreError::Locked { .. })
 }
 
 pub trait Store: Send + Sync {
