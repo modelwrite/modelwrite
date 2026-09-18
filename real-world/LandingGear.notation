@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<notation:Diagram xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:notation="http://www.eclipse.org/gmf/runtime/1.0.3/notation" xmlns:style="http://www.eclipse.org/papyrus/infra/gmfdiag/style" xmlns:uml="http://www.eclipse.org/uml2/5.0.0/UML" xmi:id="_-_eVgCmtEeuNYs26IwK2fw" type="PapyrusUMLClassDiagram" name="LandingGearPackageDiagram" measurementUnit="Pixel">
+  <children xmi:type="notation:Shape" xmi:id="_BnNMwCmuEeuNYs26IwK2fw" type="Model_Shape">
+    <children xmi:type="notation:DecorationNode" xmi:id="_BnOa4CmuEeuNYs26IwK2fw" type="Model_NameLabel"/>
+    <children xmi:type="notation:BasicCompartment" xmi:id="_BnOa4SmuEeuNYs26IwK2fw" type="Model_PackagedElementCompartment">
+      <styles xmi:type="notation:TitleStyle" xmi:id="_BnOa4imuEeuNYs26IwK2fw"/>
+      <layoutConstraint xmi:type="notation:Bounds" xmi:id="_BnOa4ymuEeuNYs26IwK2fw"/>
+    </children>
+    <element xmi:type="uml:Model" href="LandingGear.uml#_l8EicCmtEeuNYs26IwK2fw"/>
+    <layoutConstraint xmi:type="notation:Bounds" xmi:id="_BnNMwSmuEeuNYs26IwK2fw" x="540" y="180"/>
+  </children>
+  <styles xmi:type="notation:StringValueStyle" xmi:id="_-_eVgSmtEeuNYs26IwK2fw" name="diagram_compatibility_version" stringValue="1.4.0"/>
+  <styles xmi:type="notation:DiagramStyle" xmi:id="_-_eVgimtEeuNYs26IwK2fw"/>
+  <styles xmi:type="style:PapyrusDiagramStyle" xmi:id="_-_eVgymtEeuNYs26IwK2fw" diagramKindId="org.eclipse.papyrus.sysml14.diagram.package">
+    <owner xmi:type="uml:Model" href="LandingGear.uml#_l8EicCmtEeuNYs26IwK2fw"/>
+  </styles>
+  <element xmi:type="uml:Model" href="LandingGear.uml#_l8EicCmtEeuNYs26IwK2fw"/>
+</notation:Diagram>
