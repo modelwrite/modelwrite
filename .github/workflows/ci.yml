@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo run -p mw-gate -- --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json
+      # The evidence annex is the trust anchor of the provable identity, so the
+      # committed records must regenerate byte for byte. A new timestamp or a
+      # nondeterministic iteration order anywhere in the gate fails this step.
+      - name: evidence records must regenerate byte for byte
+        run: |
+          cargo run -q -p mw-gate -- --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json --evidence /tmp/self-pass.json > /dev/null
+          cargo run -q -p mw-gate -- --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json --candidate sample/corpus/coffee-machine/okf/corrupted/coffee_machine_model.json --evidence /tmp/corrupted-fail.json > /dev/null || true
+          diff /tmp/self-pass.json docs/evidence/2026-09-17-roundtrip-self-pass.json
+          diff /tmp/corrupted-fail.json docs/evidence/2026-09-17-roundtrip-corrupted-fail.json
+      - run: python -m unittest discover -s judge/tests -p "test_*.py" -v

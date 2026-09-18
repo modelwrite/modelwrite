@@ -1,0 +1,103 @@
+{
+  "manifestVersion": "1.0",
+  "server": {
+    "name": "modelwrite-mcp",
+    "protocolVersion": "2024-11-05"
+  },
+  "stability": "Tool names and input schemas are additive. Existing names never change meaning; new capability arrives as new tools.",
+  "tools": [
+    {
+      "name": "okf.validate",
+      "summary": "Validate an OKF document and return the validation report",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "okf": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "okf"
+        ]
+      }
+    },
+    {
+      "name": "graph.stats",
+      "summary": "Graph health of an OKF document: nodes, edges, isolated nodes, components",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "okf": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "okf"
+        ]
+      }
+    },
+    {
+      "name": "gate.run",
+      "summary": "Run the round-trip fidelity gate and return its evidence record",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "strictCoverage": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reference",
+          "candidate"
+        ]
+      }
+    },
+    {
+      "name": "okf.diff",
+      "summary": "Semantic diff between two OKF documents: elements, edges and attributes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "candidate"
+        ]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "mw://okf/1.0/spec",
+      "mimeType": "text/markdown"
+    },
+    {
+      "uri": "mw://evidence/latest",
+      "mimeType": "application/json"
+    }
+  ],
+  "agentContract": {
+    "gateIsTheOnlyAuthority": true,
+    "plannedTools": [
+      "rules.check",
+      "model.read",
+      "model.propose",
+      "patterns.list",
+      "patterns.instantiate",
+      "evidence.write"
+    ],
+    "note": "The shipped modelwrite agent (Slice 5) binds to this manifest. Planned tools arrive with the slices that own them, and are additive."
+  }
+}

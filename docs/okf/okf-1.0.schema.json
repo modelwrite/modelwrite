@@ -1,0 +1,166 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://modelwrite.org/okf/1.0/schema.json",
+  "title": "OKF 1.0",
+  "type": "object",
+  "required": ["project", "summary", "stateMachine", "graph"],
+  "properties": {
+    "okf": {"type": "string", "enum": ["", "1.0"]},
+    "project": {"type": "string", "minLength": 1},
+    "exportedAt": {"type": "string"},
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "sourceTool": {"type": "string"},
+        "exporter": {"type": "string"},
+        "exporterVersion": {"type": "string"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "blocks": {"type": "integer"},
+        "requirements": {"type": "integer"},
+        "interfaces": {"type": "integer"},
+        "signals": {"type": "integer"},
+        "activities": {"type": "integer"},
+        "graphNodes": {"type": "integer"},
+        "graphEdges": {"type": "integer"}
+      }
+    },
+    "structure": {"type": "array", "items": {"$ref": "#/definitions/element"}},
+    "interfaces": {"type": "array", "items": {"$ref": "#/definitions/element"}},
+    "signals": {"type": "array", "items": {"$ref": "#/definitions/element"}},
+    "requirements": {"type": "array", "items": {"$ref": "#/definitions/requirement"}},
+    "stateMachine": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "states": {"type": "array", "items": {"$ref": "#/definitions/state"}}
+            }
+          }
+        }
+      }
+    },
+    "activities": {"type": "array", "items": {"$ref": "#/definitions/activity"}},
+    "graph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/graphNode"}},
+        "edges": {"type": "array", "items": {"$ref": "#/definitions/graphEdge"}}
+      }
+    }
+  },
+  "definitions": {
+    "attribute": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "aggregation": {"type": "string"},
+        "default": {"type": "string"}
+      }
+    },
+    "element": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "stereotypes": {"type": "array", "items": {"type": "string"}},
+        "attributes": {"type": "array", "items": {"$ref": "#/definitions/attribute"}},
+        "documentation": {"type": "string"}
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "required": ["id", "reqId"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "stereotypes": {"type": "array", "items": {"type": "string"}},
+        "attributes": {"type": "array", "items": {"$ref": "#/definitions/attribute"}},
+        "documentation": {"type": "string"},
+        "reqId": {"type": "string", "minLength": 1},
+        "reqText": {"type": "string"}
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "entry": {"type": ["string", "null"]},
+        "doActivity": {"type": ["string", "null"]},
+        "exit": {"type": ["string", "null"]}
+      }
+    },
+    "activityNode": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"type": "string"},
+        "name": {"type": "string"},
+        "partition": {"type": ["string", "null"]}
+      }
+    },
+    "activityEdge": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string"},
+        "source": {"type": "string"},
+        "target": {"type": "string"},
+        "guard": {"type": "string"}
+      }
+    },
+    "activity": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "partitions": {"type": "array", "items": {"$ref": "#/definitions/partition"}},
+        "nodes": {"type": "array", "items": {"$ref": "#/definitions/activityNode"}},
+        "edges": {"type": "array", "items": {"$ref": "#/definitions/activityEdge"}}
+      }
+    },
+    "partition": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "represents": {"type": ["string", "null"]}
+      }
+    },
+    "graphNode": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"type": "string", "enum": ["activity", "actor", "block", "interface", "requirement", "signal", "state", "stateMachine", "usecase"]},
+        "name": {"type": "string"},
+        "stereotypes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "graphEdge": {
+      "type": "object",
+      "required": ["source", "target", "kind"],
+      "properties": {
+        "source": {"type": "string"},
+        "target": {"type": "string"},
+        "kind": {"type": "string", "enum": ["association", "behavior", "contains", "dependency", "effect", "generalization", "include", "part", "reference", "subject", "transition", "triggers", "uses"]},
+        "label": {"type": "string"}
+      }
+    }
+  }
+}

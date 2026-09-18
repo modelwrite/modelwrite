@@ -1,0 +1,20 @@
+[package]
+name = "mw-capi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "capi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+mw-okf = { path = "../okf" }
+mw-gate = { path = "../gate" }
+serde_json.workspace = true
+
+[dev-dependencies]
+mw-test-support = { path = "../test-support" }
+serde_json.workspace = true

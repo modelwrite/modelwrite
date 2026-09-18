@@ -1,0 +1,53 @@
+MBSE COFFEE MACHINE - KNOWLEDGE PACK
+====================================
+Everything from the MEMKO MBSEF-SEng work, in one folder.
+
+WHAT'S HERE
+-----------
+MBSE_CoffeeMachine_KnowledgePack.docx
+    The main write-up (16 pages, with screenshots): the model, how we drove
+    CATIA Magic with Groovy, how we exported the data, how the graph found gaps,
+    the digital twin + electrocution hazard, OEE, requirements-vs-industry
+    sensitivity analysis, the local LLM, and how to rebuild/deploy on a
+    controlled network. The model, the app and the standalone are ALSO embedded
+    inside this .docx as double-click attachments (see "Package Contents", p16).
+
+MBSE_Coffee_Machine_Analysis.pptx
+    The presentation version (20 slides): background & context, screenshots,
+    integration patterns and lessons learnt.
+
+CoffeeMachine-SysML-Model.mdzip
+    The complete SysML model. Open in CATIA Magic / Magic Systems of Systems
+    Architect 2026x.
+
+CoffeeMachine-App.zip
+    The full interactive portal + the two local PowerShell servers + the
+    exported model JSON + its own READ-ME. Unzip, then:
+        powershell -ExecutionPolicy Bypass -File .\serve.ps1
+        browse to http://localhost:8000
+
+CoffeeMachine-Showcase-standalone.html
+    A single self-contained file - the whole portal with the model inlined.
+    Just double-click it to run offline (no server, nothing to install).
+    Best for quickly showing people what the approach can do.
+
+MBSE_CoffeeMachine_KnowledgePack.zip
+    A copy of the .docx plus the three files above, loose - handy if your
+    Word viewer doesn't show embedded attachments.
+
+QUICK START
+-----------
+- Just want to see it?          -> double-click CoffeeMachine-Showcase-standalone.html
+- Want the full running app?    -> unzip CoffeeMachine-App.zip and run serve.ps1
+- Want the model?               -> open CoffeeMachine-SysML-Model.mdzip in CATIA Magic
+- Want the story / to present?  -> open the .docx or the .pptx
+
+DIGITAL TWIN - the electrocution hazard (REQ 3.1.5)
+---------------------------------------------------
+Open the Digital Twin page, turn Auto-serve ON and watch: the tank drains as it
+brews; a compliant design would inhibit the brew when water is low (REQ 1.3), but
+this machine keeps dispensing, so the tank runs dry, the element energises the
+chassis and - with no RCD fitted - the operator is electrocuted. (Or hit the red
+"Short circuit on dispense" button for an instant trigger.)
+
+Everything runs locally / offline. Author: Alex Kovaceski. Date: 17 Sep 2026.

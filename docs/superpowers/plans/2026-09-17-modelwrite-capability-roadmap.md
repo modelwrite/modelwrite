@@ -1,4 +1,4 @@
-# Modelwrite Platform Capability Roadmap
+﻿# Modelwrite Platform Capability Roadmap
 
 > **For agentic workers:** this is the programme plan. Each slice gets its own
 > bite-sized implementation plan (superpowers:writing-plans) at the moment the
@@ -271,6 +271,23 @@ questions asked in plain language across the model and the bound data together.
    effectiveness, run scored comparisons using the simulation service against measures
    defined in the model, and record the decision with its evidence. External market and
    cost data joins these studies in Slice 7, where the bindings live.
+9. **The shipped MCP agent** — agent/: an MCP client of the modelwrite server with a
+   skill-pack system, a provider abstraction (local model first, customer endpoint or
+   approved cloud optionally), step, token and wall-clock budgets, and a replayable run
+   log. It ships inside the platform so an organisation gets AI-generated MBSE without
+   building its own harness, and so third-party agents can bind to the same contract.
+10. **Generation skills** — pattern-driven synthesis: intake requirements from a
+    workbook, ReqIF or document set; select and instantiate patterns from the pattern
+    library; name and trace consistently; iterate against the gate until it passes.
+    Patterns are the generation substrate, which is what keeps generated structure sound
+    rather than invented.
+11. **Repair skills** — turn gate and rule findings into a work queue and drive the
+    model to a passing state, explaining each change and escalating when a finding needs
+    a human decision rather than guessing one.
+12. **Agent evaluation harness** — a labelled task set (generate, repair, review) with
+    published pass criteria and results, so agent capability is measured the way the
+    gate measures fidelity. Ambiguity handling is part of the task set: the agent must
+    ask rather than invent.
 
 **Acceptance criteria:**
 
@@ -285,13 +302,27 @@ questions asked in plain language across the model and the bound data together.
   uncovered) is answered with citations to element ids and the model commit; a question
   the model cannot answer is refused with the reason.
 - A variant trade study produces a scored comparison with a recorded decision.
+- **AI-generated MBSE, end to end:** from a requirements workbook plus a stated pattern
+  set, the shipped agent produces a corpus-scale model with zero human edits that passes
+  validation, the rules at target coverage, graph integration (no orphans, one component)
+  and the round-trip gate; the run replays deterministically from its log and its
+  evidence is committed.
+- Given the corrupted corpus fixture, the agent repairs it to a passing state and
+  explains each repair in the review pack.
+- The agent asks rather than invents when a requirement is ambiguous, demonstrated by a
+  case in the evaluation set.
+- The published tool manifest is sufficient for an externally authored skill pack to run
+  without modifying the agent.
 
 **New fixtures:** a labelled before and after model pair for smell training, a variant
-pair for the trade study, and a question set with expected answers for model question
-answering, under sample/.
+pair for the trade study, a question set with expected answers for model question
+answering, and an agent task set (a small requirements workbook, its expected
+gate-passing model, and the corrupted corpus for repair), under sample/ and
+sample/agent/.
 
-**Indicative size:** medium to large; start with the model-edit API and the copilot,
-then the ML models once labelled data exists.
+**Indicative size:** large. Start with the model-edit API, the MCP tool contract and the
+agent runtime, then the generation and repair skills, then the ML models once labelled
+data exists.
 
 ---
 
@@ -459,7 +490,7 @@ planned separately before any of it is built.
 | 2 | Slice 2 repository and collaboration | Slice 1 | largest | A team on a shared server |
 | 3 | Slice 3 authoring workbench | Slice 2 | large | Modellers without a legacy licence |
 | 4 | Slice 4 interoperability and migration | Slice 1, Slice 2 | large | An organisation with an existing CATIA estate |
-| 5 | Slice 5 AI automation | Slice 3 | medium to large | Under-resourced teams, and anyone with a question about the model |
+| 5 | Slice 5 AI automation, including the shipped MCP agent | Slice 3 | large | Under-resourced teams: AI-generated models, repair and review, and anyone with a question |
 | 6 | Slice 6 governance and operations | Slice 2 to Slice 5 | medium | Regulated enterprise |
 | 7 | Slice 7 analytics and data fusion | everything above; structured half needs Slice 2, unstructured half needs its own spec | unbounded | Programme, engineering, procurement and supplier decisions |
 

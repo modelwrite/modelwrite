@@ -1,4 +1,4 @@
-# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
+﻿# Modelwrite Phase 0 + Phase 1 (Engine Core) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
@@ -92,7 +92,10 @@ Thumbs.db
 ```
 *.mdzip binary
 *.zip binary
+sample/demo/*.html binary
 ```
+
+The third line keeps the demo fixture byte-identical in the stored blob: without it, `core.autocrlf` normalises the CRLF HTML to LF in the repository, so a clone or CI runner with autocrlf off materialises a different byte count than the collateral source (a defect found by the Task 3 review and ruled on there). It is deliberately path-specific: a blanket `*.html binary` rule would mark future portal HTML sources binary and destroy their diffs.
 
 - [ ] **Step 6: Write LICENSE (AGPL-3.0-or-later)**
 
@@ -888,12 +891,21 @@ pub struct ActivityEdge {
     pub guard: String,
 }
 
+/// A swim-lane on an activity diagram. The fixture stores partitions as
+/// objects with a name and an optional represented element, not as plain strings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Partition {
+    pub name: String,
+    #[serde(default)]
+    pub represents: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Activity {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub partitions: Vec<String>,
+    pub partitions: Vec<Partition>,
     #[serde(default)]
     pub nodes: Vec<ActivityNode>,
     #[serde(default)]
@@ -926,7 +938,7 @@ pub struct Graph {
     pub edges: Vec<GraphEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Summary {
     #[serde(default)]
     pub blocks: u64,
@@ -971,7 +983,7 @@ pub struct OkfRoot {
     pub signals: Vec<Element>,
     #[serde(default)]
     pub requirements: Vec<Requirement>,
-    #[serde(default)]
+    #[serde(rename = "stateMachine", default)]
     pub state_machine: Option<StateMachine>,
     #[serde(default)]
     pub activities: Vec<Activity>,
@@ -1080,11 +1092,16 @@ pub fn validate(root: &OkfRoot) -> ValidationReport {
             if !EDGE_KINDS.contains(&e.kind.as_str()) {
                 report.errors.push(format!("unknown edge kind {} from {} to {}", e.kind, e.source, e.target));
             }
+            // Unresolved endpoints are warnings, not errors: the reference corpus proves
+            // that real exporter output can carry edges whose element was never emitted as
+            // a node (two satisfy links in the coffee-machine export). The platform must
+            // hold, gate and reason about such a model while reporting the defect loudly;
+            // refusing the document would make the corpus unusable as the proof fixture.
             if !node_ids.contains(e.source.as_str()) {
-                report.errors.push(format!("dangling edge endpoint {} (source of a {} edge)", e.source, e.kind));
+                report.warnings.push(format!("dangling edge endpoint {} (source of a {} edge)", e.source, e.kind));
             }
             if !node_ids.contains(e.target.as_str()) {
-                report.errors.push(format!("dangling edge endpoint {} (target of a {} edge)", e.target, e.kind));
+                report.warnings.push(format!("dangling edge endpoint {} (target of a {} edge)", e.target, e.kind));
             }
         }
     }
@@ -1145,7 +1162,11 @@ use serde::Serialize;
 
 use crate::types::OkfRoot;
 
+/// The report's JSON contract is camelCase, matching every other contract the
+/// platform publishes (the OKF document itself, the gate evidence and the MCP tool
+/// results). A consumer must never have to special-case one payload's key style.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiffReport {
     pub equal: bool,
     pub missing_elements: Vec<String>,
@@ -1185,53 +1206,99 @@ pub fn element_ids(root: &OkfRoot) -> BTreeSet<String> {
     ids
 }
 
-/// Every relationship as a source|target|kind|label key.
+/// Every relationship as a canonical key: a JSON array of source, target, kind and
+/// label, so a separator character inside a field cannot alias two distinct edges.
 pub fn edge_keys(root: &OkfRoot) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     if let Some(graph) = &root.graph {
         for e in &graph.edges {
-            keys.insert(format!("{}|{}|{}|{}", e.source, e.target, e.kind, e.label));
+            let parts = [
+                e.source.as_str(),
+                e.target.as_str(),
+                e.kind.as_str(),
+                e.label.as_str(),
+            ];
+            if let Ok(key) = serde_json::to_string(&parts) {
+                keys.insert(key);
+            }
         }
     }
     keys
 }
 
-/// id -> canonical JSON of the section item, used for attribute equality.
+/// Canonical JSON per comparable unit, keyed by "<section>:<id>".
+///
+/// The universe covers the document-level fields, every element-bearing section, and
+/// the activities section (which carries its own nodes and edges). Section scoping
+/// matters: the graph mirrors elements, so the same id appears both as a section item
+/// and as a graph node, and keying by id alone would let the graph entry mask a removal
+/// or a change in the section that owns the element.
 pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
+
+    if let Ok(v) = serde_json::to_string(&root.project) {
+        map.insert("doc:project".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.okf) {
+        map.insert("doc:okf".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.exported_at) {
+        map.insert("doc:exportedAt".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.summary) {
+        map.insert("doc:summary".to_string(), v);
+    }
+    if let Ok(v) = serde_json::to_string(&root.provenance) {
+        map.insert("doc:provenance".to_string(), v);
+    }
+    if let Some(sm) = &root.state_machine {
+        if let Ok(v) = serde_json::to_string(sm) {
+            map.insert("doc:stateMachine".to_string(), v);
+        }
+    }
+
+    let mut put = |section: &str, id: &str, json: String| {
+        map.insert(format!("{}:{}", section, id), json);
+    };
+
     for el in &root.structure {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("structure", &el.id, v);
         }
     }
     for el in &root.interfaces {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("interfaces", &el.id, v);
         }
     }
     for el in &root.signals {
         if let Ok(v) = serde_json::to_string(el) {
-            map.insert(el.id.clone(), v);
+            put("signals", &el.id, v);
         }
     }
     for r in &root.requirements {
         if let Ok(v) = serde_json::to_string(r) {
-            map.insert(r.id.clone(), v);
+            put("requirements", &r.id, v);
         }
     }
     if let Some(sm) = &root.state_machine {
         for region in &sm.regions {
             for s in &region.states {
                 if let Ok(v) = serde_json::to_string(s) {
-                    map.insert(s.id.clone(), v);
+                    put("state", &s.id, v);
                 }
             }
+        }
+    }
+    for (i, a) in root.activities.iter().enumerate() {
+        if let Ok(v) = serde_json::to_string(a) {
+            put("activity", &i.to_string(), v);
         }
     }
     if let Some(graph) = &root.graph {
         for n in &graph.nodes {
             if let Ok(v) = serde_json::to_string(n) {
-                map.insert(n.id.clone(), v);
+                put("graphnode", &n.id, v);
             }
         }
     }
@@ -1239,17 +1306,22 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
 }
 
 pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
-    let ref_ids = element_ids(reference);
-    let cand_ids = element_ids(candidate);
-    let ref_edges = edge_keys(reference);
-    let cand_edges = edge_keys(candidate);
     let ref_attrs = attribute_keys(reference);
     let cand_attrs = attribute_keys(candidate);
+    let ref_edges = edge_keys(reference);
+    let cand_edges = edge_keys(candidate);
 
-    let mut missing_elements: Vec<String> = ref_ids.difference(&cand_ids).cloned().collect();
-    let mut extra_elements: Vec<String> = cand_ids.difference(&ref_ids).cloned().collect();
-    let mut missing_edges: Vec<String> = ref_edges.difference(&cand_edges).cloned().collect();
-    let mut extra_edges: Vec<String> = cand_edges.difference(&ref_edges).cloned().collect();
+    let mut missing_elements: Vec<String> = ref_attrs
+        .keys()
+        .filter(|k| !cand_attrs.contains_key(*k))
+        .cloned()
+        .collect();
+    let mut extra_elements: Vec<String> = cand_attrs
+        .keys()
+        .filter(|k| !ref_attrs.contains_key(*k))
+        .cloned()
+        .collect();
+
     let mut changed_attributes: Vec<String> = Vec::new();
     for (id, ref_value) in &ref_attrs {
         if let Some(cand_value) = cand_attrs.get(id) {
@@ -1258,6 +1330,10 @@ pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
             }
         }
     }
+
+    let mut missing_edges: Vec<String> = ref_edges.difference(&cand_edges).cloned().collect();
+    let mut extra_edges: Vec<String> = cand_edges.difference(&ref_edges).cloned().collect();
+
     missing_elements.sort();
     extra_elements.sort();
     missing_edges.sort();
@@ -1269,6 +1345,7 @@ pub fn diff(reference: &OkfRoot, candidate: &OkfRoot) -> DiffReport {
         && missing_edges.is_empty()
         && extra_edges.is_empty()
         && changed_attributes.is_empty();
+
     DiffReport {
         equal,
         missing_elements,
@@ -1295,6 +1372,18 @@ fn corpus_fixture_validates() {
     let report = validate::validate(&expected());
     assert!(report.valid, "unexpected errors: {:?}", report.errors);
     assert_eq!(report.errors, Vec::<String>::new());
+    // The reference export carries two edges whose source element was never emitted as
+    // a node; they are warned about, so the finding is recorded rather than silently
+    // accepted. See the corpus README.
+    assert_eq!(
+        report
+            .warnings
+            .iter()
+            .filter(|w| w.contains("dangling edge endpoint"))
+            .count(),
+        2,
+        "expected exactly two dangling edge endpoints in the legacy export"
+    );
 }
 
 #[test]
@@ -1319,7 +1408,7 @@ fn rejects_duplicate_element_ids() {
 }
 
 #[test]
-fn rejects_dangling_edge_endpoint() {
+fn warns_dangling_edge_endpoint() {
     let mut root = expected();
     if let Some(graph) = root.graph.as_mut() {
         let target = graph.nodes[0].id.clone();
@@ -1331,8 +1420,10 @@ fn rejects_dangling_edge_endpoint() {
         });
     }
     let report = validate::validate(&root);
-    assert!(!report.valid);
-    assert!(report.errors.iter().any(|e| e.contains("missing-node")));
+    // Unresolved endpoints are warnings, not errors (ruling B): a real exporter can
+    // emit them, so the document stays valid and the defect is reported loudly.
+    assert!(report.valid, "unexpected errors: {:?}", report.errors);
+    assert!(report.warnings.iter().any(|w| w.contains("missing-node")));
 }
 
 #[test]
@@ -1412,12 +1503,60 @@ fn renamed_element_is_changed_attribute() {
     assert!(!d.equal);
     assert_eq!(d.changed_attributes.len(), 1);
 }
+
+#[test]
+fn activity_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.activities[0].name.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}
+
+#[test]
+fn document_level_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate.project.push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes.len(), 1);
+}
+
+#[test]
+fn state_machine_change_is_a_difference() {
+    let mut candidate = expected();
+    candidate
+        .state_machine
+        .as_mut()
+        .expect("state machine present")
+        .name
+        .push_str(" X");
+    let d = diff::diff(&expected(), &candidate);
+    assert!(!d.equal);
+    assert!(d.changed_attributes.iter().any(|k| k == "doc:stateMachine"));
+}
+#[test]
+fn report_serializes_with_camel_case_keys() {
+    // The report is a published contract (the MCP okf.diff tool and any agent binding
+    // to it). Pin the key style so a serde rename cannot silently change the contract.
+    let report = diff::diff(&expected(), &expected());
+    let value = serde_json::to_value(&report).expect("report serializes");
+    let keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert!(keys.contains(&"missingElements"), "keys: {:?}", keys);
+    assert!(keys.contains(&"changedAttributes"), "keys: {:?}", keys);
+    assert!(!keys.contains(&"missing_elements"), "keys: {:?}", keys);
+}
 ```
 
 - [ ] **Step 12: Run the tests**
 
 Run: cargo test -p mw-okf
-Expected: all 13 tests pass. If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
+Expected: all 13 tests pass (7 in tests/okf_validation.rs, 6 in tests/okf_diff.rs). If corpus_fixture_validates fails, stop and report the validation errors verbatim; do not weaken the validator to make the corpus pass.
 
 - [ ] **Step 13: Format and lint**
 
@@ -1586,10 +1725,15 @@ pub fn requirement_coverage(root: &OkfRoot) -> CoverageReport {
                     covered.insert(t);
                 }
             }
-            "Allocate" => {
-                if req_ids.contains(t) || req_ids.contains(s) {
-                    allocated += 1;
+            "Allocate" if req_ids.contains(t) || req_ids.contains(s) => {
+                allocated += 1;
+                // Count only endpoints that really are requirements: an allocate edge can
+                // connect a function to a part, and inserting a non-requirement id would
+                // inflate the covered count reported in the gate evidence.
+                if req_ids.contains(t) {
                     covered.insert(t);
+                }
+                if req_ids.contains(s) {
                     covered.insert(s);
                 }
             }
@@ -1681,6 +1825,51 @@ fn coverage_counts_traceability() {
     assert_eq!(cov.satisfied, 1);
     assert_eq!(cov.covered, 1);
     assert_eq!(cov.uncovered, vec!["r2"]);
+}
+
+/// The reference model carries 20 Satisfy, 3 Refine, 1 Verify and 3 Allocate edges,
+/// and 15 of its 25 requirements are covered by at least one of them. Pinning the
+/// coverage keeps this measured claim honest: it is the number the gate reports.
+#[test]
+fn corpus_coverage_is_pinned() {
+    let cov = requirement_coverage(&expected());
+    assert_eq!(cov.total, 25);
+    assert_eq!(cov.satisfied, 20);
+    assert_eq!(cov.refined, 3);
+    assert_eq!(cov.verified, 1);
+    assert_eq!(cov.allocated, 0);
+    assert_eq!(cov.covered, 15);
+    assert_eq!(cov.uncovered.len(), 10);
+}
+
+/// Regression check for the coverage inflation bug: an allocate edge from a part to a
+/// requirement must cover the requirement and must NOT add the part to covered. The old
+/// unconditional insert would have reported covered = 2 for a single requirement.
+#[test]
+fn allocate_edge_counts_only_requirement_endpoints() {
+    const ALLOC: &str = r#"{
+  "project": "alloc",
+  "exportedAt": "2026-09-17T00:00:00Z",
+  "summary": {},
+  "stateMachine": {"name": "alloc sm", "regions": []},
+  "requirements": [
+    {"id": "r1", "name": "R1", "kind": "requirement", "stereotypes": ["Requirement"], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "allocated to a part"}
+  ],
+  "graph": {
+    "nodes": [
+      {"id": "p1", "kind": "block", "name": "P1"},
+      {"id": "r1", "kind": "requirement", "name": "R1"}
+    ],
+    "edges": [
+      {"source": "p1", "target": "r1", "kind": "dependency", "label": "Allocate"}
+    ]
+  }
+}"#;
+    let cov = requirement_coverage(&okf(ALLOC));
+    assert_eq!(cov.total, 1);
+    assert_eq!(cov.allocated, 1);
+    assert_eq!(cov.covered, 1);
+    assert!(cov.uncovered.is_empty());
 }
 ```
 
@@ -1794,17 +1983,43 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
         }
     }
 
-    let stats = graph_stats(candidate);
-    if !stats.isolated.is_empty() {
-        failures.push(format!("integration: {} isolated nodes", stats.isolated.len()));
-    }
-    if stats.component_count != 1 {
-        failures.push(format!("integration: {} connected components", stats.component_count));
+    // A candidate can lose its graph section entirely. Validation already records that
+    // as an error, so the gate must report a failure rather than panic inside the graph
+    // helpers, which require a graph to exist. Exit code 1 is the contract for a lossy
+    // candidate; a crash would be neither a pass nor a failure.
+    let stats = if candidate.graph.is_some() {
+        Some(graph_stats(candidate))
+    } else {
+        failures.push("integration: candidate has no graph section".to_string());
+        None
+    };
+    if let Some(stats) = &stats {
+        if !stats.isolated.is_empty() {
+            failures.push(format!(
+                "integration: {} isolated nodes",
+                stats.isolated.len()
+            ));
+        }
+        if stats.component_count != 1 {
+            failures.push(format!(
+                "integration: {} connected components",
+                stats.component_count
+            ));
+        }
     }
 
-    let cov = requirement_coverage(candidate);
-    if strict_coverage && !cov.uncovered.is_empty() {
-        failures.push(format!("coverage: {} uncovered requirements", cov.uncovered.len()));
+    let cov = if candidate.graph.is_some() {
+        Some(requirement_coverage(candidate))
+    } else {
+        None
+    };
+    if let Some(cov) = &cov {
+        if strict_coverage && !cov.uncovered.is_empty() {
+            failures.push(format!(
+                "coverage: {} uncovered requirements",
+                cov.uncovered.len()
+            ));
+        }
     }
 
     let evidence = json!({
@@ -1820,19 +2035,48 @@ pub fn run(reference: &OkfRoot, candidate: &OkfRoot, strict_coverage: bool) -> G
             "extraEdges": d.extra_edges,
             "changedAttributes": d.changed_attributes
         },
-        "integration": {
-            "isolated": stats.isolated,
-            "componentCount": stats.component_count,
-            "componentSizes": stats.component_sizes
+        // The schema stays stable when the candidate has no graph: the keys are always
+        // present, with empty values, so a consumer never has to handle a missing object.
+        "integration": match &stats {
+            Some(s) => json!({
+                "isolated": s.isolated,
+                "componentCount": s.component_count,
+                "componentSizes": s.component_sizes
+            }),
+            None => json!({
+                "isolated": [],
+                "componentCount": 0,
+                "componentSizes": []
+            })
         },
-        "coverage": {
-            "total": cov.total,
-            "satisfied": cov.satisfied,
-            "refined": cov.refined,
-            "verified": cov.verified,
-            "allocated": cov.allocated,
-            "covered": cov.covered,
-            "uncovered": cov.uncovered
+        "coverage": match &cov {
+            Some(c) => json!({
+                "total": c.total,
+                "satisfied": c.satisfied,
+                "refined": c.refined,
+                "verified": c.verified,
+                "allocated": c.allocated,
+                "covered": c.covered,
+                "uncovered": c.uncovered
+            }),
+            // Without a graph nothing can be shown to be covered, but the requirement
+            // count is still known: reporting total 0 would understate the model. Every
+            // requirement the candidate retains is reported as uncovered, which is the
+            // truthful reading and keeps the evidence schema stable.
+            None => {
+                let mut uncovered: Vec<String> =
+                    candidate.requirements.iter().map(|r| r.id.clone()).collect();
+                uncovered.sort();
+                json!({
+                    "total": candidate.requirements.len(),
+                    "satisfied": 0,
+                    "refined": 0,
+                    "verified": 0,
+                    "allocated": 0,
+                    "covered": 0,
+                    "uncovered": uncovered
+                })
+            }
         },
         "strictCoverage": strict_coverage,
         "validationErrors": v.errors,
@@ -1873,9 +2117,27 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--reference" => reference = args.next().map(PathBuf::from),
-            "--candidate" => candidate = args.next().map(PathBuf::from),
-            "--evidence" => evidence = args.next().map(PathBuf::from),
+            "--reference" => match args.next() {
+                Some(v) => reference = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--reference requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--candidate" => match args.next() {
+                Some(v) => candidate = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--candidate requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--evidence" => match args.next() {
+                Some(v) => evidence = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--evidence requires a file path");
+                    return ExitCode::from(2);
+                }
+            },
             "--json" => json_output = true,
             "--strict-coverage" => strict_coverage = true,
             _ => {
@@ -1907,7 +2169,10 @@ fn main() -> ExitCode {
         }
     }
     if json_output {
-        println!("{}", serde_json::to_string(&outcome.evidence).expect("evidence serializes"));
+        println!(
+            "{}",
+            serde_json::to_string(&outcome.evidence).expect("evidence serializes")
+        );
     } else if outcome.passed {
         println!("GATE PASS");
     } else {
@@ -2010,9 +2275,16 @@ const TINY_GATE: &str = r#"{
 fn self_roundtrip_passes() {
     let r = expected();
     let outcome = gate::run(&r, &r, false);
-    assert!(outcome.passed, "unexpected failures: {:?}", outcome.failures);
+    assert!(
+        outcome.passed,
+        "unexpected failures: {:?}",
+        outcome.failures
+    );
     assert_eq!(outcome.evidence["passed"], true);
-    assert_eq!(outcome.evidence["referenceHash"], outcome.evidence["candidateHash"]);
+    assert_eq!(
+        outcome.evidence["referenceHash"],
+        outcome.evidence["candidateHash"]
+    );
 }
 
 #[test]
@@ -2022,7 +2294,10 @@ fn corrupted_corpus_fails() {
         serde_json::from_str(&test_support::load_okf_broken()).expect("broken fixture parses");
     let outcome = gate::run(&reference, &candidate, false);
     assert!(!outcome.passed);
-    assert!(outcome.failures.iter().any(|f| f.contains("missing elements")));
+    assert!(outcome
+        .failures
+        .iter()
+        .any(|f| f.contains("missing elements")));
     assert!(outcome.failures.iter().any(|f| f.contains("isolated")));
 }
 
@@ -2030,10 +2305,50 @@ fn corrupted_corpus_fails() {
 fn strict_coverage_fails_on_uncovered() {
     let r = okf(TINY_GATE);
     let lenient = gate::run(&r, &r, false);
-    assert!(lenient.passed, "unexpected failures: {:?}", lenient.failures);
+    assert!(
+        lenient.passed,
+        "unexpected failures: {:?}",
+        lenient.failures
+    );
     let strict = gate::run(&r, &r, true);
     assert!(!strict.passed);
-    assert!(strict.failures.iter().any(|f| f.contains("uncovered requirements")));
+    assert!(strict
+        .failures
+        .iter()
+        .any(|f| f.contains("uncovered requirements")));
+}
+#[test]
+fn candidate_without_a_graph_fails_instead_of_panicking() {
+    // A lossy candidate can lose its graph section outright. The gate must report a
+    // failure with exit-code-1 semantics, never panic inside the graph helpers.
+    let reference = expected();
+    let candidate = okf(r#"{
+  "project": "no graph",
+  "exportedAt": "2026-09-17T00:00:00Z",
+  "summary": {},
+  "stateMachine": {"name": "sm", "regions": []},
+  "requirements": [
+    {"id": "r1", "name": "R1", "kind": "requirement", "stereotypes": ["Requirement"], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "no graph to trace through"}
+  ],
+  "graph": null
+}"#);
+    let outcome = gate::run(&reference, &candidate, false);
+    assert!(!outcome.passed);
+    assert!(outcome
+        .failures
+        .iter()
+        .any(|f| f.contains("no graph section")));
+    assert_eq!(outcome.evidence["integration"]["componentCount"], 0);
+    // Coverage must not understate the model: the retained requirement is reported as
+    // uncovered rather than the total being reported as zero.
+    assert_eq!(outcome.evidence["coverage"]["total"], 1);
+    assert_eq!(
+        outcome.evidence["coverage"]["uncovered"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 ```
 
@@ -2139,23 +2454,36 @@ members = ["engine/okf", "engine/test-support", "engine/graph", "engine/gate", "
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! C ABI for the modelwrite engine. All returned strings are owned by the
 //! caller and must be released with modelwrite_free_string.
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, CString};
+
+/// Hand a payload to the caller without any panic path. A panic unwinding across an
+/// `extern "C"` boundary is undefined behaviour, so `expect` is not acceptable here
+/// even where the current payloads provably cannot fail.
+fn into_c_string(payload: String) -> *mut c_char {
+    match CString::new(payload) {
+        Ok(s) => s.into_raw(),
+        // Unreachable in practice: serde_json escapes control characters, so a
+        // serialized payload contains no NUL. Null is returned rather than panicking.
+        Err(_) => std::ptr::null_mut(),
+    }
+}
 
 fn err_string(message: &str) -> *mut c_char {
-    let payload = serde_json::json!({ "error": message }).to_string();
-    CString::new(payload).expect("message has no NUL").into_raw()
+    into_c_string(serde_json::json!({ "error": message }).to_string())
 }
 
 /// Version string; deliberately leaked, never freed.
 #[no_mangle]
 pub extern "C" fn modelwrite_version() -> *const c_char {
-    let s = CString::new(format!("modelwrite {}", env!("CARGO_PKG_VERSION"))).expect("version has no NUL");
-    s.into_raw() as *const c_char
+    into_c_string(format!("modelwrite {}", env!("CARGO_PKG_VERSION"))) as *const c_char
 }
 
 /// Validate one OKF document; returns a JSON ValidationReport string.
+///
+/// # Safety
+/// `json` must point to `len` readable bytes and remain valid for the call.
 #[no_mangle]
-pub extern "C" fn modelwrite_validate(json: *const u8, len: usize) -> *mut c_char {
+pub unsafe extern "C" fn modelwrite_validate(json: *const u8, len: usize) -> *mut c_char {
     if json.is_null() || len == 0 {
         return err_string("empty input");
     }
@@ -2169,13 +2497,19 @@ pub extern "C" fn modelwrite_validate(json: *const u8, len: usize) -> *mut c_cha
         Err(e) => return err_string(&format!("parse error: {}", e)),
     };
     let report = okf::validate::validate(&root);
-    let payload = serde_json::to_string(&report).expect("report serializes");
-    CString::new(payload).expect("payload has no NUL").into_raw()
+    match serde_json::to_string(&report) {
+        Ok(payload) => into_c_string(payload),
+        Err(e) => err_string(&format!("failed to serialize the validation report: {}", e)),
+    }
 }
 
 /// Run the round-trip gate; returns the JSON evidence string.
+///
+/// # Safety
+/// `reference` and `candidate` must each point to their corresponding
+/// length of readable bytes and remain valid for the call.
 #[no_mangle]
-pub extern "C" fn modelwrite_gate(
+pub unsafe extern "C" fn modelwrite_gate(
     reference: *const u8,
     reference_len: usize,
     candidate: *const u8,
@@ -2189,17 +2523,25 @@ pub extern "C" fn modelwrite_gate(
         let text = std::str::from_utf8(bytes).ok()?;
         serde_json::from_str(text).ok()
     };
-    let (Some(reference), Some(candidate)) = (parse(reference, reference_len), parse(candidate, candidate_len)) else {
+    let (Some(reference), Some(candidate)) = (
+        parse(reference, reference_len),
+        parse(candidate, candidate_len),
+    ) else {
         return err_string("parse error: inputs must be OKF JSON documents");
     };
     let outcome = gate::run(&reference, &candidate, false);
-    let payload = serde_json::to_string(&outcome.evidence).expect("evidence serializes");
-    CString::new(payload).expect("payload has no NUL").into_raw()
+    match serde_json::to_string(&outcome.evidence) {
+        Ok(payload) => into_c_string(payload),
+        Err(e) => err_string(&format!("failed to serialize the gate evidence: {}", e)),
+    }
 }
 
 /// Free a string returned by this library.
+///
+/// # Safety
+/// `ptr` must be null or a pointer previously returned by this library.
 #[no_mangle]
-pub extern "C" fn modelwrite_free_string(ptr: *mut c_char) {
+pub unsafe extern "C" fn modelwrite_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
         drop(unsafe { CString::from_raw(ptr) });
     }
@@ -2309,13 +2651,16 @@ git commit -m "feat: add C ABI for validation and the gate"
 - Create: engine/mcp/src/lib.rs
 - Create: engine/mcp/src/main.rs (binary mw-mcp)
 - Test: engine/mcp/tests/mcp.rs
+- Create: docs/agents/mcp-tools.json (the published tool manifest: the agent contract)
+- Create: docs/agents/mcp-agent.md (the shipped agent: what Slice 1 provides, what Slice 5 adds)
 - Modify: Cargo.toml (add engine/mcp to workspace members)
 
 **Interfaces:**
-- Consumes: okf::{types, validate}; graph::graph_stats; gate::run.
+- Consumes: okf::{types, validate, diff}; graph::graph_stats; gate::run.
 - Produces:
   - mcp::handle_request(line: &str) -> String — one JSON-RPC 2.0 request (a single line) in, one JSON-RPC response line out; an empty String for notifications.
-  - Binary mw-mcp: reads JSON-RPC lines from stdin, writes responses to stdout. Tools: okf.validate, graph.stats, gate.run.
+  - Binary mw-mcp: reads JSON-RPC lines from stdin, writes responses to stdout. Tools: okf.validate, okf.diff, graph.stats, gate.run. Resources: mw://okf/1.0/spec (the specification text) and mw://evidence/latest.
+  - The published tool manifest docs/agents/mcp-tools.json: the stable contract the modelwrite agent (Slice 5) and third-party agents bind to. Tool names and input schemas are additive and stable.
 
 - [ ] **Step 1: Write engine/mcp/Cargo.toml**
 
@@ -2368,8 +2713,14 @@ fn tool_ok(text: String) -> Value {
 
 fn call_tool(msg: &Value) -> Value {
     let params = msg.get("params");
-    let name = params.and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("");
-    let args = params.and_then(|p| p.get("arguments")).cloned().unwrap_or_else(|| json!({}));
+    let name = params
+        .and_then(|p| p.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let args = params
+        .and_then(|p| p.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     match name {
         "okf.validate" => {
             let Some(okf) = args.get("okf").and_then(Value::as_str) else {
@@ -2398,7 +2749,10 @@ fn call_tool(msg: &Value) -> Value {
         "gate.run" => {
             let reference = args.get("reference").and_then(Value::as_str);
             let candidate = args.get("candidate").and_then(Value::as_str);
-            let strict = args.get("strictCoverage").and_then(Value::as_bool).unwrap_or(false);
+            let strict = args
+                .get("strictCoverage")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let (Some(reference), Some(candidate)) = (reference, candidate) else {
                 return tool_error("missing reference or candidate argument");
             };
@@ -2407,7 +2761,27 @@ fn call_tool(msg: &Value) -> Value {
                 (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
                 (Ok(reference), Ok(candidate)) => {
                     let outcome = gate::run(&reference, &candidate, strict);
-                    tool_ok(serde_json::to_string_pretty(&outcome.evidence).expect("evidence serializes"))
+                    tool_ok(
+                        serde_json::to_string_pretty(&outcome.evidence)
+                            .expect("evidence serializes"),
+                    )
+                }
+            }
+        }
+        "okf.diff" => {
+            let reference = args.get("reference").and_then(Value::as_str);
+            let candidate = args.get("candidate").and_then(Value::as_str);
+            let (Some(reference), Some(candidate)) = (reference, candidate) else {
+                return tool_error("missing reference or candidate argument");
+            };
+            let parse = |s: &str| serde_json::from_str::<okf::types::OkfRoot>(s);
+            match (parse(reference), parse(candidate)) {
+                (Err(e), _) | (_, Err(e)) => tool_error(&format!("parse error: {}", e)),
+                (Ok(reference), Ok(candidate)) => {
+                    // DiffReport already serializes as camelCase, so the report is the
+                    // payload: no hand-rolled key mapping can drift from the type.
+                    let report = okf::diff::diff(&reference, &candidate);
+                    tool_ok(serde_json::to_string_pretty(&report).expect("diff serializes"))
                 }
             }
         }
@@ -2477,8 +2851,53 @@ pub fn handle_request(line: &str) -> String {
                     },
                     "required": ["reference", "candidate"]
                 }
+            },
+            {
+                "name": "okf.diff",
+                "description": "Semantic diff between two OKF documents: elements, edges and attributes",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "reference": { "type": "string" },
+                        "candidate": { "type": "string" }
+                    },
+                    "required": ["reference", "candidate"]
+                }
             }
         ] }),
+        "resources/list" => json!({ "resources": [
+            {
+                "uri": "mw://okf/1.0/spec",
+                "name": "OKF 1.0 specification",
+                "mimeType": "text/markdown"
+            },
+            {
+                "uri": "mw://evidence/latest",
+                "name": "latest gate evidence",
+                "mimeType": "application/json"
+            }
+        ] }),
+        "resources/read" => {
+            let uri = msg
+                .get("params")
+                .and_then(|p| p.get("uri"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if uri == "mw://okf/1.0/spec" {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../docs/okf/okf-1.0-spec.md");
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => {
+                        json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] })
+                    }
+                    Err(e) => {
+                        json!({ "contents": [], "error": format!("cannot read spec: {}", e) })
+                    }
+                }
+            } else {
+                json!({ "contents": [] })
+            }
+        }
         "tools/call" => call_tool(&msg),
         _ => {
             return json!({
@@ -2540,7 +2959,7 @@ fn initialize_returns_server_info() {
 }
 
 #[test]
-fn tools_list_has_three_tools() {
+fn tools_list_exposes_the_agent_toolset() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }));
     let names: Vec<&str> = resp["result"]["tools"]
         .as_array()
@@ -2548,7 +2967,10 @@ fn tools_list_has_three_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["okf.validate", "graph.stats", "gate.run"]);
+    assert_eq!(
+        names,
+        vec!["okf.validate", "graph.stats", "gate.run", "okf.diff"]
+    );
 }
 
 #[test]
@@ -2579,6 +3001,36 @@ fn gate_tool_runs_roundtrip() {
 }
 
 #[test]
+fn diff_tool_reports_a_removed_requirement() {
+    let reference = test_support::load_okf_expected();
+    let mut model: serde_json::Value = serde_json::from_str(&reference).unwrap();
+    model["requirements"].as_array_mut().unwrap().pop();
+    let candidate = model.to_string();
+    let resp = call(json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": { "name": "okf.diff", "arguments": { "reference": reference, "candidate": candidate } }
+    }));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let report: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(report["equal"], false);
+    assert_eq!(report["missingElements"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn resources_list_exposes_the_spec() {
+    let resp = call(json!({ "jsonrpc": "2.0", "id": 7, "method": "resources/list", "params": {} }));
+    let uris: Vec<&str> = resp["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
+    assert!(uris.contains(&"mw://okf/1.0/spec"));
+}
+
+#[test]
 fn unknown_method_returns_error() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 5, "method": "nope", "params": {} }));
     assert_eq!(resp["error"]["code"], -32601);
@@ -2598,13 +3050,118 @@ Expected: all 5 tests pass.
 
 Expected: one JSON line listing okf.validate, graph.stats and gate.run. If piping into the binary is blocked in the current environment, skip this step (the unit tests already cover handle_request) and note it in the commit message.
 
-- [ ] **Step 8: Format, lint and commit**
+- [ ] **Step 8: Publish the tool manifest (the agent contract)**
+
+Write docs/agents/mcp-tools.json:
+
+```json
+{
+  "manifestVersion": "1.0",
+  "server": { "name": "modelwrite-mcp", "protocolVersion": "2024-11-05" },
+  "stability": "Tool names and input schemas are additive. Existing names never change meaning; new capability arrives as new tools.",
+  "tools": [
+    {
+      "name": "okf.validate",
+      "summary": "Validate an OKF document and return the validation report",
+      "inputSchema": { "type": "object", "properties": { "okf": { "type": "string" } }, "required": ["okf"] }
+    },
+    {
+      "name": "okf.diff",
+      "summary": "Semantic diff between two OKF documents: elements, edges and attributes",
+      "inputSchema": { "type": "object", "properties": { "reference": { "type": "string" }, "candidate": { "type": "string" } }, "required": ["reference", "candidate"] }
+    },
+    {
+      "name": "graph.stats",
+      "summary": "Graph health of an OKF document: nodes, edges, isolated nodes, components",
+      "inputSchema": { "type": "object", "properties": { "okf": { "type": "string" } }, "required": ["okf"] }
+    },
+    {
+      "name": "gate.run",
+      "summary": "Run the round-trip fidelity gate and return its evidence record",
+      "inputSchema": { "type": "object", "properties": { "reference": { "type": "string" }, "candidate": { "type": "string" }, "strictCoverage": { "type": "boolean" } }, "required": ["reference", "candidate"] }
+    }
+  ],
+  "resources": [
+    { "uri": "mw://okf/1.0/spec", "mimeType": "text/markdown" },
+    { "uri": "mw://evidence/latest", "mimeType": "application/json" }
+  ],
+  "agentContract": {
+    "gateIsTheOnlyAuthority": true,
+    "plannedTools": [
+      "rules.check",
+      "model.read",
+      "model.propose",
+      "patterns.list",
+      "patterns.instantiate",
+      "evidence.write"
+    ],
+    "note": "The shipped modelwrite agent (Slice 5) binds to this manifest. Planned tools arrive with the slices that own them, and are additive."
+  }
+}
+```
+
+- [ ] **Step 9: Document the agent seam**
+
+Write docs/agents/mcp-agent.md:
+
+```markdown
+# The modelwrite agent
+
+Slice 1 provides the contract. Slice 5 provides the agent. This file is the seam
+between them, so the agent is designed for rather than retrofitted.
+
+## What exists after Slice 1
+
+- The MCP server (mw-mcp): okf.validate, okf.diff, graph.stats, gate.run, plus the
+  resources mw://okf/1.0/spec and mw://evidence/latest.
+- The published manifest docs/agents/mcp-tools.json: tool names, input schemas and the
+  stability rule.
+- The rule pack agents/CLAUDE.md: the invariants any agent, ours or third party, must
+  respect.
+
+## What Slice 5 adds
+
+- agent/: the shipped MCP client. Skill packs, a provider abstraction (local model
+  first, customer endpoint or approved cloud optionally), step and token budgets, and a
+  replayable run log.
+- The model-edit API and its tools: model.read, model.propose, rules.check,
+  patterns.list, patterns.instantiate, evidence.write.
+- Generation, repair and review skills, and the agent evaluation harness that measures
+  them.
+
+## The loop
+
+intake -> propose instructions on the model-edit API -> apply them to a draft branch ->
+run the rules -> run the gate -> repair what the gate rejects -> draft commit for human
+review -> evidence.
+
+Patterns are the generation substrate: the agent instantiates and parameterises known
+patterns rather than inventing structure, which is what makes generated models sound
+before anyone reviews them.
+
+## Rules that bind the agent
+
+1. The gate is the only authority on correctness; no agent, log line or tool parameter
+   can mark a run as passed.
+2. Every action is an instruction on the model-edit API, never a direct edit.
+3. Every iteration ends in a gate run, and the output is a draft commit for human review.
+4. Ambiguity is a question, not an invention: the agent asks rather than guessing.
+5. Every run is replayable: prompts, tool calls and results are logged, and step, token
+   and wall-clock budgets are enforced.
+```
+
+- [ ] **Step 10: Run the tests again**
+
+Run: cargo test -p mw-mcp
+Expected: all 7 tests pass (the 5 original plus the diff and resources tests).
+
+- [ ] **Step 11: Format, lint and commit**
 
 ```powershell
 cargo fmt --all
 cargo clippy -p mw-mcp --all-targets -- -D warnings
-git add Cargo.toml engine/mcp
-git commit -m "feat: add MCP server exposing validation, graph stats and the gate"
+git add Cargo.toml engine/mcp docs/agents
+git commit -m "feat: add MCP server and the published agent tool contract"
 ```
 
 ---
