@@ -86,3 +86,32 @@ async fn version_names_the_service() {
     assert_eq!(value["service"], "mw-server");
     assert_eq!(value["server"], env!("CARGO_PKG_VERSION"));
 }
+#[test]
+fn the_bind_rule_refuses_to_expose_an_unauthenticated_service() {
+    // Open mode plus an interface anyone can route to means every request is an anonymous
+    // admin. The combination is refused unless the operator says so explicitly, and the
+    // safe default stays loopback.
+    use server::resolve_bind;
+
+    // Loopback is always allowed, authenticated or not.
+    assert!(resolve_bind("127.0.0.1", true, false).is_ok());
+    assert!(resolve_bind("127.0.0.1", false, false).is_ok());
+
+    // Beyond loopback WITH authentication is fine: the container case.
+    assert!(resolve_bind("0.0.0.0", false, false).is_ok());
+
+    // Beyond loopback WITHOUT authentication is refused...
+    let refused = resolve_bind("0.0.0.0", true, false);
+    assert!(
+        refused.is_err(),
+        "exposing an unauthenticated service must be refused"
+    );
+    let message = refused.unwrap_err().to_string();
+    assert!(message.contains("anonymous admin"), "got: {}", message);
+
+    // ...unless it is deliberate.
+    assert!(resolve_bind("0.0.0.0", true, true).is_ok());
+
+    // And a value that is not an address is a clear error, not a panic.
+    assert!(resolve_bind("not-an-address", false, false).is_err());
+}

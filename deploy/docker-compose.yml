@@ -37,6 +37,9 @@ services:
       # The database password appears only via interpolation; the token is read from
       # the environment and never inlined. With neither MW_AUTH_TOKEN nor
       # MW_ALLOW_OPEN=yes the entrypoint refuses to start (by design).
+      # A container must listen beyond loopback to be reachable at all. The server
+      # defaults to 127.0.0.1, which is right for a laptop and useless in a container.
+      MW_BIND: 0.0.0.0
       MW_DATABASE_URL: postgres://modelwrite:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/modelwrite
       MW_AUTH_TOKEN: ${MW_AUTH_TOKEN:-}
       MW_ALLOW_OPEN: ${MW_ALLOW_OPEN:-}

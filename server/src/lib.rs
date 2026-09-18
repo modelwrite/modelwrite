@@ -86,6 +86,32 @@ pub fn app(state: AppState) -> Router {
         .with_state(api_state)
 }
 
+/// Resolve the address the service binds to, and refuse the combination that leaks a
+/// system of record: listening beyond loopback while authentication is not configured, so
+/// every request would be an anonymous admin.
+///
+/// The default stays loopback on purpose. A container must say MW_BIND=0.0.0.0 to be
+/// reachable, which makes exposure a deliberate line in a deployment file rather than
+/// something that happens the first time the service starts.
+pub fn resolve_bind(
+    host: &str,
+    auth_is_open: bool,
+    allow_open: bool,
+) -> anyhow::Result<std::net::IpAddr> {
+    let ip: std::net::IpAddr = host
+        .parse()
+        .map_err(|_| anyhow::anyhow!("MW_BIND must be an IP address, got {}", host))?;
+    if auth_is_open && !ip.is_loopback() && !allow_open {
+        anyhow::bail!(
+            "refusing to bind {} while authentication is not configured: every request \
+             would be an anonymous admin. Configure MW_AUTH_TOKEN or MW_AUTH_JWKS, bind \
+             loopback, or set MW_ALLOW_OPEN=yes to accept the risk deliberately.",
+            ip
+        );
+    }
+    Ok(ip)
+}
+
 /// Liveness. Public on purpose: it never reaches the store, and it needs no token - a
 /// health check that requires a credential fails exactly during the incident it exists to
 /// detect. It reports the AUTH MODE so a deployment that forgot to configure authentication

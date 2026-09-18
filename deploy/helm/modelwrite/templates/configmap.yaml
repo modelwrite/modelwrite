@@ -6,6 +6,9 @@ metadata:
   labels:
     {{- include "modelwrite.labels" . | nindent 4 }}
 data:
+  # The server defaults to binding loopback, which is correct on a laptop and useless in a
+  # pod: without this the Service and the probes would have nobody to reach.
+  MW_BIND: "0.0.0.0"
   MW_PORT: {{ .Values.service.port | quote }}
   MW_EVIDENCE_DIR: {{ printf "%s/evidence" .Values.persistence.mountPath | quote }}
   MW_AUTH_ISSUER: {{ .Values.auth.issuer | quote }}
