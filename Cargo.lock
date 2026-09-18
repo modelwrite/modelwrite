@@ -906,6 +906,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-binding"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "mw-okf",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "mw-capi"
 version = "0.1.0"
 dependencies = [
