@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001"
+         xmlns:foo="http://example.com/foreign">
+  <uml:Model xmi:id="model-fa" name="Foreign Attr">
+    <packagedElement xmi:type="uml:Class" xmi:id="block-fa" name="Good Name" foo:name="Evil Name">
+      <Block xmi:id="app-fa" base_Class="block-fa"/>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>

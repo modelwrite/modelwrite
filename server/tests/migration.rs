@@ -87,7 +87,14 @@ async fn importing_the_fixture_commits_with_provenance_and_retains_the_artifact(
             "/projects/coffee/import",
             import_body(
                 "coffee-grinder.xmi",
-                &["uml:Package pkg-structure (Structure)"],
+                &[
+                    "uml:Model model-grinder",
+                    "uml:Comment doc-grinder",
+                    "uml:Property prop-motor",
+                    "uml:Property prop-capacity",
+                    "uml:Dependency dep-satisfy",
+                    "uml:Package pkg-structure (Structure)",
+                ],
             ),
         ))
         .await
@@ -102,7 +109,14 @@ async fn importing_the_fixture_commits_with_provenance_and_retains_the_artifact(
     assert_eq!(provenance["bindingVersion"], "2.4");
     assert_eq!(
         provenance["acceptedLosses"],
-        serde_json::json!(["uml:Package pkg-structure (Structure)"])
+        serde_json::json!([
+            "uml:Model model-grinder",
+            "uml:Comment doc-grinder",
+            "uml:Property prop-motor",
+            "uml:Property prop-capacity",
+            "uml:Dependency dep-satisfy",
+            "uml:Package pkg-structure (Structure)",
+        ])
     );
 
     // The engine's fidelity measurement says the round trip lost nothing.
@@ -152,6 +166,7 @@ async fn an_unmapped_element_is_refused_until_named_and_then_recorded_in_the_aud
                 &[
                     "uml:StateMachine sm-1",
                     "uml:Class block-1 attribute 'visibility'",
+                    "uml:Model model-unknown",
                 ],
             ),
         ))
@@ -259,7 +274,14 @@ async fn a_base64_artifact_imports_the_same_as_a_raw_body() {
     body["branch"] = serde_json::json!("main");
     body["author"] = serde_json::json!("alex");
     body["message"] = serde_json::json!("import base64");
-    body["acceptLosses"] = serde_json::json!(["uml:Package pkg-structure (Structure)"]);
+    body["acceptLosses"] = serde_json::json!([
+        "uml:Model model-grinder",
+        "uml:Comment doc-grinder",
+        "uml:Property prop-motor",
+        "uml:Property prop-capacity",
+        "uml:Dependency dep-satisfy",
+        "uml:Package pkg-structure (Structure)",
+    ]);
 
     let response = router
         .clone()

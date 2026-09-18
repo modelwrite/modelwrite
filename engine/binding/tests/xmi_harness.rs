@@ -85,7 +85,7 @@ fn subset_document() -> OkfRoot {
 }
 
 #[test]
-fn the_real_binding_round_trips_the_subset_losslessly() {
+fn the_real_binding_round_trips_the_subset_with_only_named_id_loss() {
     let binding = XmiBinding::new();
     assert_eq!(binding.info().id, "sysml-v1-xmi");
     assert_eq!(binding.info().direction, Direction::ImportAndExport);
@@ -93,8 +93,23 @@ fn the_real_binding_round_trips_the_subset_losslessly() {
     let source = serde_json::to_vec(&subset_document()).expect("source must serialize");
     let outcome = round_trip(&binding, &source).expect("round trip must succeed");
 
-    // The engine's own diff, not the binding's claim, says nothing was lost.
+    // The engine's own diff, not the binding's claim, says nothing structural
+    // was lost.
     assert!(outcome.diff.equal, "engine diff: {:?}", outcome.diff);
-    assert!(outcome.loss_report.is_lossless());
+
+    // The binding is honestly lossy rather than silently lossy: it names the
+    // transient XMI ids (Model, property, comment, dependency) that OKF has no
+    // slot for, each with a Lossy verdict. Nothing structural is Unmappable, so
+    // the migration decision rests on named, Lossy id drops - never a silent one.
+    assert!(
+        outcome
+            .loss_report
+            .mappings
+            .iter()
+            .all(|m| m.verdict == binding::MappingVerdict::Lossy),
+        "loss report should name only dropped ids: {:?}",
+        outcome.loss_report.mappings
+    );
+    assert!(!outcome.loss_report.mappings.is_empty());
     assert_eq!(outcome.artifact_hash, artifact_hash(&source));
 }

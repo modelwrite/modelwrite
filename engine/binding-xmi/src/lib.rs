@@ -22,6 +22,7 @@ pub const BINDING_ID: &str = "sysml-v1-xmi";
 pub const BINDING_VERSION: &str = "2.4";
 
 const XMI_NS: &str = "http://www.omg.org/spec/XMI/20131001";
+const UML_NS: &str = "http://www.omg.org/spec/UML/20131001";
 
 /// The SysML v1 XMI binding.
 #[derive(Debug, Clone, Default)]
@@ -68,11 +69,18 @@ fn local_part(qname: &str) -> &str {
     qname.rsplit(':').next().unwrap_or(qname)
 }
 
-/// An attribute matched by local name only (for unambiguous names like name,
-/// aggregation, client, supplier, body and the base_* references).
+/// True when an attribute is the UML attribute of the given local name: either
+/// unqualified (the normal form in these hand-written documents) or in the UML
+/// namespace. This is deliberately not namespace-blind, so a foreign attribute
+/// that happens to share a local name with a UML one is never read as UML.
+fn is_uml_attr(a: &roxmltree::Attribute, name: &str) -> bool {
+    a.name() == name && (a.namespace().is_none() || a.namespace() == Some(UML_NS))
+}
+
+/// A UML attribute matched by namespace and local name (see [is_uml_attr]).
 fn attr<'a, 'input>(node: roxmltree::Node<'a, 'input>, name: &str) -> Option<&'a str> {
     for a in node.attributes() {
-        if a.name() == name {
+        if is_uml_attr(&a, name) {
             return Some(a.value());
         }
     }
@@ -100,14 +108,25 @@ fn xmi_type<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> Option<&'a str> {
     attr_ns(node, Some(XMI_NS), "type")
 }
 
-/// The first base_* reference on a stereotype application element.
+/// The first base_* reference on a stereotype application element, matched only
+/// when unqualified so a foreign base_* attribute is never mistaken for it.
 fn base_ref<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> Option<&'a str> {
     for a in node.attributes() {
-        if a.name().starts_with("base_") {
+        if a.name().starts_with("base_") && a.namespace().is_none() {
             return Some(a.value());
         }
     }
     None
+}
+
+/// A human label for an attribute, including its namespace when it is not the
+/// (implicit) unqualified form. This keeps a foreign attribute with a colliding
+/// local name distinguishable from the UML attribute it shadows.
+fn attribute_label(a: &roxmltree::Attribute) -> String {
+    match a.namespace() {
+        Some(ns) => format!("{} (namespace {ns})", a.name()),
+        None => a.name().to_string(),
+    }
 }
 
 /// Resolve a property type reference: an xmi:id resolves to the named element,
@@ -147,6 +166,7 @@ enum ElementKind {
 }
 
 struct RawProperty {
+    id: String,
     name: String,
     type_ref: String,
     aggregation: String,
@@ -166,6 +186,13 @@ struct RawDependency {
     supplier: String,
 }
 
+struct RawComment {
+    id: String,
+    body: String,
+    annotated: String,
+    enclosing_class: Option<String>,
+}
+
 struct Importer {
     info: BindingInfo,
     artifact_hash: String,
@@ -176,7 +203,7 @@ struct Importer {
     dependencies: Vec<RawDependency>,
     dep_stereotypes: HashMap<String, String>,
     packages: Vec<(String, String)>,
-    comments: Vec<(String, String)>,
+    comments: Vec<RawComment>,
     losses: Vec<Mapping>,
 }
 
@@ -204,6 +231,7 @@ impl Importer {
         if root_type == Some("Model") || root.tag_name().name() == "Model" {
             self.walk(root, None);
         } else {
+            self.report_root_attributes(root);
             for child in root.children() {
                 self.walk(child, None);
             }
@@ -271,6 +299,15 @@ impl Importer {
                     ElementKind::Model,
                     &format!("uml:Model {id}"),
                 );
+                // CRITICAL 2: the model id has no OKF slot (project carries only
+                // the name), so it is named rather than dropped in silence.
+                if !id.is_empty() {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Model {id}"),
+                        verdict: MappingVerdict::Lossy,
+                        note: "uml:Model xmi:id dropped: OKF has no project id slot; the name is carried as project".to_string(),
+                    });
+                }
                 for child in node.children() {
                     self.walk(child, None);
                 }
@@ -307,7 +344,7 @@ impl Importer {
                 let name = attr(node, "name").unwrap_or("").to_string();
                 let type_ref = node
                     .attributes()
-                    .find(|a| a.name() == "type" && a.namespace() != Some(XMI_NS))
+                    .find(|a| is_uml_attr(a, "type"))
                     .map(|a| a.value())
                     .unwrap_or("")
                     .to_string();
@@ -322,6 +359,7 @@ impl Importer {
                     Some(owner) => {
                         if let Some(c) = self.classes.iter_mut().find(|c| c.id == owner) {
                             c.properties.push(RawProperty {
+                                id: id.clone(),
                                 name,
                                 type_ref,
                                 aggregation,
@@ -365,20 +403,22 @@ impl Importer {
                     ElementKind::Comment,
                     &format!("uml:Comment {id}"),
                 );
-                let target = if !annotated.is_empty() {
-                    annotated
-                } else {
-                    enclosing_class.unwrap_or("").to_string()
-                };
-                if target.is_empty() {
+                // CRITICAL 2: the comment id has no OKF slot (documentation is a
+                // bare string), so it is named rather than dropped in silence.
+                if !id.is_empty() {
                     self.losses.push(Mapping {
                         subject: format!("uml:Comment {id}"),
-                        verdict: MappingVerdict::Unmappable,
-                        note: "uml:Comment not attached to any element".to_string(),
+                        verdict: MappingVerdict::Lossy,
+                        note: "uml:Comment xmi:id dropped: OKF documentation has no id slot"
+                            .to_string(),
                     });
-                } else {
-                    self.comments.push((target, body));
                 }
+                self.comments.push(RawComment {
+                    id: id.clone(),
+                    body,
+                    annotated,
+                    enclosing_class: enclosing_class.map(|s| s.to_string()),
+                });
             }
             _ => {
                 let element_name = type_full.as_deref().unwrap_or(tag.as_str()).to_string();
@@ -396,6 +436,17 @@ impl Importer {
         }
     }
 
+    fn report_root_attributes(&mut self, node: roxmltree::Node<'_, '_>) {
+        let tag = node.tag_name().name().to_string();
+        for a in node.attributes() {
+            self.losses.push(Mapping {
+                subject: format!("{tag} root attribute '{}'", attribute_label(&a)),
+                verdict: MappingVerdict::Unmappable,
+                note: "unmapped attribute on the XMI root element".to_string(),
+            });
+        }
+    }
+
     fn report_unmapped_attributes(
         &mut self,
         node: roxmltree::Node<'_, '_>,
@@ -405,41 +456,42 @@ impl Importer {
         for a in node.attributes() {
             let name = a.name();
             let ns = a.namespace();
+            let uml = ns.is_none() || ns == Some(UML_NS);
+            let xmi = ns == Some(XMI_NS);
             let consumed = match kind {
                 ElementKind::Model | ElementKind::Package | ElementKind::Class => {
-                    (name == "id" && ns == Some(XMI_NS))
-                        || (name == "type" && ns == Some(XMI_NS))
-                        || name == "name"
+                    (name == "id" && xmi) || (name == "type" && xmi) || (name == "name" && uml)
                 }
                 ElementKind::Property => {
-                    (name == "id" && ns == Some(XMI_NS))
-                        || (name == "type" && ns == Some(XMI_NS))
-                        || (name == "type" && ns != Some(XMI_NS))
-                        || name == "name"
-                        || name == "aggregation"
-                        || name == "default"
+                    (name == "id" && xmi)
+                        || (name == "type" && xmi)
+                        || (name == "type" && uml)
+                        || (name == "name" && uml)
+                        || (name == "aggregation" && uml)
+                        || (name == "default" && uml)
                 }
                 ElementKind::Dependency => {
-                    (name == "id" && ns == Some(XMI_NS))
-                        || (name == "type" && ns == Some(XMI_NS))
-                        || name == "name"
-                        || name == "client"
-                        || name == "supplier"
+                    (name == "id" && xmi)
+                        || (name == "type" && xmi)
+                        || (name == "name" && uml)
+                        || (name == "client" && uml)
+                        || (name == "supplier" && uml)
                 }
                 ElementKind::Comment => {
-                    (name == "id" && ns == Some(XMI_NS))
-                        || (name == "type" && ns == Some(XMI_NS))
-                        || name == "name"
-                        || name == "body"
-                        || name == "annotatedElement"
+                    // NOTE: 'name' is deliberately absent: a uml:Comment name has
+                    // no OKF slot and is reported rather than consumed in silence.
+                    (name == "id" && xmi)
+                        || (name == "type" && xmi)
+                        || (name == "body" && uml)
+                        || (name == "annotatedElement" && uml)
                 }
                 ElementKind::Stereotype => {
-                    (name == "id" && ns == Some(XMI_NS)) || name.starts_with("base_")
+                    (name == "id" && xmi) || (name.starts_with("base_") && ns.is_none())
                 }
             };
             if !consumed {
                 self.losses.push(Mapping {
-                    subject: format!("{element_name} attribute '{name}'"),
+                    subject: format!("{element_name} attribute '{}'", attribute_label(&a)),
                     verdict: MappingVerdict::Unmappable,
                     note: "unmapped attribute on a recognised XMI element".to_string(),
                 });
@@ -453,17 +505,95 @@ impl Importer {
             id_to_name.insert(c.id.as_str(), c.name.as_str());
         }
 
-        // Precompute documentation per target id so the borrow checker does not
-        // have to hold a closure over self while losses are being pushed.
+        // The emitted blocks are exactly the classes carrying the Block stereotype.
+        let emitted: HashSet<&str> = self
+            .classes
+            .iter()
+            .filter(|c| self.block_ids.contains(&c.id))
+            .map(|c| c.id.as_str())
+            .collect();
+
+        // A label for every recognised element, so a comment targeting a non-block
+        // can say what it targeted rather than just "dangling".
+        let mut known: HashMap<&str, String> = HashMap::new();
+        for (pid, pname) in &self.packages {
+            known.insert(pid.as_str(), format!("uml:Package {pname}"));
+        }
+        for d in &self.dependencies {
+            known.insert(d.id.as_str(), format!("uml:Dependency {}", d.name));
+        }
+        for c in &self.classes {
+            if emitted.contains(c.id.as_str()) {
+                known.insert(c.id.as_str(), format!("block {}", c.name));
+            } else {
+                known.insert(c.id.as_str(), format!("uml:Class {} (not a block)", c.name));
+            }
+            for p in &c.properties {
+                known.insert(p.id.as_str(), format!("uml:Property {}", p.name));
+            }
+        }
+
+        // Resolve each comment: attach its body to every target that is an emitted
+        // block, and report every target that is not. A body is never dropped in
+        // silence (CRITICAL 1).
         let mut docs: HashMap<String, String> = HashMap::new();
-        for (target, body) in &self.comments {
-            docs.entry(target.clone()).or_default().push_str(body);
+        for comment in &self.comments {
+            let targets: Vec<&str> = if !comment.annotated.is_empty() {
+                comment.annotated.split_whitespace().collect()
+            } else if let Some(owner) = &comment.enclosing_class {
+                vec![owner.as_str()]
+            } else {
+                Vec::new()
+            };
+            if targets.is_empty() {
+                self.losses.push(Mapping {
+                    subject: format!("uml:Comment {}", comment.id),
+                    verdict: MappingVerdict::Unmappable,
+                    note: "uml:Comment body dropped: not attached to any element".to_string(),
+                });
+                continue;
+            }
+            for target in targets {
+                if emitted.contains(target) {
+                    docs.entry(target.to_string())
+                        .or_default()
+                        .push_str(&comment.body);
+                } else if let Some(label) = known.get(target) {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Comment {}", comment.id),
+                        verdict: MappingVerdict::Unmappable,
+                        note: format!(
+                            "uml:Comment body dropped: annotatedElement {target} ({label}) is not an emitted block"
+                        ),
+                    });
+                } else {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Comment {}", comment.id),
+                        verdict: MappingVerdict::Unmappable,
+                        note: format!(
+                            "uml:Comment body dropped: annotatedElement {target} is a dangling id"
+                        ),
+                    });
+                }
+            }
         }
 
         let mut structure: Vec<Element> = Vec::new();
         for c in &self.classes {
-            if self.block_ids.contains(&c.id) {
+            if emitted.contains(c.id.as_str()) {
                 let documentation = docs.get(&c.id).cloned().unwrap_or_default();
+                for p in &c.properties {
+                    // CRITICAL 2: the property id has no OKF slot (Attribute has
+                    // none), so it is named rather than dropped in silence.
+                    if !p.id.is_empty() {
+                        self.losses.push(Mapping {
+                            subject: format!("uml:Property {}", p.id),
+                            verdict: MappingVerdict::Lossy,
+                            note: "uml:Property xmi:id dropped: OKF Attribute has no id slot"
+                                .to_string(),
+                        });
+                    }
+                }
                 let attributes = c
                     .properties
                     .iter()
@@ -488,6 +618,15 @@ impl Importer {
                     verdict: MappingVerdict::Unmappable,
                     note: "uml:Class without the Block stereotype; not a block".to_string(),
                 });
+                // I3: each property of the non-block class is named individually,
+                // rather than passed over.
+                for p in &c.properties {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Property {} ({})", p.id, p.name),
+                        verdict: MappingVerdict::Unmappable,
+                        note: "property of a non-block uml:Class; not carried".to_string(),
+                    });
+                }
             }
         }
 
@@ -504,6 +643,25 @@ impl Importer {
         let mut graph_edges: Vec<GraphEdge> = Vec::new();
         for d in &self.dependencies {
             if let Some(stereotype) = self.dep_stereotypes.get(&d.id) {
+                // CRITICAL 2: the dependency id has no OKF slot (GraphEdge has
+                // none), so it is named rather than dropped in silence.
+                if !d.id.is_empty() {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Dependency {}", d.id),
+                        verdict: MappingVerdict::Lossy,
+                        note: "uml:Dependency xmi:id dropped: OKF GraphEdge has no id slot"
+                            .to_string(),
+                    });
+                }
+                // I1: a stereotyped dependency's name is dropped (the edge label
+                // carries only the stereotype), so a non-empty name is named.
+                if !d.name.is_empty() {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Dependency {} ({})", d.id, d.name),
+                        verdict: MappingVerdict::Lossy,
+                        note: "uml:Dependency name dropped: the graph edge label carries only the stereotype".to_string(),
+                    });
+                }
                 graph_edges.push(GraphEdge {
                     source: d.client.clone(),
                     target: d.supplier.clone(),
@@ -524,7 +682,7 @@ impl Importer {
             self.losses.push(Mapping {
                 subject: format!("uml:Package {pid} ({pname})"),
                 verdict: MappingVerdict::Lossy,
-                note: "OKF has no package/namespace concept; members are promoted to the top-level structure"
+                note: "OKF has no package/namespace concept; members are promoted to the top-level structure and the package (with its xmi:id) is dropped"
                     .to_string(),
             });
         }
@@ -574,6 +732,17 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 el.id, el.kind
             )));
         }
+        // I2: the export carries exactly one stereotype (Block). Any other
+        // stereotype set would be silently normalised on the way out, so refuse
+        // rather than normalise.
+        if el.stereotypes.len() != 1 || el.stereotypes[0] != model::BLOCK_STEREOTYPE {
+            return Err(BindingError::Export(format!(
+                "cannot export structure element {}: stereotypes {:?} are outside the subset (only {:?} is carried)",
+                el.id,
+                el.stereotypes,
+                [model::BLOCK_STEREOTYPE]
+            )));
+        }
     }
     if !root.interfaces.is_empty() {
         return Err(BindingError::Export(
@@ -615,11 +784,25 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                     .to_string(),
             ));
         }
-        for n in &graph.nodes {
+        // I2: a graph node must mirror its structure element exactly - kind,
+        // name and stereotypes - or export would silently normalise it.
+        for (n, el) in graph.nodes.iter().zip(root.structure.iter()) {
             if n.kind != "block" {
                 return Err(BindingError::Export(format!(
                     "cannot export graph node {} of kind '{}': outside the subset",
                     n.id, n.kind
+                )));
+            }
+            if n.name != el.name {
+                return Err(BindingError::Export(format!(
+                    "cannot export graph node {}: name '{}' does not match its structure element name '{}'",
+                    n.id, n.name, el.name
+                )));
+            }
+            if n.stereotypes != el.stereotypes {
+                return Err(BindingError::Export(format!(
+                    "cannot export graph node {}: stereotypes {:?} do not match its structure element stereotypes {:?}",
+                    n.id, n.stereotypes, el.stereotypes
                 )));
             }
         }

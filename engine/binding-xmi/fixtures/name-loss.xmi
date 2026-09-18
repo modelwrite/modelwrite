@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-nl" name="Name Loss">
+    <packagedElement xmi:type="uml:Class" xmi:id="block-nl" name="Named Block">
+      <Block xmi:id="app-nl" base_Class="block-nl"/>
+      <ownedComment xmi:type="uml:Comment" xmi:id="doc-nl" name="the docs" body="Documentation text."/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Class" xmi:id="block-nl2" name="Other Block">
+      <Block xmi:id="app-nl2" base_Class="block-nl2"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Dependency" xmi:id="dep-nl" name="trace link" client="block-nl" supplier="block-nl2">
+      <Satisfy xmi:id="app-nls" base_Dependency="dep-nl"/>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>

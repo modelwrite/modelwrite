@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-nbc" name="Non Block Class">
+    <packagedElement xmi:type="uml:Class" xmi:id="plain-class" name="Plain Class">
+      <ownedAttribute xmi:type="uml:Property" xmi:id="prop-plain" name="thing" type="Integer" aggregation="none"/>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>

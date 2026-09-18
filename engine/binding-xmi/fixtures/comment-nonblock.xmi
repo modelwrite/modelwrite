@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-cnb" name="Comment Non Block">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg-a" name="PkgA"/>
+    <packagedElement xmi:type="uml:Class" xmi:id="block-a" name="Block A">
+      <Block xmi:id="app-a" base_Class="block-a"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Comment" xmi:id="comment-pkg" body="about the package" annotatedElement="pkg-a"/>
+    <packagedElement xmi:type="uml:Comment" xmi:id="comment-dangling" body="dangling target" annotatedElement="no-such-id"/>
+    <packagedElement xmi:type="uml:Comment" xmi:id="comment-multi" body="multi target" annotatedElement="block-a no-such-id"/>
+  </uml:Model>
+</xmi:XMI>

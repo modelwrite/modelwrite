@@ -17,6 +17,12 @@ fn import(name: &str) -> (OkfRoot, binding::LossReport) {
         .expect("import must succeed")
 }
 
+fn has(mappings: &[binding::Mapping], verdict: MappingVerdict, subject: &str) -> bool {
+    mappings
+        .iter()
+        .any(|m| m.verdict == verdict && m.subject == subject)
+}
+
 #[test]
 fn the_binding_declares_its_identity_direction_and_subset() {
     let binding = XmiBinding::new();
@@ -34,7 +40,25 @@ fn the_binding_declares_its_identity_direction_and_subset() {
     assert!(table
         .iter()
         .any(|m| m.subject.contains("Satisfy/Allocate/Refine/Verify")));
-    assert!(table.iter().any(|m| m.subject == "xmi:id"));
+
+    // CRITICAL 2: the xmi:id row no longer claims a blanket Exact. It states the
+    // truth per construct: Exact only where OKF has a slot (block element and
+    // graph node), Lossy everywhere else.
+    assert!(table.iter().any(|m| {
+        m.subject == "xmi:id on a block (element and graph node)"
+            && m.verdict == MappingVerdict::Exact
+    }));
+    assert!(table.iter().any(|m| {
+        m.subject.contains("xmi:id on uml:Model") && m.verdict == MappingVerdict::Lossy
+    }));
+    assert!(!table
+        .iter()
+        .any(|m| m.subject == "xmi:id" && m.verdict == MappingVerdict::Exact));
+
+    // M3: the negative set is stated, so the boundary is visible from the table.
+    assert!(table.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable && m.subject.contains("Any other XMI element")
+    }));
 }
 
 #[test]
@@ -94,13 +118,44 @@ fn the_fixture_imports_to_a_hand_checked_document() {
     assert_eq!(root.summary.graph_nodes, 2);
     assert_eq!(root.summary.graph_edges, 1);
 
-    // The one loss is the package flattening, named - nothing is silent.
-    assert_eq!(loss.mappings.len(), 1);
-    assert_eq!(loss.mappings[0].verdict, MappingVerdict::Lossy);
-    assert_eq!(
-        loss.mappings[0].subject,
+    // CRITICAL 2: every dropped id is named as a Lossy entry, plus the package
+    // flattening - nothing is silent. (Model, Comment, two Property ids, the
+    // Dependency id, and the Package.)
+    assert_eq!(loss.mappings.len(), 6);
+    assert!(loss
+        .mappings
+        .iter()
+        .all(|m| m.verdict == MappingVerdict::Lossy));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Model model-grinder"
+    ));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Comment doc-grinder"
+    ));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Property prop-motor"
+    ));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Property prop-capacity"
+    ));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Dependency dep-satisfy"
+    ));
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
         "uml:Package pkg-structure (Structure)"
-    );
+    ));
     assert!(!loss.is_lossless());
 }
 
@@ -124,8 +179,16 @@ fn an_unknown_element_and_attribute_are_named_not_dropped() {
             && m.subject == "uml:Class block-1 attribute 'visibility'"
     }));
 
-    // Exactly two losses: the unknown element and the unmapped attribute.
-    assert_eq!(loss.mappings.len(), 2);
+    // CRITICAL 2: the Model id is also named, not dropped silently.
+    assert!(has(
+        &loss.mappings,
+        MappingVerdict::Lossy,
+        "uml:Model model-unknown"
+    ));
+
+    // Exactly three losses: the unknown element, the unmapped attribute, and the
+    // dropped Model id.
+    assert_eq!(loss.mappings.len(), 3);
     assert!(!loss.is_lossless());
 }
 
@@ -149,4 +212,167 @@ fn export_round_trips_the_subset() {
         .import(&bytes)
         .expect("re-import must succeed");
     assert_eq!(round_tripped, root);
+}
+
+// --- CRITICAL 1: a comment whose target is not an emitted block is reported ---
+
+#[test]
+fn a_comment_on_a_non_block_target_is_reported_not_dropped() {
+    let (root, loss) = import("comment-nonblock.xmi");
+
+    // The block still imports and receives the part of the multi-target comment
+    // that points at it.
+    assert_eq!(root.structure.len(), 1);
+    assert_eq!(root.structure[0].id, "block-a");
+    assert_eq!(root.structure[0].documentation, "multi target");
+
+    // The comment on the package, the dangling target, and the dangling half of
+    // the multi-target comment are each named.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Comment comment-pkg"
+            && m.note.contains("not an emitted block")
+    }));
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Comment comment-dangling"
+            && m.note.contains("dangling id")
+    }));
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Comment comment-multi"
+            && m.note.contains("dangling id")
+    }));
+}
+
+// --- I1: name dropped on Comment and on a stereotyped Dependency is reported ---
+
+#[test]
+fn a_comment_name_and_a_stereotyped_dependency_name_are_reported() {
+    let (_, loss) = import("name-loss.xmi");
+
+    // The comment body still attaches to its block.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Comment doc-nl attribute 'name'"
+    }));
+    // The stereotyped dependency's name is dropped (the label is the stereotype)
+    // and named.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Lossy
+            && m.subject == "uml:Dependency dep-nl (trace link)"
+            && m.note.contains("name")
+    }));
+}
+
+// --- I2: export refuses out-of-subset stereotypes and graph-node mismatch ---
+
+#[test]
+fn export_refuses_a_structure_element_with_extra_stereotypes() {
+    let (mut root, _) = import("coffee-grinder.xmi");
+    root.structure[0].stereotypes.push("Trace".to_string());
+    let result = XmiBinding::new().export(&root);
+    match result {
+        Err(BindingError::Export(msg)) => assert!(msg.contains("stereotype")),
+        other => panic!("expected Export refusal, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn export_refuses_a_graph_node_whose_name_does_not_match_its_element() {
+    let (mut root, _) = import("coffee-grinder.xmi");
+    root.graph.as_mut().unwrap().nodes[0].name = "Wrong Name".to_string();
+    let result = XmiBinding::new().export(&root);
+    match result {
+        Err(BindingError::Export(msg)) => assert!(msg.contains("name")),
+        other => panic!("expected Export refusal, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn export_refuses_a_graph_node_whose_stereotypes_do_not_match_its_element() {
+    let (mut root, _) = import("coffee-grinder.xmi");
+    root.graph.as_mut().unwrap().nodes[0].stereotypes = vec!["Trace".to_string()];
+    let result = XmiBinding::new().export(&root);
+    match result {
+        Err(BindingError::Export(msg)) => assert!(msg.contains("stereotype")),
+        other => panic!("expected Export refusal, got {:?}", other.map(|_| ())),
+    }
+}
+
+// --- I3: properties of a non-block class are individually named ---
+
+#[test]
+fn properties_of_a_non_block_class_are_named_not_passed_over() {
+    let (root, loss) = import("nonblock-class.xmi");
+
+    // No block, so nothing is emitted.
+    assert!(root.structure.is_empty());
+
+    // The class and its property are each named, with the property's id.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Class plain-class (Plain Class)"
+    }));
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable && m.subject == "uml:Property prop-plain (thing)"
+    }));
+}
+
+// --- M1: attributes on the xmi:XMI root element are reported ---
+
+#[test]
+fn an_attribute_on_the_root_element_is_reported() {
+    let (_, loss) = import("root-attr.xmi");
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject.contains("root attribute")
+            && m.subject.contains("version")
+    }));
+}
+
+// --- M2: a foreign attribute is not read as UML, and the ambiguity is reported ---
+
+#[test]
+fn a_foreign_attribute_with_a_uml_local_name_is_not_mistaken_for_uml() {
+    let (root, loss) = import("foreign-attr.xmi");
+
+    // The unqualified UML name wins; the foreign foo:name is NOT read as the name.
+    assert_eq!(root.structure[0].name, "Good Name");
+
+    // The foreign attribute is reported, with its namespace so the ambiguity is
+    // visible rather than silently swallowed.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject.contains("attribute 'name")
+            && m.subject.contains("http://example.com/foreign")
+    }));
+}
+
+// --- M4: an empty document is a clean error, never a panic ---
+
+#[test]
+fn an_empty_document_is_a_clean_error_not_a_panic() {
+    for empty in [
+        b"".as_slice(),
+        b"   
+  "
+        .as_slice(),
+    ] {
+        let result = XmiBinding::new().import(empty);
+        match result {
+            Err(BindingError::Import(_)) => {}
+            other => panic!("expected a clean Import error, got {:?}", other.map(|_| ())),
+        }
+    }
+}
+
+#[test]
+fn a_document_without_a_model_root_is_a_clean_error_not_a_panic() {
+    let bytes = b"<xmi:XMI xmlns:xmi='http://www.omg.org/spec/XMI/20131001'/>";
+    let result = XmiBinding::new().import(bytes);
+    match result {
+        Err(BindingError::Import(msg)) => assert!(msg.contains("uml:Model")),
+        other => panic!("expected a clean Import error, got {:?}", other.map(|_| ())),
+    }
 }
