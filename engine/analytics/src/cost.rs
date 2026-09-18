@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::confidence::{self, FusedValue, FusionError, Value};
 use crate::dataset::Dataset;
+use crate::money::Money;
 
 /// Which column of a dataset holds the requirement id, and which holds the cost.
 /// The mapping is declared per dataset because no two organisations store cost the
@@ -51,9 +52,10 @@ impl ColumnMapping {
 pub enum Cost {
     /// No dataset has a cost record for this requirement.
     Uncosted,
-    /// One or more datasets priced this requirement. The value is their sum, the
-    /// trust is the weakest link, and every source and read time is named.
-    Costed(FusedValue<i64>),
+    /// One or more datasets priced this requirement. The value is their exact
+    /// decimal sum, the trust is the weakest link, and every source and read time
+    /// is named.
+    Costed(FusedValue<Money>),
 }
 
 impl Cost {
@@ -79,7 +81,7 @@ pub struct CostedRequirement {
 pub enum CostError {
     /// The dataset has no column with the declared header name.
     MissingColumn { source: String, column: String },
-    /// A row's cost cell is absent or not a whole-number amount.
+    /// A row's cost cell is absent or not a decimal money amount.
     MalformedCost {
         source: String,
         requirement: String,
@@ -116,7 +118,7 @@ impl fmt::Display for CostError {
                 } else {
                     write!(
                         f,
-                        "dataset {} has a cost {:?} for requirement {} that is not a whole-number amount",
+                        "dataset {} has a cost {:?} for requirement {} that is not a valid money amount",
                         source, value, requirement
                     )
                 }
@@ -156,7 +158,7 @@ pub fn cost_by_requirement(
 
     // Every cost record, keyed by requirement id. A record carries the value and,
     // through the dataset's own source, the source id, trust and read time.
-    let mut records: HashMap<String, Vec<Value<i64>>> = HashMap::new();
+    let mut records: HashMap<String, Vec<Value<Money>>> = HashMap::new();
     for (dataset, mapping) in datasets {
         let (req_col, cost_col) = resolve_columns(dataset, mapping)?;
         let source_id = dataset.source.id.clone();
@@ -181,7 +183,7 @@ pub fn cost_by_requirement(
                     })
                 }
             };
-            let value: i64 = match raw.trim().parse() {
+            let value: Money = match raw.trim().parse() {
                 Ok(value) => value,
                 Err(_) => {
                     return Err(CostError::MalformedCost {

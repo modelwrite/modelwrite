@@ -7,7 +7,8 @@
 use std::collections::BTreeSet;
 
 use analytics::{
-    cost_by_requirement, ColumnMapping, Cost, CostError, Dataset, Source, SourceKind, TrustLevel,
+    cost_by_requirement, ColumnMapping, Cost, CostError, Dataset, Money, Source, SourceKind,
+    TrustLevel,
 };
 use okf::types::{OkfRoot, Requirement, Summary};
 
@@ -61,6 +62,10 @@ fn set(items: &[&str]) -> BTreeSet<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
+fn money(s: &str) -> Money {
+    s.parse().expect("a valid money amount")
+}
+
 #[test]
 fn an_uncosted_requirement_is_uncosted_and_not_zero_and_still_appears() {
     let m = model(&["REQ-1", "REQ-2"]);
@@ -81,7 +86,7 @@ fn an_uncosted_requirement_is_uncosted_and_not_zero_and_still_appears() {
 
     // And REQ-1 is costed, proving the two states coexist without a phantom zero.
     match &result[0].cost {
-        Cost::Costed(fused) => assert_eq!(fused.value, 100),
+        Cost::Costed(fused) => assert_eq!(fused.value, money("100")),
         other => panic!("REQ-1 should be costed, got {:?}", other),
     }
 }
@@ -102,7 +107,7 @@ fn a_cost_is_attributed_to_its_source_and_date() {
         other => panic!("expected costed, got {:?}", other),
     };
 
-    assert_eq!(fused.value, 250);
+    assert_eq!(fused.value, money("250"));
     assert_eq!(fused.trust, TrustLevel::Reported);
     assert_eq!(fused.sources, set(&["erp"]));
     assert_eq!(
@@ -174,10 +179,70 @@ fn a_fused_costs_trust_is_the_weakest_of_its_inputs() {
 
     // One reported and one estimated record: the sum is 120, but the trust is the
     // weakest link - estimated - and both sources are named.
-    assert_eq!(fused.value, 120);
+    assert_eq!(fused.value, money("120"));
     assert_eq!(fused.trust, TrustLevel::Estimated);
     assert!(fused.is_estimate());
     assert_eq!(fused.sources, set(&["erp", "spreadsheet"]));
+}
+
+#[test]
+fn a_decimal_cost_is_read_exactly() {
+    let m = model(&["REQ-1"]);
+    let ds = dataset(
+        source("erp", TrustLevel::Reported),
+        "t",
+        "requirement_id,unit_cost\nREQ-1,12.50\n",
+    );
+    let mapping = mapping();
+
+    let result = cost_by_requirement(&[&m], &[(&ds, &mapping)]).unwrap();
+    let fused = match &result[0].cost {
+        Cost::Costed(fused) => fused,
+        other => panic!("expected costed, got {:?}", other),
+    };
+    assert_eq!(fused.value, money("12.5"));
+}
+
+#[test]
+fn a_negative_cost_is_a_credit() {
+    let m = model(&["REQ-1"]);
+    let ds = dataset(
+        source("erp", TrustLevel::Reported),
+        "t",
+        "requirement_id,unit_cost\nREQ-1,-3.25\n",
+    );
+    let mapping = mapping();
+
+    let result = cost_by_requirement(&[&m], &[(&ds, &mapping)]).unwrap();
+    let fused = match &result[0].cost {
+        Cost::Costed(fused) => fused,
+        other => panic!("expected costed, got {:?}", other),
+    };
+    assert_eq!(fused.value, money("-3.25"));
+}
+
+#[test]
+fn decimal_costs_fuse_exactly() {
+    let m = model(&["REQ-1"]);
+    let a = dataset(
+        source("erp", TrustLevel::Measured),
+        "2026-01-01",
+        "requirement_id,unit_cost\nREQ-1,0.1\n",
+    );
+    let b = dataset(
+        source("sheet", TrustLevel::Measured),
+        "2026-01-02",
+        "requirement_id,unit_cost\nREQ-1,0.2\n",
+    );
+    let mapping = mapping();
+
+    let result = cost_by_requirement(&[&m], &[(&a, &mapping), (&b, &mapping)]).unwrap();
+    let fused = match &result[0].cost {
+        Cost::Costed(fused) => fused,
+        other => panic!("expected costed, got {:?}", other),
+    };
+    // 0.1 + 0.2 is exactly 0.3, never 0.30000000000000004.
+    assert_eq!(fused.value, money("0.3"));
 }
 
 #[test]
@@ -277,11 +342,11 @@ fn the_real_corpus_joins_against_cost_data() {
     assert_eq!(result.len(), 25);
 
     match &result[0].cost {
-        Cost::Costed(fused) => assert_eq!(fused.value, 1200),
+        Cost::Costed(fused) => assert_eq!(fused.value, money("1200")),
         other => panic!("first corpus requirement should be costed, got {:?}", other),
     }
     match &result[1].cost {
-        Cost::Costed(fused) => assert_eq!(fused.value, 3400),
+        Cost::Costed(fused) => assert_eq!(fused.value, money("3400")),
         other => panic!(
             "second corpus requirement should be costed, got {:?}",
             other
