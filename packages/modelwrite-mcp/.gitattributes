@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The npm package is packed straight from the working copy, so these text files
+# must keep LF line endings on every OS: a CRLF shebang in bin/mw-mcp.js would
+# break the binary when a Linux/macOS MCP client installs it. Force LF here so
+# core.autocrlf (a Windows default) cannot turn the shebang into a broken one.
+* text eol=lf

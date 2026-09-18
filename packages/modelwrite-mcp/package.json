@@ -1,0 +1,33 @@
+{
+  "name": "modelwrite-mcp",
+  "version": "0.1.0",
+  "description": "The modelwrite MCP server (mw-mcp): validate, gate, diff and read OKF documents, and optionally read-and-propose over a modelwrite repository.",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/modelwrite/modelwrite.git"
+  },
+  "bin": {
+    "mw-mcp": "./bin/mw-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "modelwrite",
+    "okf",
+    "mcp",
+    "model-driven",
+    "round-trip",
+    "gate"
+  ]
+}

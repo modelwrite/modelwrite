@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# The default is read-only: every job here only reads the repository. The one
+# job that writes anything (publish, which pushes to ghcr.io) grants itself the
+# packages permission below.
+permissions:
+  contents: read
+
 jobs:
   engine:
     runs-on: ubuntu-latest
@@ -164,4 +170,37 @@ jobs:
         run: helm lint deploy/helm/modelwrite
       - name: build the container image
         run: docker build -f deploy/Dockerfile -t modelwrite/modelwrite:ci .
+
+  publish:
+    # Publishes the container image to GitHub Container Registry when a release
+    # tag (v*) is pushed. The image is rebuilt here (a release is infrequent)
+    # and tagged with the version plus moving major and minor tags, so pulling
+    # ghcr.io/modelwrite/modelwrite:0 always gets the latest 0.x. The
+    # GITHUB_TOKEN is the only credential: the packages:write permission below
+    # authorises it to push to this repository's own ghcr.io namespace.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [engine, msrv, postgres, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/modelwrite/modelwrite
+    steps:
+      - uses: actions/checkout@v4
+      - name: log in to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: build the container image
+        run: docker build -f deploy/Dockerfile -t "$IMAGE:ci" .
+      - name: tag and push the versioned image
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          minor="${version%.*}"
+          major="${version%%.*}"
+          for tag in "$version" "$minor" "$major" latest; do
+            docker tag "$IMAGE:ci" "$IMAGE:$tag"
+          done
+          for tag in "$version" "$minor" "$major" latest; do
+            docker push "$IMAGE:$tag"
+          done
 
