@@ -59,16 +59,26 @@ Environment variables (the exact names the server reads): `MW_DATABASE_URL`
 `MW_PORT`. The entrypoint additionally honours `MW_ALLOW_OPEN=yes` as the
 explicit opt-in to run open.
 
-### Known limitation: the service binds to loopback
+### Binding, and why exposure is deliberate
 
-As of this tranche, mw-server binds to `127.0.0.1` and there is **no**
-`MW_BIND`/`MW_HOST` variable to change it. Inside a container that means the
-service is reachable only from its own container's network namespace, not through
-the published port (Compose) or the Service (Kubernetes). The probes, the port
-mapping and the Service here are the correct eventual configuration, but until a
-bind-address variable is added to the server they will not carry real traffic.
-This is a server-code change and is deliberately out of scope for this deployment
-task.
+mw-server binds `127.0.0.1` by DEFAULT. That is the right default - a service
+that listens on every interface the moment it starts is a service that gets
+exposed by accident - but it means a container is unreachable until it says
+otherwise. Both the compose file and the chart's ConfigMap therefore set
+`MW_BIND=0.0.0.0` explicitly.
+
+The combination that leaks a system of record is **open mode on a reachable
+interface**: with no credential configured, every request is an anonymous admin,
+so anyone who can route to the port is that admin. The server REFUSES TO START
+in that combination - a non-loopback bind with `AuthConfig::Open` and no
+`MW_ALLOW_OPEN=yes` is an error naming both ways to fix it. The container
+entrypoint applies the same rule one layer earlier, so a misconfigured
+deployment fails at `docker run` rather than at the first unauthorized request.
+
+To run a deliberately open pilot:
+
+    MW_BIND=0.0.0.0 MW_ALLOW_OPEN=yes mw-server
+
 
 ## Docker Compose (a trial on one machine)
 

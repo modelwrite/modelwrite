@@ -40,6 +40,9 @@ services:
       # A container must listen beyond loopback to be reachable at all. The server
       # defaults to 127.0.0.1, which is right for a laptop and useless in a container.
       MW_BIND: 0.0.0.0
+      # NOTE: the password is interpolated into a URL, so it must not contain @ : / or %
+      # unless it is percent-encoded. A password that does will produce a malformed URL and
+      # the service will fail to connect rather than start with the wrong one.
       MW_DATABASE_URL: postgres://modelwrite:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/modelwrite
       MW_AUTH_TOKEN: ${MW_AUTH_TOKEN:-}
       MW_ALLOW_OPEN: ${MW_ALLOW_OPEN:-}

@@ -55,6 +55,14 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # /data is the writable volume (SQLite database and gate evidence). These
 # defaults make the SQLite path work with no extra configuration once /data is
 # mounted; the chart and compose file mount a read-write volume here.
+#
+# The directory must be CREATED with the service user as its owner, before the
+# user switch below. A named volume is copy-populated from the image path on
+# first use, so a root-owned /data would give the volume root ownership too, and
+# the non-root service could not create its database or its evidence directory:
+# the trial would crash-loop on first up. Kubernetes has fsGroup to fix this;
+# Docker does not, so the image has to get it right.
+RUN install -d -m 0750 -o 65532 -g 65532 /data
 WORKDIR /data
 ENV MW_DB=/data/modelwrite.db \
     MW_EVIDENCE_DIR=/data/evidence

@@ -63,6 +63,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
+            - name: tmp
+              mountPath: /tmp
             {{- if .Values.auth.jwksSecret }}
             - name: jwks
               mountPath: /jwks
@@ -94,6 +96,11 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        # readOnlyRootFilesystem is set, so anything that needs to write outside the data
+        # volume needs its own mount. The runtime needs a writable /tmp; compose gives it a
+        # tmpfs and the chart gives it this, so the two deployments agree.
+        - name: tmp
+          emptyDir: {}
         {{- if .Values.auth.jwksSecret }}
         - name: jwks
           secret:

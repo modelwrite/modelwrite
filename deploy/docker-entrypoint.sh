@@ -20,8 +20,13 @@ is_blank() {
     esac
 }
 
+# The server accepts the opt-in case-insensitively, so this guard must too: an operator
+# who writes MW_ALLOW_OPEN=YES should not have the container refuse while the server
+# would have accepted it. One rule, applied in both places.
+mw_allow_open=$(printf '%s' "${MW_ALLOW_OPEN:-}" | tr '[:upper:]' '[:lower:]')
+
 if is_blank "${MW_AUTH_TOKEN:-}" && is_blank "${MW_AUTH_JWKS:-}"; then
-    if [ "${MW_ALLOW_OPEN:-}" != "yes" ]; then
+    if [ "$mw_allow_open" != "yes" ]; then
         cat >&2 <<'EOF'
 REFUSING TO START: no authentication is configured.
 mw-server runs in OPEN mode with no credential, which accepts every request as
