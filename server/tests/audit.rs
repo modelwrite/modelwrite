@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
+
+use server::auth::{AuthConfig, Identity};
+use server::store::{sqlite::SqliteStore, Store};
 
 fn state(dir: &std::path::Path) -> server::AppState {
     let store = server::store::sqlite::SqliteStore::open(&dir.join("mw.db")).unwrap();
@@ -81,6 +86,30 @@ async fn commit(router: &axum::Router, branch: &str, message: &str, okf: Value) 
         .as_str()
         .unwrap()
         .to_string()
+}
+
+/// An authenticated identity pinned to the given subject with the admin role, so it can
+/// create projects, commits, branches, gate runs and delete branches.
+fn identity(subject: &str) -> Identity {
+    Identity {
+        subject: subject.to_string(),
+        roles: vec!["admin".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+/// Build the full application router pinned to one identity, returning a handle to the
+/// store so a test can prove a refused request recorded nothing. The tempdir is returned so
+/// it stays alive for as long as the router (and its open SQLite connection) is used.
+fn app_with_identity(identity: Identity) -> (axum::Router, Arc<SqliteStore>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    let state = server::AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(identity),
+    };
+    (server::app(state), store, dir)
 }
 
 #[tokio::test]
@@ -390,4 +419,195 @@ async fn the_log_is_newest_first_and_capped() {
         entries[0]["id"].as_i64().unwrap() > entries[1]["id"].as_i64().unwrap(),
         "the log must be newest first"
     );
+}
+
+#[tokio::test]
+async fn every_unknown_actor_path_now_names_the_identity() {
+    let (router, _store, _dir) = app_with_identity(identity("alex"));
+
+    // project.create
+    let created = router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    // commit.create (base), then branch.create, gate.run and branch.delete.
+    let base = commit(&router, "main", "base", model("Block")).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            json!({ "name": "feature", "from": base }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+
+    let gated = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/gate",
+            json!({ "reference": base, "candidate": base }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(gated.status(), StatusCode::OK);
+
+    let deleted = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/projects/coffee/branches/feature")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    // Every previously-"unknown" action now names the verified identity.
+    let entries = read_audit(&router).await;
+    for action in [
+        "project.create",
+        "branch.create",
+        "gate.run",
+        "branch.delete",
+    ] {
+        let entry = entries
+            .iter()
+            .find(|e| e["action"] == action)
+            .unwrap_or_else(|| panic!("missing audit action {}", action));
+        assert_eq!(
+            entry["actor"], "alex",
+            "{} must name the verified identity, not \"unknown\"",
+            action
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_authenticated_commit_records_the_identity() {
+    let (router, _store, _dir) = app_with_identity(identity("alex"));
+    let created = router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "author": "alex", "message": "base", "okf": model("Block") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let entries = read_audit(&router).await;
+    let commit_entry = entries
+        .iter()
+        .find(|e| e["action"] == "commit.create")
+        .expect("a commit.create entry must be recorded");
+    assert_eq!(
+        commit_entry["actor"], "alex",
+        "the commit must be attributed to the verified identity"
+    );
+}
+
+#[tokio::test]
+async fn a_body_naming_another_actor_is_refused_and_records_nothing() {
+    let (router, store, _dir) = app_with_identity(identity("alex"));
+    // Seed the project directly so a denied commit is observable as "nothing changed".
+    store.create_project("coffee", None).unwrap();
+
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "author": "someone-else", "message": "m", "okf": model("Block") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a body naming another actor must be refused with 403"
+    );
+
+    assert!(
+        store.commits_on("coffee", "main").unwrap().is_empty(),
+        "a refused commit must write no commit"
+    );
+    assert!(
+        store.audit("coffee", 1000).unwrap().is_empty(),
+        "a refused commit must write no audit entry"
+    );
+}
+
+#[tokio::test]
+async fn a_holder_naming_another_actor_is_refused_and_records_nothing() {
+    let (router, store, _dir) = app_with_identity(identity("alex"));
+    store.create_project("coffee", None).unwrap();
+
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            json!({ "branch": "main", "elements": ["b1"], "holder": "someone-else", "ttlSeconds": 300 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a holder naming another actor must be refused with 403"
+    );
+
+    assert!(
+        store.locks("coffee", 0).unwrap().is_empty(),
+        "a refused acquire must create no lock"
+    );
+    assert!(
+        store.audit("coffee", 1000).unwrap().is_empty(),
+        "a refused acquire must write no audit entry"
+    );
+}
+
+#[tokio::test]
+async fn open_mode_records_anonymous() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    // The body still claims "alex" and is accepted (open mode has no "someone else"), but
+    // the audit must record the honest subject: nobody was authenticated.
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "author": "alex", "message": "base", "okf": model("Block") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let entries = read_audit(&router).await;
+    assert!(!entries.is_empty(), "open mode must still record actions");
+    for entry in &entries {
+        assert_eq!(
+            entry["actor"], "anonymous",
+            "open mode must record the honest anonymous subject"
+        );
+    }
 }

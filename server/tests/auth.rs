@@ -434,7 +434,12 @@ async fn a_scoped_identity_only_sees_the_projects_it_may_reach() {
     store.create_project("tea", None).unwrap();
 
     let response = router
-        .oneshot(Request::builder().uri("/projects").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);

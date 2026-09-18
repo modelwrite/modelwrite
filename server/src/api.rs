@@ -130,6 +130,28 @@ fn now_seconds() -> i64 {
     now_epoch().parse().unwrap_or(0)
 }
 
+/// A body may name an actor in an `author` or `holder` field. Once authentication is
+/// configured that claimed name must agree with the verified identity, or the request is
+/// refused with 403 BEFORE anything is written, so a caller can never put another person's
+/// name into the record. A missing or empty name proceeds - it names nobody. In open mode
+/// nobody was authenticated, so no name can be "someone else's" and the check is skipped;
+/// the audit still records the honest subject, "anonymous".
+pub fn verify_actor(
+    auth: &AuthConfig,
+    identity: &Identity,
+    claimed: Option<&str>,
+) -> Result<(), ApiError> {
+    if matches!(auth, AuthConfig::Open) {
+        return Ok(());
+    }
+    match claimed {
+        Some(name) if !name.is_empty() && name != identity.subject.as_str() => Err(
+            ApiError::forbidden("the request names an actor other than the authenticated caller"),
+        ),
+        _ => Ok(()),
+    }
+}
+
 /// Record a refusal - an action that was ATTEMPTED but refused - in the audit log. A
 /// refusal is not a mutation, so it appends directly rather than riding a transaction; the
 /// event matters even though nothing changed.
@@ -157,12 +179,14 @@ pub fn record_refusal(
 
 /// Call a commit-producing store method and, if it is refused because an element is
 /// locked, record commit.refused before surfacing the 409. A lock refusal is the
-/// highest-value event this feature produces: it is the overwrite the lock prevented.
+/// highest-value event this feature produces: it is the overwrite the lock prevented. The
+/// `actor` is the verified identity's subject - a refusal is an audit entry and must carry
+/// the same verified actor as every other entry.
 pub fn commit_refusal_guard(
     state: &ApiState,
     project: &str,
     branch: &str,
-    author: &str,
+    actor: &str,
     result: Result<Commit, StoreError>,
 ) -> Result<Commit, ApiError> {
     match result {
@@ -176,7 +200,7 @@ pub fn commit_refusal_guard(
             if let Err(recording) = record_refusal(
                 state.store.as_ref(),
                 project,
-                author,
+                actor,
                 "commit.refused",
                 branch,
                 &detail,
@@ -282,7 +306,7 @@ pub async fn create_project(
         id: 0,
         project: body.name.clone(),
         at: now_seconds(),
-        actor: "unknown".to_string(),
+        actor: identity.subject.clone(),
         action: "project.create".to_string(),
         subject: body.name.clone(),
         detail: "project created".to_string(),
@@ -337,6 +361,8 @@ pub async fn create_commit(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     if state
         .store
         .project(&project)
@@ -409,7 +435,7 @@ pub async fn create_commit(
         id: 0,
         project: project.clone(),
         at: now,
-        actor: body.author.clone(),
+        actor: identity.subject.clone(),
         action: "commit.create".to_string(),
         subject: body.branch.clone(),
         detail: body.message.clone(),
@@ -418,7 +444,7 @@ pub async fn create_commit(
         &state,
         &project,
         &body.branch,
-        &body.author,
+        &identity.subject,
         state.store.commit_model(
             &project,
             &body.branch,
@@ -513,7 +539,7 @@ pub async fn create_branch(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: "unknown".to_string(),
+        actor: identity.subject.clone(),
         action: "branch.create".to_string(),
         subject: body.name.clone(),
         detail: format!("from {}", body.from),
@@ -574,7 +600,7 @@ pub async fn delete_branch(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: "unknown".to_string(),
+        actor: identity.subject.clone(),
         action: "branch.delete".to_string(),
         subject: name.clone(),
         detail: "branch deleted".to_string(),
@@ -611,6 +637,8 @@ pub async fn reset_branch(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &name)?;
     if state
         .store
@@ -649,7 +677,7 @@ pub async fn reset_branch(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: body.author.clone(),
+        actor: identity.subject.clone(),
         action: "branch.reset".to_string(),
         subject: name.clone(),
         detail: format!("reset to {}", body.to),
@@ -658,7 +686,7 @@ pub async fn reset_branch(
         &state,
         &project,
         &name,
-        &body.author,
+        &identity.subject,
         state.store.commit_model(
             &project,
             &name,

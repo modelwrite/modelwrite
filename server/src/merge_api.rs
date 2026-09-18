@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::api::{
     commit_json, commit_refusal_guard, load_model, map_store_error, touched_elements,
-    validate_name, ApiState,
+    validate_name, verify_actor, ApiState,
 };
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
@@ -125,6 +125,8 @@ pub async fn merge_branches(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &body.branch)?;
     validate_name("branch name", &body.other)?;
     if state
@@ -164,7 +166,7 @@ pub async fn merge_branches(
                 id: 0,
                 project: project.clone(),
                 at: now_seconds(),
-                actor: body.author.clone(),
+                actor: identity.subject.clone(),
                 action: "merge.conflict".to_string(),
                 subject: body.branch.clone(),
                 detail: format!("merge conflict between {} and {}", body.branch, body.other),
@@ -234,7 +236,7 @@ pub async fn merge_branches(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: body.author.clone(),
+        actor: identity.subject.clone(),
         action: "merge.clean".to_string(),
         subject: body.branch.clone(),
         detail: format!("merged {} into {}", body.other, body.branch),
@@ -243,7 +245,7 @@ pub async fn merge_branches(
         &state,
         &project,
         &body.branch,
-        &body.author,
+        &identity.subject,
         state.store.commit_merge(
             &project,
             &body.branch,

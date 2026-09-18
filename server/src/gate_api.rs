@@ -59,7 +59,7 @@ pub async fn run_gate(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: "unknown".to_string(),
+        actor: identity.subject.clone(),
         action: "gate.run".to_string(),
         subject: body.candidate.clone(),
         detail: format!(

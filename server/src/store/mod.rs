@@ -50,8 +50,9 @@ pub struct Lock {
 
 /// One entry in the append-only audit log. The `id` is assigned by the store on append
 /// (callers pass 0); `at` is the wall-clock time supplied by the HTTP layer, never read
-/// inside the store; `actor` is what the request SAID it was - its author or holder - not
-/// a verified identity, which is a later tranche.
+/// inside the store; `actor` is the verified identity's subject - who actually performed
+/// the action - never a name taken from the request body. In open mode that subject is
+/// "anonymous": nobody was authenticated, which is the honest statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEntry {

@@ -5,7 +5,9 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{map_store_error, record_refusal, validate_element_name, validate_name, ApiState};
+use crate::api::{
+    map_store_error, record_refusal, validate_element_name, validate_name, verify_actor, ApiState,
+};
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{now_epoch, AuditEntry, Lock};
@@ -52,6 +54,7 @@ pub async fn acquire_locks(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    verify_actor(&state.auth, &identity, Some(&body.holder))?;
     validate_name("branch name", &body.branch)?;
     validate_holder(&body.holder)?;
     if body.elements.is_empty() {
@@ -89,7 +92,7 @@ pub async fn acquire_locks(
         id: 0,
         project: project.clone(),
         at: now,
-        actor: body.holder.clone(),
+        actor: identity.subject.clone(),
         action: "lock.acquire".to_string(),
         subject: elements.join(","),
         detail: format!(
@@ -118,7 +121,7 @@ pub async fn acquire_locks(
                 if let Err(recording) = record_refusal(
                     state.store.as_ref(),
                     &project,
-                    &body.holder,
+                    &identity.subject,
                     "lock.denied",
                     &elements.join(","),
                     &error.to_string(),
@@ -176,6 +179,7 @@ pub async fn release_locks(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    verify_actor(&state.auth, &identity, Some(&body.holder))?;
     if state
         .store
         .project(&project)
@@ -190,7 +194,7 @@ pub async fn release_locks(
         id: 0,
         project: project.clone(),
         at: now_seconds(),
-        actor: body.holder.clone(),
+        actor: identity.subject.clone(),
         action: "lock.release".to_string(),
         subject: body.ids.join(","),
         detail: "released lock(s)".to_string(),
