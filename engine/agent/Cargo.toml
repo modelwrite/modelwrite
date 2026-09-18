@@ -16,4 +16,5 @@ serde.workspace = true
 
 [dev-dependencies]
 mw-binding = { path = "../binding" }
+mw-binding-xmi = { path = "../binding-xmi" }
 mw-okf = { path = "../okf" }

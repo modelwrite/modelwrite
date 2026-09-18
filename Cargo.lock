@@ -910,6 +910,7 @@ name = "mw-agent"
 version = "0.1.0"
 dependencies = [
  "mw-binding",
+ "mw-binding-xmi",
  "mw-okf",
  "serde",
 ]

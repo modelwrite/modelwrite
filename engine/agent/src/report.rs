@@ -3,8 +3,9 @@
 //!
 //! The text is the contract: it must be readable with no knowledge of the
 //! types, it must separate the proposals that change a model from the ones that
-//! do not, and it must mark a low-confidence proposal instead of burying it.
-//! Nothing here can panic; it is pure formatting over borrowed data.
+//! do not, it must mark a low-confidence proposal instead of burying it, and it
+//! must list the entries the agent had nothing to say about rather than hiding
+//! them. Nothing here can panic; it is pure formatting over borrowed data.
 
 use crate::{Confidence, Proposal, ProposedAction, ReviewArtifact};
 
@@ -16,6 +17,7 @@ const HEADER: &str = "MODELWRITE AGENT REVIEW";
 const CHANGES_MODEL: &str = "PROPOSALS THAT CHANGE THE MODEL";
 const OBSERVATIONS: &str = "PROPOSALS THAT DO NOT CHANGE THE MODEL";
 const ATTENTION: &str = " *** NEEDS ATTENTION ***";
+const UNKNOWN: &str = "WHAT THE AGENT DOES NOT KNOW";
 
 pub(crate) fn render(artifact: &ReviewArtifact) -> String {
     let mut out = String::new();
@@ -62,6 +64,20 @@ pub(crate) fn render(artifact: &ReviewArtifact) -> String {
         changing.len(),
         attention
     ));
+
+    // The gaps are listed as their own section, before the proposals: what the
+    // agent does not know matters as much as what it proposes, and hiding it
+    // would be the failure this platform is built against.
+    if !artifact.gaps.is_empty() {
+        out.push('\n');
+        out.push_str(UNKNOWN);
+        out.push('\n');
+        out.push_str(&"-".repeat(UNKNOWN.len()));
+        out.push('\n');
+        for gap in &artifact.gaps {
+            out.push_str(&format!("- {}\n", gap));
+        }
+    }
 
     out.push('\n');
     out.push_str(CHANGES_MODEL);

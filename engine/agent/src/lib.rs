@@ -14,6 +14,7 @@
 //! is defined and tested with a scripted implementation before anything is
 //! connected to a live provider.
 
+pub mod losses;
 mod report;
 
 use std::fmt;
@@ -214,15 +215,20 @@ pub trait Reasoner {
 
 /// The record a human reads before anything is committed.
 ///
-/// It carries the task, the proposals, the agent's identity and a summary, and
-/// it is the audit artifact: it says who (an agent) proposed what, so a reader
-/// a year later can tell who decided.
+/// It carries the task, the proposals, the agent's identity, a summary, and the
+/// entries the agent had nothing to say about (`gaps`), and it is the audit
+/// artifact: it says who (an agent) proposed what, so a reader a year later can
+/// tell who decided.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReviewArtifact {
     pub task: AgentTask,
     pub proposals: Vec<Proposal>,
     pub agent: String,
     pub rationale_summary: String,
+    /// The blocking entries the reasoner produced no proposal for - the material
+    /// the agent does not know. A review that hides these gaps is the failure
+    /// this platform is built against, so they are named, never buried.
+    pub gaps: Vec<String>,
 }
 
 impl ReviewArtifact {
@@ -283,6 +289,7 @@ impl ScriptedReasoner {
             proposals,
             agent: self.agent.clone(),
             rationale_summary,
+            gaps: Vec::new(),
         })
     }
 }
