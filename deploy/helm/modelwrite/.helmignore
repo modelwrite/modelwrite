@@ -1,6 +1,7 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# The example Secret is documentation, not a template. It must not be rendered
-# by Helm (rendering it would install a Secret full of CHANGE-ME placeholders),
-# and Helm rejects a non-.yaml/.yml/.tpl/.txt extension in templates/, so it is
-# excluded here.
-templates/secret.yaml.example
+﻿# SPDX-License-Identifier: AGPL-3.0-or-later
+# The example Secret is documentation for the operator, not a template. It lives at the
+# chart root rather than in templates/ for exactly that reason: Helm renders every .yaml
+# in templates/, which would install a Secret full of CHANGE-ME placeholders, and Helm
+# rejects a file whose extension it does not know ('.example') inside templates/ outright.
+# Excluded from the packaged chart as well, so it cannot be mistaken for configuration.
+secret.yaml.example

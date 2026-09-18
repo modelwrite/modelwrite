@@ -1,9 +1,9 @@
-# Deploying modelwrite
+﻿# Deploying modelwrite
 
 This directory turns the repository into software an organisation can install: a
 container image, a Docker Compose trial stack, and a Helm chart for Kubernetes.
 
-**WARNING — OPEN MODE. mw-server runs WITHOUT authentication when neither a token
+**WARNING â€” OPEN MODE. mw-server runs WITHOUT authentication when neither a token
 nor a JWKS is configured, and in that mode every request is accepted as an
 anonymous administrator. The container image refuses to start in that state
 unless the operator sets `MW_ALLOW_OPEN=yes` explicitly. Never run anything
@@ -23,7 +23,7 @@ that a machine without Docker or PostgreSQL cannot, on every push:
   which renders every template and fails on a malformed template or an invalid
   `Chart.yaml`/`values.yaml`.
 - **Every plain YAML file parses.** A PyYAML pass over `docker-compose.yml`,
-  `Chart.yaml`, `values.yaml` and `templates/secret.yaml.example` fails the job on
+  `Chart.yaml`, `values.yaml` and `secret.yaml.example` fails the job on
   a syntax error. (The Go-template `templates/*.yaml` files are not YAML until
   Helm renders them; `helm lint` is their check.)
 - **The PostgreSQL backend executes.** The `postgres` job starts a real
@@ -43,15 +43,15 @@ Those remain an operator's first-run responsibility.
 
 Operate on the truth, not on a wish list. This chart does **not** provide:
 
-- **TLS termination** — the service speaks plain HTTP on port 8080 and expects a
+- **TLS termination** â€” the service speaks plain HTTP on port 8080 and expects a
   proxy/ingress in front of it. No certificate management is included.
-- **Backups** — the PostgreSQL data and the evidence volume are not backed up.
+- **Backups** â€” the PostgreSQL data and the evidence volume are not backed up.
   You are responsible for database backups and for keeping the gate evidence.
-- **High availability** — one replica, no leader election, no failover. The
+- **High availability** â€” one replica, no leader election, no failover. The
   SQLite backend is a single file and must never be shared between replicas.
-- **Secret management** — the chart references Secrets by name but does not
-  create or rotate them (see `templates/secret.yaml.example`).
-- **Database migration jobs or a managed database** — it expects an existing
+- **Secret management** â€” the chart references Secrets by name but does not
+  create or rotate them (see `secret.yaml.example`).
+- **Database migration jobs or a managed database** â€” it expects an existing
   PostgreSQL URL (or falls back to SQLite on the persistent volume).
 
 ## The container image
@@ -124,7 +124,7 @@ To run a deliberately open pilot:
 
 - Secrets are referenced by name (`auth.tokenSecret`, `auth.jwksSecret`,
   `database.urlSecret`) and never inlined in `values.yaml`; see
-  `templates/secret.yaml.example` for the exact keys.
+  `secret.yaml.example` for the exact keys.
 - Liveness and readiness probes both hit `GET /health`, which reports the auth
   mode, so an accidentally-open deployment is visible to monitoring.
 - Resource requests and limits are set in `values.yaml`.
@@ -135,14 +135,14 @@ To run a deliberately open pilot:
 An air-gapped site has no pull access to a registry and may have no PostgreSQL.
 Install the already-built image and its identity material:
 
-1. **Transfer the image** — `docker save` it on a connected machine, carry the
+1. **Transfer the image** â€” `docker save` it on a connected machine, carry the
    tar, and `docker load` it on the isolated host (or use a private registry on
    the isolated network).
-2. **Mount the JWKS** — place the JWKS file where the container can read it and
+2. **Mount the JWKS** â€” place the JWKS file where the container can read it and
    point `MW_AUTH_JWKS` at its path (the chart mounts a `jwksSecret` at
    `/jwks`). This is the air-gapped identity path: signed JWTs, verified
    locally, no network identity provider.
-3. **Use a local database or none** — set `MW_DATABASE_URL` to a local
+3. **Use a local database or none** â€” set `MW_DATABASE_URL` to a local
    PostgreSQL, or omit it and let the service run on SQLite at `/data/modelwrite.db`.
 
 The gate evidence (`MW_EVIDENCE_DIR`) is written to `/data/evidence` and must
@@ -151,10 +151,10 @@ be on a volume you back up.
 ## Validation
 
 Local (PyYAML 6.0.3): `docker-compose.yml`, `Chart.yaml`, `values.yaml` and
-`templates/secret.yaml.example` all parse as YAML. CI goes further: the `deploy`
+`secret.yaml.example` all parse as YAML. CI goes further: the `deploy`
 job parses those same files, runs `helm lint` on the chart (which renders the
 Go-template files and checks them for real), and builds the image with
-`docker build`. The example Secret (`templates/secret.yaml.example`) is excluded
+`docker build`. The example Secret (`secret.yaml.example`) is excluded
 from Helm rendering by `.helmignore`, because Helm rejects a non-template
 extension in `templates/` and rendering it would install placeholder secrets.
 The Kubernetes API versions used (`apps/v1`, `v1`) are stable and long-supported.
