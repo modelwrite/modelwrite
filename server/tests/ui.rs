@@ -838,3 +838,49 @@ async fn a_viewer_cannot_merge() {
         html
     );
 }
+
+#[tokio::test]
+async fn hostile_content_in_a_model_is_escaped_on_the_model_page() {
+    // The project list is not where a supplier's words arrive: requirement text and element
+    // documentation are. The escaping is uniform because maud escapes every splice, but a
+    // test here is what keeps that true if somebody reaches for raw markup later.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let mut okf = test_support::load_okf_expected();
+    let mut value: serde_json::Value = serde_json::from_str(&okf).unwrap();
+    value["structure"][0]["documentation"] = serde_json::json!("<script>alert('docs')</script>");
+    value["requirements"][0]["reqText"] = serde_json::json!("<script>alert('req')</script>");
+    okf = value.to_string();
+
+    let committed = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "hostile", "okf": serde_json::from_str::<serde_json::Value>(&okf).unwrap() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let page = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        html.contains("&lt;script&gt;"),
+        "the hostile content must appear escaped"
+    );
+    assert!(
+        !html.contains("<script"),
+        "no raw script tag may reach the model page"
+    );
+}

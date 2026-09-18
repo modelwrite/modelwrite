@@ -83,7 +83,7 @@ fn project_list_page(identity: &Identity, mechanism: &str, rows: &[ProjectRow]) 
             ul class="projects" {
                 @for row in rows {
                     li {
-                        a class="project-name" href={ "/ui/projects/" (row.name.as_str()) } { (row.name.as_str()) }
+                        a class="project-name" href={ "/ui/projects/" (crate::ui::urlencode(row.name.as_str())) } { (row.name.as_str()) }
                         span class="meta" {
                             (row.branch_count) " "
                             @if row.branch_count == 1 { "branch" } @else { "branches" }
@@ -180,7 +180,7 @@ fn branch_list_page(
             ul class="branches" {
                 @for row in rows {
                     li {
-                        a class="branch-name" href={ "/ui/projects/" (project) "/model?branch=" (row.name.as_str()) } { (row.name.as_str()) }
+                        a class="branch-name" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model?branch=" (crate::ui::urlencode(row.name.as_str())) } { (row.name.as_str()) }
                         code class="tip" { (short_hash(&row.tip)) }
                         @if let Some(commit) = &row.commit {
                             span class="message" { (commit.message.as_str()) }

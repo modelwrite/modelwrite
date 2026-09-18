@@ -244,11 +244,37 @@ fn structure_tree<'a>(root: &'a OkfRoot) -> Vec<TreeNode<'a>> {
         .filter(|element| !has_parent.contains(element.id.as_str()))
         .collect();
     roots.sort_by(|a, b| a.name.cmp(&b.name));
+    // The ROOTS are marked visited as they are emitted. Without that the unreached-element
+    // sweep below would treat every root as unreached and render it twice.
     let mut visited: HashSet<&'a str> = HashSet::new();
-    roots
-        .into_iter()
-        .map(|element| build_node(element, &elements, &children, &mut visited))
-        .collect()
+    let mut nodes: Vec<TreeNode<'a>> = Vec::with_capacity(roots.len());
+    for element in roots {
+        visited.insert(element.id.as_str());
+        nodes.push(build_node(element, &elements, &children, &mut visited));
+    }
+
+    // Anything the walk did not reach is still rendered.
+    //
+    // A part/contains CYCLE leaves every element in the cycle with a parent but no root to
+    // reach it from, so the walk never arrives and those elements would simply be missing -
+    // which is the failure this whole platform exists to prevent, and the model is untrusted
+    // input from a colleague, a supplier or an import. The corpus is acyclic, so its test
+    // could never catch this for any other model.
+    //
+    // Emitting the unreached elements as their own roots means the section can under-render
+    // NOTHING: every element in the document appears exactly once, whatever shape the graph
+    // turns out to be.
+    let mut orphaned: Vec<&'a Element> = root
+        .structure
+        .iter()
+        .filter(|element| !visited.contains(element.id.as_str()))
+        .collect();
+    orphaned.sort_by(|a, b| a.name.cmp(&b.name));
+    for element in orphaned {
+        visited.insert(element.id.as_str());
+        nodes.push(build_node(element, &elements, &children, &mut visited));
+    }
+    nodes
 }
 
 fn build_node<'a>(
@@ -449,6 +475,10 @@ fn traceability_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
                     c.allocated,
                 )
             }
+            // No graph section means no relationships, so the engine has nothing to measure
+            // and returns no report at all. Reporting "0 covered" would be a NUMBER the
+            // engine never produced, which is exactly the kind of quiet invention this page
+            // is not allowed to make; the section says there is nothing to measure instead.
             None => {
                 let ids: HashSet<&str> = root
                     .requirements
@@ -458,13 +488,21 @@ fn traceability_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
                 (root.requirements.len(), 0, ids, 0, 0, 0, 0)
             }
         };
+    let measurable = ctx.coverage.is_some();
     let unresolved = unresolved_edges(root);
     html! {
         section class="model-section" id="traceability" {
             h2 { "Traceability" }
-            p class="coverage-summary" {
-                (total) " requirements: " (covered) " covered, " (uncovered_ids.len()) " uncovered · "
-                (satisfied) " satisfy, " (refined) " refine, " (verified) " verify, " (allocated) " allocate"
+            @if measurable {
+                p class="coverage-summary" {
+                    (total) " requirements: " (covered) " covered, " (uncovered_ids.len()) " uncovered · "
+                    (satisfied) " satisfy, " (refined) " refine, " (verified) " verify, " (allocated) " allocate"
+                }
+            } @else {
+                p class="coverage-summary" {
+                    "This model has no graph section, so there are no relationships to measure. "
+                    "Coverage cannot be reported."
+                }
             }
             @if root.requirements.is_empty() {
                 p { "This model has no requirements." }

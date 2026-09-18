@@ -17,3 +17,23 @@ pub mod layout;
 pub mod model;
 pub mod pages;
 pub mod review;
+
+/// Percent-encode a value for use in a URL PATH SEGMENT or QUERY STRING.
+///
+/// HTML escaping is a different job and does not cover this: a branch named `a&b` is
+/// perfectly safe to put in a document but produces a query string that means something
+/// else, so the link silently points at the wrong thing. Nothing here is a security fix -
+/// maud already prevents markup injection - it is the difference between a link that works
+/// and a link that lies.
+pub fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
+}
