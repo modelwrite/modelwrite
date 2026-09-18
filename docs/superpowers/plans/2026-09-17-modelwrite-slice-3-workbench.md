@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Rust stable; edition 2021. The server crate is at rust-version 1.85.
+- Rust stable; edition 2021. The server crate is at rust-version 1.88 (raised when a transitive dependency required it). The engine crates remain at 1.75.
 - Every source file begins with: // SPDX-License-Identifier: AGPL-3.0-or-later
 - Cargo is not on PATH in fresh shells: begin every shell command sequence with $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
 - Use --no-fail-fast when running a test suite.
