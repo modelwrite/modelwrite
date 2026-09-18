@@ -898,7 +898,10 @@ name = "mw-cli"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "mw-gate",
+ "mw-okf",
  "mw-server",
+ "mw-test-support",
  "serde_json",
  "tempfile",
  "tokio",
