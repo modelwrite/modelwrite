@@ -920,7 +920,11 @@ name = "mw-analytics"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "mw-graph",
+ "mw-okf",
+ "mw-test-support",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 
