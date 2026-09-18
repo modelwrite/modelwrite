@@ -1030,6 +1030,7 @@ dependencies = [
  "jsonwebtoken",
  "maud",
  "mw-agent",
+ "mw-analytics",
  "mw-binding",
  "mw-binding-xmi",
  "mw-gate",
