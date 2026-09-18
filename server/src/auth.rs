@@ -4,11 +4,17 @@
 //! Authentication is OPT-IN. With no configuration the service runs in OPEN mode, every
 //! request is accepted, and the identity is an anonymous admin (`Identity::open()`). When
 //! a static bearer token is configured, a request must present it (SHA-256, compared in
-//! constant time) or be refused with 401. Signed JWTs arrive in Task 4.
+//! constant time) or be refused with 401. When a JWKS is configured, a request must
+//! present a signed JWT whose RS256/RS384/RS512 signature verifies against one of the
+//! configured keys and whose expiry, issuer and audience are valid; roles and projects
+//! arrive from configurable claims.
+
+use std::collections::HashMap;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::HeaderMap;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use sha2::{Digest, Sha256};
 
 use crate::api::ApiState;
@@ -78,8 +84,8 @@ impl Permission {
 }
 
 /// How the service decides who a request is. Authentication is opt-in: the `Open` variant
-/// is the default, and the only non-open variant Task 1's startup path constructs is
-/// `Static`.
+/// is the default, and a request is accepted without a credential. The `Static` and
+/// `Jwt` variants require a bearer token.
 #[derive(Clone)]
 pub enum AuthConfig {
     Open,
@@ -88,21 +94,27 @@ pub enum AuthConfig {
     Static {
         token_hash: String,
     },
-    /// Signed JWTs verified against a JWKS. Task 4 implements this variant; until then it
-    /// is present only so the configuration is complete and matches stay exhaustive about
-    /// the not-yet-implemented path.
+    /// Signed JWTs verified against a JWKS. `keys` is keyed by the `kid` each key
+    /// declares; `issuer` and `audience`, when present, must match the corresponding
+    /// claim. `role_claim` and `project_claim` name the claims that carry the caller's
+    /// roles and projects.
     Jwt {
-        jwks_source: String,
+        keys: HashMap<String, DecodingKey>,
+        issuer: Option<String>,
+        audience: Option<String>,
+        role_claim: String,
+        project_claim: String,
     },
     /// Every request resolves to this exact identity. Only tests construct this: it lets
     /// the permission and project-scope decisions be exercised with a specific role or
-    /// scope before Task 4 wires a real per-claim authority. `from_env` never produces it.
+    /// scope. `from_env` never produces it.
     Fixed(Identity),
 }
 
-/// Redacted on purpose: a derived Debug would print the token digest, and a configuration
-/// that can be printed into a log is a configuration that eventually will be. The digest is
-/// not the secret, but it is the thing compared to the secret, so it stays out of logs.
+/// Redacted on purpose: a derived Debug would print the token digest or the JWKS keys, and
+/// a configuration that can be printed into a log is a configuration that eventually will
+/// be. The digest is not the secret but it is the thing compared to the secret, so it stays
+/// out of logs; the JWKS keys are public, but their count is all a log needs.
 impl std::fmt::Debug for AuthConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -110,9 +122,19 @@ impl std::fmt::Debug for AuthConfig {
             AuthConfig::Static { .. } => {
                 write!(f, "AuthConfig::Static {{ token_hash: <redacted> }}")
             }
-            AuthConfig::Jwt { jwks_source } => f
+            AuthConfig::Jwt {
+                keys,
+                issuer,
+                audience,
+                role_claim,
+                project_claim,
+            } => f
                 .debug_struct("AuthConfig::Jwt")
-                .field("jwks_source", jwks_source)
+                .field("keys", &keys.len())
+                .field("issuer", issuer)
+                .field("audience", audience)
+                .field("role_claim", role_claim)
+                .field("project_claim", project_claim)
                 .finish(),
             AuthConfig::Fixed(identity) => f
                 .debug_struct("AuthConfig::Fixed")
@@ -125,13 +147,28 @@ impl std::fmt::Debug for AuthConfig {
 }
 
 impl AuthConfig {
-    /// Read the configuration from the environment. Task 1 wires the static token only;
-    /// Task 4 wires the JWKS. With no `MW_AUTH_TOKEN` the service runs OPEN.
-    pub fn from_env() -> AuthConfig {
-        match std::env::var("MW_AUTH_TOKEN") {
-            Ok(token) if !token.trim().is_empty() => AuthConfig::static_token(token.trim()),
-            _ => AuthConfig::Open,
+    /// Read the configuration from the environment. A static token (`MW_AUTH_TOKEN`) is
+    /// the simplest option; signed JWTs arrive from a JWKS at a file path
+    /// (`MW_AUTH_JWKS`, a mounted secret - what an air-gapped install has) or, second, a
+    /// URL fetched once at startup (`MW_AUTH_JWKS_URL`). With neither the service runs
+    /// OPEN. A malformed JWKS is a startup error, not a silent fall back to open mode.
+    pub fn from_env() -> anyhow::Result<AuthConfig> {
+        if let Ok(token) = std::env::var("MW_AUTH_TOKEN") {
+            if !token.trim().is_empty() {
+                return Ok(AuthConfig::static_token(token.trim()));
+            }
         }
+        if let Ok(path) = std::env::var("MW_AUTH_JWKS") {
+            if !path.trim().is_empty() {
+                return AuthConfig::from_jwks_file(path.trim());
+            }
+        }
+        if let Ok(url) = std::env::var("MW_AUTH_JWKS_URL") {
+            if !url.trim().is_empty() {
+                return AuthConfig::from_jwks_url(url.trim());
+            }
+        }
+        Ok(AuthConfig::Open)
     }
 
     /// Build the static-token configuration, hashing the token ONCE so every later
@@ -142,10 +179,73 @@ impl AuthConfig {
         }
     }
 
+    /// The JWT configuration with the default claim names: roles in `roles`, projects in
+    /// `projects`. Use `jwt_with_claims` to rename them.
+    pub fn jwt(
+        keys: HashMap<String, DecodingKey>,
+        issuer: Option<String>,
+        audience: Option<String>,
+    ) -> AuthConfig {
+        AuthConfig::jwt_with_claims(
+            keys,
+            issuer,
+            audience,
+            "roles".to_string(),
+            "projects".to_string(),
+        )
+    }
+
+    /// The JWT configuration with explicit claim names.
+    pub fn jwt_with_claims(
+        keys: HashMap<String, DecodingKey>,
+        issuer: Option<String>,
+        audience: Option<String>,
+        role_claim: String,
+        project_claim: String,
+    ) -> AuthConfig {
+        AuthConfig::Jwt {
+            keys,
+            issuer,
+            audience,
+            role_claim,
+            project_claim,
+        }
+    }
+
+    /// Build a JWT configuration from a JWKS FILE (the primary source: a mounted secret,
+    /// which is what an air-gapped install has). Issuer, audience and claim names come
+    /// from the environment.
+    pub fn from_jwks_file(path: &str) -> anyhow::Result<AuthConfig> {
+        let jwks = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("cannot read the JWKS at {}: {}", path, e))?;
+        let keys = parse_jwks(&jwks)?;
+        Ok(AuthConfig::jwt_with_claims(
+            keys,
+            jwt_env_issuer(),
+            jwt_env_audience(),
+            jwt_env_claim("MW_AUTH_ROLES_CLAIM", "roles"),
+            jwt_env_claim("MW_AUTH_PROJECTS_CLAIM", "projects"),
+        ))
+    }
+
+    /// Build a JWT configuration from a JWKS fetched once at startup from a URL. This is
+    /// the second choice behind the file path: a service that cannot start without
+    /// outbound network access cannot run in an air-gapped install.
+    pub fn from_jwks_url(url: &str) -> anyhow::Result<AuthConfig> {
+        let jwks = fetch_jwks_url(url)?;
+        let keys = parse_jwks(&jwks)?;
+        Ok(AuthConfig::jwt_with_claims(
+            keys,
+            jwt_env_issuer(),
+            jwt_env_audience(),
+            jwt_env_claim("MW_AUTH_ROLES_CLAIM", "roles"),
+            jwt_env_claim("MW_AUTH_PROJECTS_CLAIM", "projects"),
+        ))
+    }
+
     /// Pin every request to one identity. This is a test hook: `from_env` never produces
     /// it, and it exists so the role and project-scope decisions on every route can be
-    /// exercised with a viewer, an author or a single-project scope before Task 4 adds a
-    /// real token authority that can express those claims.
+    /// exercised with a viewer, an author or a single-project scope.
     pub fn fixed(identity: Identity) -> AuthConfig {
         AuthConfig::Fixed(identity)
     }
@@ -197,6 +297,157 @@ pub fn parse_identity_from_static(token: &str, config: &AuthConfig) -> Option<Id
     }
 }
 
+/// Parse a JWKS document into decoding keys, keyed by each key's `kid` (an empty string
+/// when a key declares none). Only RSA keys are kept: they are the only kind that can
+/// verify the RSA signatures this service accepts, and a set that also carries an EC or
+/// octet key is common rather than erroneous.
+pub fn parse_jwks(jwks: &str) -> anyhow::Result<HashMap<String, DecodingKey>> {
+    let set: jsonwebtoken::jwk::JwkSet = serde_json::from_str(jwks)
+        .map_err(|e| anyhow::anyhow!("the JWKS is not valid JSON: {}", e))?;
+    let mut keys = HashMap::new();
+    for jwk in set.keys {
+        let jsonwebtoken::jwk::AlgorithmParameters::RSA(rsa) = jwk.algorithm else {
+            continue;
+        };
+        let key = DecodingKey::from_rsa_components(&rsa.n, &rsa.e)
+            .map_err(|e| anyhow::anyhow!("a JWKS RSA key is unusable: {}", e))?;
+        keys.insert(jwk.common.key_id.unwrap_or_default(), key);
+    }
+    if keys.is_empty() {
+        return Err(anyhow::anyhow!("the JWKS contains no RSA keys"));
+    }
+    Ok(keys)
+}
+
+/// Fetch a JWKS from a URL once, at startup, by shelling out to `curl`. This is the only
+/// way to reach an HTTPS URL without adding a second dependency (an HTTP/TLS stack), and it
+/// is deliberately a startup-time operation for the URL path, which only exists for
+/// environments that already have outbound network access.
+fn fetch_jwks_url(url: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("curl")
+        .args(["--fail", "--silent", "--show-error", "--location", url])
+        .output()
+        .map_err(|e| anyhow::anyhow!("cannot run curl to fetch the JWKS: {}", e))?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "curl failed to fetch the JWKS: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout).map_err(|_| anyhow::anyhow!("the fetched JWKS is not UTF-8"))
+}
+
+/// The expected issuer from `MW_AUTH_ISSUER`, or `None` when it is unset or empty.
+fn jwt_env_issuer() -> Option<String> {
+    std::env::var("MW_AUTH_ISSUER")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+}
+
+/// The expected audience from `MW_AUTH_AUDIENCE`, or `None` when it is unset or empty.
+fn jwt_env_audience() -> Option<String> {
+    std::env::var("MW_AUTH_AUDIENCE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+}
+
+/// A claim name from the environment, with a default. Empty values fall back to the
+/// default rather than producing a claim that can never match.
+fn jwt_env_claim(var: &str, default: &str) -> String {
+    std::env::var(var)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// A roles or projects claim is either a JSON array of strings or a single string. Anything
+/// else - absent, a number, an object - yields nothing, because absence must deny rather
+/// than default to something permissive.
+fn string_list_claim(claims: &serde_json::Value, key: &str) -> Vec<String> {
+    match claims.get(key) {
+        Some(serde_json::Value::String(s)) => vec![s.clone()],
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Resolve a presented token against the JWT configuration: `Some(identity)` when the
+/// signature, expiry, issuer and audience all verify, `None` otherwise. A non-JWT
+/// configuration has no keys to verify against, so it is `None`.
+pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Identity> {
+    let AuthConfig::Jwt {
+        keys,
+        issuer,
+        audience,
+        role_claim,
+        project_claim,
+    } = config
+    else {
+        return None;
+    };
+
+    // The header selects the key (kid) and must declare a supported RSA algorithm. An
+    // `alg: none` header does not even parse here, and the HMAC family is refused before
+    // any key is consulted, so a signed-token check cannot be downgraded to a shared-secret
+    // check.
+    let header = decode_header(token).ok()?;
+    if !matches!(
+        header.alg,
+        Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512
+    ) {
+        return None;
+    }
+
+    let kid = header.kid.as_deref().unwrap_or("");
+    let key = keys.get(kid)?;
+
+    let mut validation = Validation::new(header.alg);
+    // 60 seconds of clock skew, so a service and an identity provider whose clocks differ
+    // by seconds do not lock users out. Validation::new already requires `exp` and
+    // rejects a malformed or absent expiry, so a token cannot shed its expiry by giving it
+    // the wrong JSON type.
+    validation.leeway = 60;
+
+    if let Some(iss) = issuer {
+        validation.set_issuer(&[iss.as_str()]);
+        // Requiring the claim makes a missing OR malformed issuer a hard failure rather
+        // than a silently skipped check.
+        validation.required_spec_claims.insert("iss".to_string());
+    }
+
+    match audience {
+        Some(aud) => {
+            validation.set_audience(&[aud.as_str()]);
+            validation.required_spec_claims.insert("aud".to_string());
+        }
+        None => {
+            // No audience is configured, so a token carrying an audience is not a mismatch:
+            // audience verification is simply not enforced.
+            validation.validate_aud = false;
+        }
+    }
+
+    let data = decode::<serde_json::Value>(token, key, &validation).ok()?;
+    let claims = data.claims;
+
+    let subject = claims
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let roles = string_list_claim(&claims, role_claim);
+    let projects = string_list_claim(&claims, project_claim);
+
+    Some(Identity {
+        subject,
+        roles,
+        projects,
+    })
+}
+
 /// The `Authorization: Bearer <token>` value, or `None` when the header is missing or does
 /// not carry a non-empty bearer token.
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -211,8 +462,8 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 /// Resolve the request's identity against the configured authentication. In open mode every
-/// request is the anonymous admin; in static mode the bearer token must match, or the call
-/// is refused with 401. This is the extraction layer Task 2 threads through every route.
+/// request is the anonymous admin; in static mode the bearer token must match; in JWT mode
+/// the bearer token must verify against the configured JWKS. A missing or bad token is 401.
 pub async fn identity(state: &ApiState, headers: &HeaderMap) -> Result<Identity, ApiError> {
     match &state.auth {
         AuthConfig::Open => Ok(Identity::open()),
@@ -223,10 +474,12 @@ pub async fn identity(state: &ApiState, headers: &HeaderMap) -> Result<Identity,
             parse_identity_from_static(token, &state.auth)
                 .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))
         }
-        // Task 4 implements signed-token verification. Task 1's startup never constructs
-        // this variant, so the arm is unreachable until then; it still refuses rather than
-        // panicking or admitting an unverified caller.
-        AuthConfig::Jwt { .. } => Err(ApiError::unauthorized("authentication unavailable")),
+        AuthConfig::Jwt { .. } => {
+            let token = bearer_token(headers)
+                .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
+            parse_identity_from_jwt(token, &state.auth)
+                .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))
+        }
     }
 }
 
@@ -351,13 +604,10 @@ mod tests {
         assert!(parse_identity_from_static("s3cret-toke", &config).is_none());
         // A static token cannot be resolved against a non-static configuration.
         assert!(parse_identity_from_static(token, &AuthConfig::Open).is_none());
-        assert!(parse_identity_from_static(
-            token,
-            &AuthConfig::Jwt {
-                jwks_source: "x".to_string()
-            }
-        )
-        .is_none());
+        assert!(
+            parse_identity_from_static(token, &AuthConfig::jwt(HashMap::new(), None, None))
+                .is_none()
+        );
     }
 
     #[test]
@@ -368,5 +618,61 @@ mod tests {
         assert_eq!(a.len(), 64);
         assert!(!a.contains("the-token"));
         assert_ne!(hash_token("the-token"), hash_token("other-token"));
+    }
+
+    #[test]
+    fn parse_jwks_keeps_rsa_keys_by_kid_and_skips_others() {
+        // Two RSA keys (one kid-less) and one octet key that must be skipped.
+        let jwks = serde_json::json!({
+            "keys": [
+                { "kty": "RSA", "kid": "k1", "n": "AQID", "e": "AQAB" },
+                { "kty": "RSA", "n": "BAUG", "e": "AQAB" },
+                { "kty": "oct", "kid": "k2", "k": "c2VjcmV0" },
+            ]
+        });
+        let keys = parse_jwks(&jwks.to_string()).expect("a JWKS with RSA keys parses");
+        assert_eq!(keys.len(), 2, "the octet key must be skipped");
+        assert!(keys.contains_key("k1"), "kid k1 must be present");
+        assert!(
+            keys.contains_key(""),
+            "the kid-less key maps to the empty string"
+        );
+        assert!(!keys.contains_key("k2"), "the octet key must not be kept");
+    }
+
+    #[test]
+    fn parse_jwks_rejects_a_set_with_no_rsa_keys() {
+        let jwks = serde_json::json!({
+            "keys": [ { "kty": "oct", "kid": "k", "k": "c2VjcmV0" } ]
+        });
+        assert!(parse_jwks(&jwks.to_string()).is_err());
+    }
+
+    #[test]
+    fn string_list_claim_reads_array_single_string_and_denies_absence() {
+        let claims = serde_json::json!({
+            "roles": ["author", "reviewer"],
+            "one": "admin",
+            "wrong": 7,
+        });
+        assert_eq!(
+            string_list_claim(&claims, "roles"),
+            vec!["author".to_string(), "reviewer".to_string()]
+        );
+        assert_eq!(string_list_claim(&claims, "one"), vec!["admin".to_string()]);
+        assert_eq!(string_list_claim(&claims, "wrong"), Vec::<String>::new());
+        assert_eq!(string_list_claim(&claims, "absent"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn jwt_debug_redacts_the_keys() {
+        let config = AuthConfig::jwt(HashMap::new(), Some("iss".into()), Some("aud".into()));
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("AuthConfig::Jwt"));
+        assert!(debug.contains("keys"));
+        assert!(
+            !debug.contains("AQID"),
+            "a JWKS key must not appear in the debug output"
+        );
     }
 }

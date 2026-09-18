@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     // Authentication is opt-in. With no token configured the service runs in OPEN mode:
     // every request is accepted as an anonymous admin. That keeps pilots and air-gapped
     // installs working, so the warning is deliberate and loud, not an error.
-    let auth = AuthConfig::from_env();
+    let auth = AuthConfig::from_env()?;
     if matches!(&auth, AuthConfig::Open) {
         eprintln!(
             "WARNING: mw-server is running WITHOUT authentication (open mode); \

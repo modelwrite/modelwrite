@@ -13,11 +13,12 @@ use axum::http::{Request, StatusCode};
 use axum::routing::get as axum_get;
 use axum::{Json, Router};
 use http_body_util::BodyExt;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use server::api::ApiState;
-use server::auth::{AuthConfig, Identity};
+use server::auth::{parse_jwks, AuthConfig, Identity};
 use server::store::{sqlite::SqliteStore, Store};
 use server::{app, AppState};
 
@@ -519,4 +520,288 @@ async fn a_identity_that_reaches_nothing_sees_an_empty_listing() {
         json_body(response).await.as_array().unwrap().is_empty(),
         "an identity scoped to nothing sees nothing"
     );
+}
+// ---------------------------------------------------------------------------
+// Task 4: signed tokens (JWT) against a JWKS. A committed RSA-2048 key pair
+// (generated once, committed so tests need no network and no identity provider)
+// signs tokens; the JWKS carries only the public half. A second private key
+// proves that a token signed by the wrong key is refused.
+// ---------------------------------------------------------------------------
+
+const JWKS: &str = include_str!("fixtures/jwks.json");
+const PRIVATE_KEY: &str = include_str!("fixtures/rs256_private.pem");
+const OTHER_PRIVATE_KEY: &str = include_str!("fixtures/rs256_other_private.pem");
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Sign an RS256 token with the given claims, kid and private key PEM.
+fn sign(claims: Value, kid: &str, pem: &str) -> String {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(kid.to_string());
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+    )
+    .unwrap()
+}
+
+fn jwt_config(issuer: Option<&str>, audience: Option<&str>) -> AuthConfig {
+    AuthConfig::jwt(
+        parse_jwks(JWKS).unwrap(),
+        issuer.map(str::to_string),
+        audience.map(str::to_string),
+    )
+}
+
+fn bearer(uri: &str, token: &str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn bearer_post(uri: &str, body: Value, token: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// base64url without padding, for the hand-crafted alg:none token (jsonwebtoken cannot
+/// emit an alg:none header, by design).
+fn b64url(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[((n >> 6) & 63) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(n & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn jwt_mode_accepts_a_valid_token() {
+    let router = router(jwt_config(
+        Some("https://idp.example.com"),
+        Some("modelwrite"),
+    ));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["author", "reviewer"],
+            "projects": ["coffee"],
+            "iss": "https://idp.example.com",
+            "aud": "modelwrite",
+            "exp": now() + 3600,
+        }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["subject"], "alex");
+    assert_eq!(body["roles"][0], "author");
+    assert_eq!(body["roles"][1], "reviewer");
+    assert_eq!(body["projects"][0], "coffee");
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_an_expired_token_without_echoing_it() {
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({ "sub": "alex", "roles": ["author"], "exp": now() - 120 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let text = body_text(response).await;
+    assert!(text.contains("error"), "a 401 must be a structured error");
+    assert!(
+        !text.contains(&token),
+        "a token must never appear in a response body"
+    );
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_token_signed_by_the_wrong_key() {
+    let router = router(jwt_config(None, None));
+    // Signed with the OTHER private key but claiming the configured kid, so the right key
+    // is selected and the signature check fails.
+    let token = sign(
+        json!({ "sub": "alex", "roles": ["author"], "exp": now() + 3600 }),
+        "test-key",
+        OTHER_PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_wrong_issuer() {
+    let router = router(jwt_config(Some("https://idp.example.com"), None));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["author"],
+            "iss": "https://evil.example.com",
+            "exp": now() + 3600,
+        }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_missing_issuer() {
+    let router = router(jwt_config(Some("https://idp.example.com"), None));
+    let token = sign(
+        json!({ "sub": "alex", "roles": ["author"], "exp": now() + 3600 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_wrong_audience() {
+    let router = router(jwt_config(None, Some("modelwrite")));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["author"],
+            "aud": "some-other-service",
+            "exp": now() + 3600,
+        }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_alg_none() {
+    let router = router(jwt_config(None, None));
+    let header = b64url(br#"{"alg":"none","kid":"test-key"}"#);
+    let claims = b64url(br#"{"sub":"alex","roles":["admin"],"exp":9999999999}"#);
+    let token = format!("{}.{}.", header, claims);
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "alg:none must be refused outright"
+    );
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_malformed_expiry_type() {
+    // A malformed exp (a string rather than a number) must be refused, not silently
+    // treated as absent: otherwise an attacker could shed the expiry entirely.
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({ "sub": "alex", "roles": ["author"], "exp": "not-a-number" }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_tolerates_clock_skew_within_the_window_but_not_beyond() {
+    // 30 seconds of past expiry is inside the 60-second window, so a user is not locked
+    // out by an identity provider whose clock runs slightly ahead.
+    let router = router(jwt_config(None, None));
+    let within = sign(
+        json!({ "sub": "alex", "roles": ["viewer"], "exp": now() - 30 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router
+        .clone()
+        .oneshot(bearer("/whoami", &within))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 120 seconds of past expiry is beyond the window and must be refused.
+    let beyond = sign(
+        json!({ "sub": "alex", "roles": ["viewer"], "exp": now() - 120 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &beyond)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_without_a_roles_claim_cannot_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    let state = AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: jwt_config(None, None),
+    };
+    let router = app(state);
+    // A valid token with no roles claim: it verifies, but holds no role, so a write is
+    // refused with 403 rather than defaulting to a permissive identity.
+    let token = sign(
+        json!({ "sub": "alex", "exp": now() + 3600 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router
+        .oneshot(bearer_post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "author": "alex", "message": "m", "okf": {} }),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a no-role identity must be refused a write, not treated as permissive"
+    );
+}
+
+#[tokio::test]
+async fn from_jwks_file_loads_a_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("jwks.json");
+    std::fs::write(&path, JWKS).unwrap();
+    let config = AuthConfig::from_jwks_file(path.to_str().unwrap()).unwrap();
+    match &config {
+        AuthConfig::Jwt { keys, .. } => {
+            assert!(keys.contains_key("test-key"), "the committed kid must load");
+        }
+        other => panic!("expected a Jwt config, got {:?}", other),
+    }
 }

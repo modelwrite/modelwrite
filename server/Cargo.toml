@@ -24,6 +24,7 @@ serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 anyhow.workspace = true
+jsonwebtoken = "9.3.1"
 
 [dev-dependencies]
 mw-test-support = { path = "../engine/test-support" }
