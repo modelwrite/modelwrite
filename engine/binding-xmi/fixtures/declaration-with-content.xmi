@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-dwc" name="Declarations and Content">
+    <profileApplication xmi:type="uml:ProfileApplication" xmi:id="pa-dwc">
+      <appliedProfile xmi:type="uml:Profile" href="pathmap://SysML14_PROFILES/SysML.profile.uml#SysML"/>
+    </profileApplication>
+    <packageImport xmi:type="uml:PackageImport" xmi:id="pi-dwc">
+      <importedPackage xmi:type="uml:Model" href="pathmap://UML_LIBRARIES/UMLPrimitiveTypes.library.uml#_0"/>
+    </packageImport>
+    <packagedElement xmi:type="uml:Class" xmi:id="block-dwc" name="Known Block">
+      <Block xmi:id="app-dwc" base_Class="block-dwc"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:StateMachine" xmi:id="sm-dwc" name="Lost State Machine"/>
+  </uml:Model>
+</xmi:XMI>

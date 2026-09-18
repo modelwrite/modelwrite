@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 pub use okf::diff::DiffReport;
 pub use okf::types::OkfRoot;
-pub use report::{LossReport, Mapping, MappingVerdict};
+pub use report::{ImportSummary, ImportVerdict, LossReport, Mapping, MappingVerdict};
 
 /// Which directions a binding supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +104,18 @@ pub struct FidelityOutcome {
 /// destroy the thing it migrated.
 pub fn artifact_hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
+}
+
+/// Build the human-first summary of an import: how many elements came in, how
+/// many declarations were recognised, and how much model content did not
+/// survive. The detailed `LossReport` stays available underneath it.
+pub fn summarize_import(root: &OkfRoot, report: &LossReport) -> ImportSummary {
+    ImportSummary::new(
+        root.structure.len() as u64,
+        report.declarations().len() as u64,
+        report.content_losses().len() as u64,
+        report.lossy().len() as u64,
+    )
 }
 
 /// Round-trip a source OKF document through a binding and back, then diff the

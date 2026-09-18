@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+pub mod repository;
+
 use serde_json::{json, Value};
+
+use repository::Repository;
 
 fn tool_error(message: &str) -> Value {
     json!({ "content": [{ "type": "text", "text": message }], "isError": true })
@@ -9,7 +13,182 @@ fn tool_ok(text: String) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": false })
 }
 
-fn call_tool(msg: &Value) -> Value {
+fn pretty(value: &Value) -> String {
+    serde_json::to_string_pretty(value).expect("tool result serializes")
+}
+
+/// The document-level tools: they operate on an OKF document supplied in the request and
+/// never touch a repository or the network. They are always present, with or without
+/// repository-mode configuration.
+fn document_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "okf.validate",
+            "description": "Validate an OKF JSON document supplied in the request (document-level; no repository, no network)",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "okf": { "type": "string" } },
+                "required": ["okf"]
+            }
+        }),
+        json!({
+            "name": "graph.stats",
+            "description": "Graph health of an OKF document supplied in the request (document-level; no repository, no network)",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "okf": { "type": "string" } },
+                "required": ["okf"]
+            }
+        }),
+        json!({
+            "name": "gate.run",
+            "description": "Round-trip fidelity gate between two OKF documents supplied in the request (document-level; no repository, no network)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reference": { "type": "string" },
+                    "candidate": { "type": "string" },
+                    "strictCoverage": { "type": "boolean" }
+                },
+                "required": ["reference", "candidate"]
+            }
+        }),
+        json!({
+            "name": "okf.diff",
+            "description": "Semantic diff between two OKF documents supplied in the request: elements, edges and attributes (document-level; no repository, no network)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reference": { "type": "string" },
+                    "candidate": { "type": "string" }
+                },
+                "required": ["reference", "candidate"]
+            }
+        }),
+    ]
+}
+
+/// The repository tools: read-and-propose tools over the running modelwrite service. They
+/// are OPT-IN: each requires repository mode to be configured via MW_MCP_SERVICE_URL and
+/// MW_MCP_TOKEN, and answers "not configured" (without any network call) when it is not. They
+/// are always LISTED so the published contract stays stable, but they are inert until the
+/// operator opts in.
+fn repository_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "repo.projects",
+            "description": "List the projects the configured token may see. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission; no network call is made unless both are set.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "repo.branches",
+            "description": "List a project's branches and their tips. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "project": { "type": "string" } },
+                "required": ["project"]
+            }
+        }),
+        json!({
+            "name": "repo.commits",
+            "description": "List the commits on a project's branch (default main). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "branch": { "type": "string" }
+                },
+                "required": ["project"]
+            }
+        }),
+        json!({
+            "name": "repo.read",
+            "description": "Read the OKF model behind a commit and its commit record (provenance). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" }
+                },
+                "required": ["project", "hash"]
+            }
+        }),
+        json!({
+            "name": "repo.importReport",
+            "description": "Read a migration's loss report and the engine's fidelity measurement, by retained artifact hash. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "artifactHash": { "type": "string" }
+                },
+                "required": ["project", "artifactHash"]
+            }
+        }),
+        json!({
+            "name": "repo.diff",
+            "description": "Diff two commits and run the round-trip gate LOCALLY from the two models read from the repository, returning the verdict and the evidence. It never records a run (recording is a write). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "reference": { "type": "string" },
+                    "candidate": { "type": "string" },
+                    "strictCoverage": { "type": "boolean" }
+                },
+                "required": ["project", "reference", "candidate"]
+            }
+        }),
+        json!({
+            "name": "repo.audit",
+            "description": "Read a project's append-only audit log. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "limit": { "type": "integer" }
+                },
+                "required": ["project"]
+            }
+        }),
+        json!({
+            "name": "repo.checks",
+            "description": "Read the gate checks recorded against a commit (what has been checked about this model). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; review permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" }
+                },
+                "required": ["project", "hash"]
+            }
+        }),
+        json!({
+            "name": "repo.propose",
+            "description": "Record a proposal for a human to review and decide. This is the agent's output: it persists a proposal (review permission) and never writes a change - a human accepts it. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "reviewArtifact": { "type": "object" }
+                },
+                "required": ["project", "reviewArtifact"]
+            }
+        }),
+    ]
+}
+
+fn all_tool_definitions() -> Vec<Value> {
+    let mut tools = document_tool_definitions();
+    tools.extend(repository_tool_definitions());
+    tools
+}
+
+fn call_tool(msg: &Value, repo: &Repository) -> Value {
     let params = msg.get("params");
     let name = params
         .and_then(|p| p.get("name"))
@@ -89,11 +268,24 @@ fn call_tool(msg: &Value) -> Value {
                 }
             }
         }
+        // Every repository tool routes through the single dispatch in repository::run_tool,
+        // which issues only read (GET) routes and the one propose (POST /proposals) route.
+        "repo.projects" | "repo.branches" | "repo.commits" | "repo.read" | "repo.importReport"
+        | "repo.diff" | "repo.audit" | "repo.checks" | "repo.propose" => {
+            match repo.run_tool(name, &args) {
+                Ok(value) => tool_ok(pretty(&value)),
+                Err(e) => tool_error(&e),
+            }
+        }
         _ => tool_error(&format!("unknown tool: {}", name)),
     }
 }
 
 pub fn handle_request(line: &str) -> String {
+    handle_request_with(line, &Repository::disabled())
+}
+
+pub fn handle_request_with(line: &str, repo: &Repository) -> String {
     let msg: Value = match serde_json::from_str(line) {
         Ok(m) => m,
         Err(e) => {
@@ -124,51 +316,7 @@ pub fn handle_request(line: &str) -> String {
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "modelwrite-mcp", "version": env!("CARGO_PKG_VERSION") }
         }),
-        "tools/list" => json!({ "tools": [
-            {
-                "name": "okf.validate",
-                "description": "Validate an OKF JSON document",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "okf": { "type": "string" } },
-                    "required": ["okf"]
-                }
-            },
-            {
-                "name": "graph.stats",
-                "description": "Graph health of an OKF document",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "okf": { "type": "string" } },
-                    "required": ["okf"]
-                }
-            },
-            {
-                "name": "gate.run",
-                "description": "Round-trip fidelity gate between two OKF documents",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "reference": { "type": "string" },
-                        "candidate": { "type": "string" },
-                        "strictCoverage": { "type": "boolean" }
-                    },
-                    "required": ["reference", "candidate"]
-                }
-            },
-            {
-                "name": "okf.diff",
-                "description": "Semantic diff between two OKF documents: elements, edges and attributes",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "reference": { "type": "string" },
-                        "candidate": { "type": "string" }
-                    },
-                    "required": ["reference", "candidate"]
-                }
-            }
-        ] }),
+        "tools/list" => json!({ "tools": all_tool_definitions() }),
         "resources/list" => json!({ "resources": [
             {
                 "uri": "mw://okf/1.0/spec",
@@ -202,7 +350,7 @@ pub fn handle_request(line: &str) -> String {
                 json!({ "contents": [] })
             }
         }
-        "tools/call" => call_tool(&msg),
+        "tools/call" => call_tool(&msg, repo),
         _ => {
             return json!({
                 "jsonrpc": "2.0",

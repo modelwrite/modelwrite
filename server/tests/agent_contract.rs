@@ -166,6 +166,10 @@ fn valid_body(endpoint: &Value) -> Value {
         ("POST", "/projects/:project/locks/release") | ("DELETE", "/projects/:project/locks") => {
             json!({ "holder": "alex", "ids": ["x"] })
         }
+        ("POST", "/projects/:project/proposals/:id/accept") => {
+            json!({ "acceptedItems": ["x"], "branch": "main", "message": "m" })
+        }
+        ("POST", "/projects/:project/proposals/:id/refuse") => json!({ "reason": "no" }),
         _ => json!({}),
     }
 }
@@ -317,6 +321,43 @@ fn the_manifest_names_exactly_the_mcp_servers_tools() {
             name
         );
     }
+}
+
+#[test]
+fn the_mcp_toolset_is_read_and_propose_only() {
+    // The MCP surface is the agent's client, so it must offer no write capability. The live
+    // tools/list is the authority for what is exposed: the repository tools are the read
+    // (GET) routes plus the single propose route (POST /projects/:project/proposals, the
+    // review permission). A future tool that reached a write route would add a name to this
+    // subset and fail here, as well as in the exact-match assertion above.
+    let names: Vec<String> = mcp_tools_list().into_iter().map(|(n, _)| n).collect();
+    let repo_tools: Vec<&str> = names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| n.starts_with("repo."))
+        .collect();
+    assert_eq!(
+        repo_tools,
+        vec![
+            "repo.projects",
+            "repo.branches",
+            "repo.commits",
+            "repo.read",
+            "repo.importReport",
+            "repo.diff",
+            "repo.audit",
+            "repo.checks",
+            "repo.propose",
+        ],
+        "the repository toolset is fixed: read tools plus the one propose tool, never a write tool"
+    );
+
+    // The published contract must say the same thing in its machine-readable form.
+    let manifest = load_manifest();
+    assert_eq!(
+        manifest["repositoryMode"]["mode"], "readAndProposeOnly",
+        "the published contract must declare repository mode read-and-propose only"
+    );
 }
 
 #[test]

@@ -10,13 +10,15 @@ agent calls it in production. The machine-readable form of everything below is
 
 An agent meets the modelwrite service through TWO surfaces, and it matters which is which:
 
-- **The MCP tools** (`mw-mcp`) are document-level. They take an OKF document as an argument,
-  operate on it in memory, and return a report. They never touch a repository and never need
-  authentication. They are `okf.validate`, `graph.stats`, `gate.run` and `okf.diff`.
+- **The MCP tools** (`mw-mcp`) have TWO modes. The document-level tools take an OKF document as
+  an argument, operate on it in memory, and return a report; they never touch a repository and
+  never need authentication. The repository tools (`repo.*`) are OPT-IN: they reach the running
+  service over its HTTP API, authenticated with a token, and are read-and-propose only. With no
+  configuration the MCP server is a pure document processor that makes NO network call.
 - **The repository HTTP surface** (`mw-server`) is where every change happens. Every call is
   authenticated like a human's, permission-checked like a human's, lock-checked like a human's,
-  and recorded in the audit log with the caller's identity. An agent that wants to read or
-  change a repository uses these routes, never the MCP tools.
+  and recorded in the audit log with the caller's identity. The `repo.*` MCP tools are a thin,
+  read-and-propose client over this same surface — never a second, privileged one.
 
 ## The agent is a client, not a privileged path
 
@@ -29,11 +31,11 @@ An agent may **read** and **propose**. It may **not write**: an agent token cann
 role (`author`) or the `admin` role, and a deployment that configures one is refused at startup
 with a message saying that an agent proposes and a human commits.
 
-An agent's proposals ARE now persisted and addressable, and there IS a review-and-accept route.
-What an agent must understand about it is that **it cannot call it**: acceptance requires the
-`Write` permission, which an agent token cannot hold, and the commit path re-checks the
-acceptance inside its own transaction. So the acceptance route is for the human, and the agent's
-proposals are its input.
+An agent's proposals ARE persisted and addressable, and there IS a review-and-accept route. The
+MCP tool `repo.propose` records the proposal (it needs the `review` role, which an agent token
+may hold). Acceptance requires the `Write` permission, which an agent token cannot hold, and the
+commit path re-checks the acceptance inside its own transaction. So the acceptance route is for
+the human, and the agent's proposals are its input.
 
 The record names both parties. A commit that came from an accepted proposal carries provenance
 naming the proposal, the **agent** that proposed it, the **human** who accepted it, and the items
@@ -78,11 +80,12 @@ project of `*` reaches every project). Four permissions exist, each granted by s
 |------------|---------------------|----------------|
 | `read` | `viewer`, `author`, `reviewer`, `admin` | Reading commits, branches, locks, the audit log, imports, gate runs |
 | `write` | `author`, `admin` | Commits, branches, resets, merges, gate runs, imports, lock acquire/release |
-| `review` | `reviewer`, `admin` | Reading gate runs and evidence |
+| `review` | `reviewer`, `admin` | Reading gate runs and evidence; recording a proposal |
 | `admin` | `admin` | Project creation, branch deletion, lock breaking; holds every lesser permission |
 
-`GET /projects/:project/gate-runs` is the one route that accepts either `write` OR
-`review` (an author may see the run it started; a reviewer reads runs it did not start).
+`GET /projects/:project/gate-runs` and `GET /projects/:project/commits/:hash/checks` accept
+either `write` OR `review` (an author may see the run it started; a reviewer reads runs it did
+not start).
 
 Every route that names a project also enforces **project scope**: a caller whose roles do not
 reach the project is refused `403` before the store is touched. A listing is filtered, not
@@ -128,7 +131,8 @@ append and this read. Every entry carries:
 The action vocabulary is fixed and lives in `server/src/audit.rs`:
 `project.create`, `commit.create`, `commit.refused`, `branch.create`, `branch.delete`,
 `branch.reset`, `merge.clean`, `merge.conflict`, `lock.acquire`, `lock.release`,
-`lock.denied`, `gate.run`, `import.accept`, `import.refused`.
+`lock.denied`, `gate.run`, `import.accept`, `import.refused`, `proposal.record`,
+`proposal.accept`, `proposal.refused`.
 
 ## The repository HTTP surface
 
@@ -139,27 +143,34 @@ project name, commit hash, branch name or artifact hash.
 
 | Method | Path | Permission | What it does |
 |--------|------|------------|--------------|
-| GET | `/health` | public | Liveness; reports the auth mode |
-| GET | `/version` | public | Build information |
-| POST | `/projects` | admin | Create a project |
-| GET | `/projects` | read | List projects, filtered to the caller's scope |
-| POST | `/projects/:project/commits` | write | Commit an OKF document to a branch |
-| GET | `/projects/:project/commits` | read | List commits on a branch (`?branch=`, default `main`) |
-| GET | `/projects/:project/commits/:hash` | read | Fetch the OKF document behind a commit |
-| POST | `/projects/:project/branches` | write | Create a branch |
-| GET | `/projects/:project/branches` | read | List branches and their tips |
-| DELETE | `/projects/:project/branches/:name` | admin | Delete a branch |
-| POST | `/projects/:project/branches/:name/reset` | write | Revert a branch to an earlier commit as a new commit |
-| POST | `/projects/:project/gate` | write | Run the round-trip fidelity gate and record the run |
-| GET | `/projects/:project/gate-runs` | write-or-review | List recorded gate runs |
-| POST | `/projects/:project/import` | write | Import a source artifact through a binding; gated and measured |
-| GET | `/projects/:project/import/:artifactHash/report` | read | Read an import's loss report and fidelity measurement |
-| POST | `/projects/:project/merge` | write | Three-way merge one branch into another |
-| GET | `/projects/:project/audit` | read | Read the append-only audit log |
-| POST | `/projects/:project/locks` | write | Acquire element leases |
-| GET | `/projects/:project/locks` | read | List live element leases |
-| DELETE | `/projects/:project/locks` | write | Release element leases |
-| POST | `/projects/:project/locks/release` | write | Release element leases (POST form) |
+| GET | /health | public | Liveness; reports the auth mode |
+| GET | /version | public | Build information |
+| POST | /projects | admin | Create a project |
+| GET | /projects | read | List projects, filtered to the caller's scope |
+| POST | /projects/:project/commits | write | Commit an OKF document to a branch |
+| GET | /projects/:project/commits | read | List commits on a branch (?branch=, default main) |
+| GET | /projects/:project/commits/:hash | read | Fetch the OKF document behind a commit |
+| GET | /projects/:project/commits/:hash/record | read | Fetch a commit's record and provenance |
+| GET | /projects/:project/commits/:hash/checks | write-or-review | Read the gate checks recorded against a commit |
+| POST | /projects/:project/branches | write | Create a branch |
+| GET | /projects/:project/branches | read | List branches and their tips |
+| DELETE | /projects/:project/branches/:name | admin | Delete a branch |
+| POST | /projects/:project/branches/:name/reset | write | Revert a branch to an earlier commit as a new commit |
+| POST | /projects/:project/gate | write | Run the round-trip fidelity gate and record the run |
+| GET | /projects/:project/gate-runs | write-or-review | List recorded gate runs |
+| POST | /projects/:project/import | write | Import a source artifact through a binding; gated and measured |
+| GET | /projects/:project/import/:artifactHash/report | read | Read an import's loss report and fidelity measurement |
+| GET | /projects/:project/import/:artifactHash/artifact | read | Fetch the retained source artifact byte for byte |
+| POST | /projects/:project/proposals | review | Record an agent's proposal (the body IS the review artifact) |
+| GET | /projects/:project/proposals/:id | read | Fetch a proposal by id |
+| POST | /projects/:project/proposals/:id/accept | write | A human with write accepts a proposal by id |
+| POST | /projects/:project/proposals/:id/refuse | write | A human with write refuses a proposal by id |
+| POST | /projects/:project/merge | write | Three-way merge one branch into another |
+| GET | /projects/:project/audit | read | Read the append-only audit log |
+| POST | /projects/:project/locks | write | Acquire element leases |
+| GET | /projects/:project/locks | read | List live element leases |
+| DELETE | /projects/:project/locks | write | Release element leases |
+| POST | /projects/:project/locks/release | write | Release element leases (POST form) |
 
 ### The import and its loss report
 
@@ -171,12 +182,15 @@ must be lossless; and the commit is linked to the source artifact in one transac
 refused import returns `422` with the unaccepted losses. `GET /projects/:project/import/:artifactHash/report`
 returns the import's loss report and fidelity measurement whether or not it was committed.
 
-## The MCP tools (document-level)
+## The MCP tools
 
-The MCP server (`mw-mcp`) exposes four tools that operate on documents supplied in the
-request and never touch a repository. Their names and input schemas are in
-`docs/agents/mcp-tools.json` and are additive. `gate.run` also accepts an optional
-`strictCoverage` boolean, named in the manifest rather than below.
+The MCP server (`mw-mcp`) exposes thirteen tools. The first four are document-level: they
+operate on documents supplied in the request and never touch a repository or the network. The
+remaining nine are the repository tools, opt-in and read-and-propose only. Their names and
+input schemas are in `docs/agents/mcp-tools.json` and are additive. `gate.run` and `repo.diff`
+also accept an optional `strictCoverage` boolean, named in the manifest rather than below.
+
+### Document tools (always available, no repository, no network)
 
 | Tool | Required arguments | What it returns |
 |------|--------------------|-----------------|
@@ -185,18 +199,66 @@ request and never touch a repository. Their names and input schemas are in
 | `gate.run` | `reference`, `candidate` | The round-trip fidelity gate's evidence record |
 | `okf.diff` | `reference`, `candidate` | The semantic diff: elements, edges and attributes |
 
+### Repository tools (opt-in, read-and-propose only)
+
+Repository mode is enabled only when BOTH `MW_MCP_SERVICE_URL` (the running service's base URL,
+plain `http`) and `MW_MCP_TOKEN` (the bearer token to present) are set. With neither set, the
+repository tools are listed but answer "not configured", and the server makes no network call.
+Every repository tool issues a read (`GET`) route or the single propose route; no tool issues a
+write route, and a `403` from the service is surfaced as a clear tool error, never a crash and
+never a retry.
+
+| Tool | Required arguments | What it returns |
+|------|--------------------|-----------------|
+| `repo.projects` |  | The projects the token may see |
+| `repo.branches` | `project` | The project's branches and their tips |
+| `repo.commits` | `project` | The commits on a branch (`branch`, default `main`) |
+| `repo.read` | `project`, `hash` | The OKF model behind a commit, with its commit record (provenance) |
+| `repo.importReport` | `project`, `artifactHash` | A migration's loss report and fidelity measurement |
+| `repo.diff` | `project`, `reference`, `candidate` | The local gate verdict and evidence for two commits (never records a run) |
+| `repo.audit` | `project` | The append-only audit log |
+| `repo.checks` | `project`, `hash` | The gate checks recorded against a commit |
+| `repo.propose` | `project`, `reviewArtifact` | The recorded proposal (the agent's output for a human to decide) |
+
+`repo.diff` reads the two models from the repository and runs the gate LOCALLY with the same
+engine the service uses. It returns the verdict and evidence but never records a run, because
+recording a run is a write (`POST /projects/:project/gate`). `repo.propose` is the agent's real
+job: it persists a proposal (the `review` permission) for a human to accept or refuse by id.
+
+## How to connect your agent
+
+Point your agent at modelwrite by configuring the MCP server with two environment variables:
+
+- **MW_MCP_SERVICE_URL** — the running service's base URL, e.g. http://127.0.0.1:8080 (plain HTTP)
+- **MW_MCP_TOKEN** — the bearer token to present — an agent token (the service grants it viewer/reviewer)
+
+With neither set, `mw-mcp` is a pure document processor and makes no network call. A typical
+MCP client configuration:
+
+    {
+      "mcpServers": {
+        "modelwrite": {
+          "command": "mw-mcp",
+          "env": {
+            "MW_MCP_SERVICE_URL": "http://127.0.0.1:8080",
+            "MW_MCP_TOKEN": "<the agent token from the service deployment>"
+          }
+        }
+      }
+    }
+
 ## Rules that bind the agent
 
 1. The gate is the only authority on correctness; no tool parameter, log line or model output
    can mark a run as passed.
 2. Every repository change is an HTTP call on the surface above, authenticated and
-   permission-checked like a human's — never a direct edit and never a privileged path.
-3. The agent's output is a proposal for a human to read. The agent loop is NOT wired today:
-   nothing outside `engine/agent` consumes `propose_loss_resolutions`, so a proposal never
-   reaches the server on its own; a human acts on it through the ordinary routes.
+   permission-checked like a human's — never a direct edit and never a privileged path. The
+   `repo.*` tools are read-and-propose only; a write is refused by the service with 403 and the
+   MCP server surfaces it as a clear refusal, never a crash or a retry.
+3. The agent's output is a proposal for a human to read. `repo.propose` records that proposal;
+   a human accepts or refuses it by id through the ordinary write routes.
 4. Attribution is not optional: the agent token carries the agent's identity and the
-   authorizer, so any action it takes in future is attributable to the agent and who authorised
-   it. An agent cannot write today, so no agent write is recorded yet.
+   authorizer, so any action it takes is attributable to the agent and who authorised it.
 5. Ambiguity is a question, not an invention: the agent asks rather than guessing.
 
 ## Enforcement
@@ -205,7 +267,11 @@ request and never touch a repository. Their names and input schemas are in
 real router, that every HTTP endpoint named there resolves on the method named, that every
 permissioned endpoint refuses a caller with no role, and — by driving the MCP server's own
 `tools/list` handler — that the manifest names exactly the tools the MCP server exposes with
-the same required arguments. The MCP tool list is ENFORCED, and the HTTP surface is ENFORCED.
-It also proves the agent mechanism: an agent token authenticates a named agent that may read,
-and `server/tests/agent_audit.rs` proves an agent cannot commit, merge, reset or import, and
-that the import acceptance key names exactly the entry a human chose.
+the same required arguments, and that the toolset is read-and-propose only (no write tool).
+The MCP tool list is ENFORCED, and the HTTP surface is ENFORCED. The repository tools' own
+tests (`engine/mcp/tests/repository.rs`) prove, over an injected transport and a loopback
+server, that the tools read a real project, model and loss report, that the wire carries only
+read routes plus the propose route, that a 403 is surfaced once and not retried, and that with
+no configuration no network call is made. `server/tests/agent_audit.rs` proves an agent cannot
+commit, merge, reset or import, and `server/tests/proposal.rs` proves an agent is refused at
+the acceptance endpoint and that an accepted proposal's commit names both parties.

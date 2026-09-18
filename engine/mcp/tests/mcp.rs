@@ -25,7 +25,21 @@ fn tools_list_exposes_the_agent_toolset() {
         .collect();
     assert_eq!(
         names,
-        vec!["okf.validate", "graph.stats", "gate.run", "okf.diff"]
+        vec![
+            "okf.validate",
+            "graph.stats",
+            "gate.run",
+            "okf.diff",
+            "repo.projects",
+            "repo.branches",
+            "repo.commits",
+            "repo.read",
+            "repo.importReport",
+            "repo.diff",
+            "repo.audit",
+            "repo.checks",
+            "repo.propose",
+        ]
     );
 }
 

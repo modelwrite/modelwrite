@@ -70,6 +70,26 @@ pub fn mapping_table() -> Vec<Mapping> {
             note: "OKF's project, package, Attribute, GraphEdge and documentation have no id slot; each dropped id is named in the loss report".to_string(),
         },
         Mapping {
+            subject: "uml:ProfileApplication (declaration)".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "a profile application carries no model content; recognised and deliberately not carried, so this is not a loss. Its applied profile is an Eclipse pathmap:// reference that cannot resolve outside the IDE".to_string(),
+        },
+        Mapping {
+            subject: "uml:PackageImport (declaration)".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "a package import carries no model content; recognised and deliberately not carried, so this is not a loss. Its imported library is an Eclipse pathmap:// reference that cannot resolve outside the IDE".to_string(),
+        },
+        Mapping {
+            subject: "ecore:EAnnotation (declaration)".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "an EMF annotation (and its EPackage reference) carries no model content; recognised and deliberately not carried, so this is not a loss".to_string(),
+        },
+        Mapping {
+            subject: "XMI root metadata, e.g. xmi:version (declaration)".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "the schema version and other root metadata carry no model content; recognised and deliberately not carried, so this is not a loss".to_string(),
+        },
+        Mapping {
             subject: "Any other XMI element or attribute (e.g. uml:StateMachine, uml:Association, uml:Generalization, a foreign-namespaced attribute)".to_string(),
             verdict: MappingVerdict::Unmappable,
             note: "outside the sysml-v1-xmi subset; reported on import as an Unmappable entry naming the element (and its xmi:id) or attribute - never dropped in silence".to_string(),
