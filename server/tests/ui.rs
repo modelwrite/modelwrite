@@ -47,6 +47,14 @@ async fn body_text(response: axum::response::Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+async fn json_body(response: axum::response::Response) -> serde_json::Value {
+    serde_json::from_str(&body_text(response).await).unwrap()
+}
+
+fn count(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
+}
+
 fn viewer() -> Identity {
     Identity {
         subject: "viewer".to_string(),
@@ -145,7 +153,7 @@ async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
         AuthConfig::static_token("the-token"),
     ));
 
-    for uri in ["/ui", "/ui/projects/coffee"] {
+    for uri in ["/ui", "/ui/projects/coffee", "/ui/projects/coffee/model"] {
         let response = router.clone().oneshot(get(uri)).await.unwrap();
         assert_eq!(
             response.status(),
@@ -239,5 +247,208 @@ async fn an_unknown_project_renders_not_found() {
     assert!(
         html.contains("project nope"),
         "the page must name the missing project"
+    );
+}
+
+#[tokio::test]
+async fn the_model_page_renders_all_four_sections_of_the_corpus() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // All four sections render, in order.
+    assert!(html.contains("<h2>Structure</h2>"), "structure section");
+    assert!(
+        html.contains("<h2>Requirements</h2>"),
+        "requirements section"
+    );
+    assert!(
+        html.contains("<h2>Traceability</h2>"),
+        "traceability section"
+    );
+    assert!(
+        html.contains("<h2>State and activity</h2>"),
+        "state and activity section"
+    );
+
+    // The corpus counts: 49 structure elements, 9 signals, 25 requirements, 8 activities.
+    assert_eq!(
+        count(&html, "<li class=\"element\""),
+        49,
+        "49 structure elements"
+    );
+    assert_eq!(count(&html, "<li class=\"signal\""), 9, "9 signals");
+    assert_eq!(
+        count(&html, "<tr class=\"requirement\""),
+        25,
+        "25 requirements"
+    );
+    assert_eq!(
+        count(&html, "<tr class=\"trace-row\""),
+        25,
+        "25 matrix rows"
+    );
+    assert_eq!(count(&html, "class=\"activity\""), 8, "8 activities");
+    assert_eq!(count(&html, "class=\"state\""), 7, "7 states");
+    assert_eq!(count(&html, "class=\"transition\""), 8, "8 transitions");
+
+    // The engine's coverage numbers, rendered verbatim rather than recomputed.
+    assert!(
+        html.contains("25 requirements: 15 covered, 10 uncovered"),
+        "the coverage summary must come from the engine, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("20 satisfy, 3 refine, 1 verify, 0 allocate"),
+        "the per-kind coverage counts must come from the engine"
+    );
+
+    // Ten uncovered requirements are visibly marked, fifteen are marked covered.
+    assert_eq!(
+        count(&html, "class=\"uncovered\""),
+        10,
+        "10 uncovered marked"
+    );
+    assert_eq!(count(&html, "class=\"covered\""), 15, "15 covered marked");
+    assert!(
+        html.contains("System Level Requirements"),
+        "an uncovered requirement must render"
+    );
+    assert!(
+        html.contains("Regulatory Compliance Mark"),
+        "the leaf uncovered requirement must render"
+    );
+    assert!(
+        html.contains("Heater Initialization"),
+        "a covered requirement must render"
+    );
+
+    // The two dangling edges render as explicit broken links, not silently dropped.
+    assert_eq!(
+        count(&html, "class=\"unresolved-edge\""),
+        2,
+        "2 unresolved edges"
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789524431087_459748_5711"),
+        "the first dangling endpoint must be shown"
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789524431091_435540_5713"),
+        "the second dangling endpoint must be shown"
+    );
+
+    // The page names what it is rendering.
+    assert!(
+        html.contains("Coffee Machine"),
+        "the root block must render"
+    );
+    assert!(
+        html.contains("import the exported model"),
+        "the commit message must render"
+    );
+    assert!(html.contains("alex"), "the commit author must render");
+}
+
+#[tokio::test]
+async fn the_model_page_resolves_branch_and_commit_and_404s_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for uri in [
+        "/ui/projects/coffee/model?branch=main".to_string(),
+        format!("/ui/projects/coffee/model?commit={}", hash),
+    ] {
+        let response = router.clone().oneshot(get(&uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{} must render", uri);
+        let html = body_text(response).await;
+        assert!(
+            html.contains("<h2>Structure</h2>"),
+            "{} must render structure",
+            uri
+        );
+    }
+
+    let bad_branch = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model?branch=nope"))
+        .await
+        .unwrap();
+    assert_eq!(bad_branch.status(), StatusCode::NOT_FOUND);
+
+    let bad_commit = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model?commit=deadbeef"))
+        .await
+        .unwrap();
+    assert_eq!(bad_commit.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_scoped_identity_cannot_see_another_projects_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store.create_project("tea", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(Identity {
+            subject: "scoped".to_string(),
+            roles: vec!["viewer".to_string()],
+            projects: vec!["coffee".to_string()],
+        }),
+    });
+
+    let response = router.oneshot(get("/ui/projects/tea/model")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("project not in scope"),
+        "the page must name the scope refusal, got:\n{}",
+        html
     );
 }

@@ -179,7 +179,7 @@ fn branch_list_page(
             ul class="branches" {
                 @for row in rows {
                     li {
-                        span class="branch-name" { (row.name.as_str()) }
+                        a class="branch-name" href={ "/ui/projects/" (project) "/model?branch=" (row.name.as_str()) } { (row.name.as_str()) }
                         code class="tip" { (short_hash(&row.tip)) }
                         @if let Some(commit) = &row.commit {
                             span class="message" { (commit.message.as_str()) }

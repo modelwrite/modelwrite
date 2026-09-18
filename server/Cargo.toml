@@ -29,6 +29,7 @@ postgres = [
 
 [dependencies]
 mw-okf = { path = "../engine/okf" }
+mw-graph = { path = "../engine/graph" }
 mw-gate = { path = "../engine/gate" }
 axum.workspace = true
 tokio.workspace = true

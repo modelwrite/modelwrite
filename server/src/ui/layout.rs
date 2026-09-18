@@ -36,6 +36,24 @@ code.tip { font-family: ui-monospace, monospace; font-size: 0.85rem; color: #666
 .meta { display: block; color: #666; font-size: 0.85rem; }
 .sign-in, .error { max-width: 40rem; }
 h1 { margin-top: 0; }
+.model-section { margin-bottom: 2.25rem; }
+.model-section h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.25rem; }
+.structure-tree, .structure-tree ul, ul.signals, ul.interfaces, ul.allocations, ul.states, ul.transitions, ul.activity-nodes, ul.unresolved-edges { list-style: none; margin: 0; padding: 0; }
+.structure-tree ul { margin-left: 1.25rem; padding-left: 0.75rem; border-left: 1px solid #ddd; }
+.element-name, .state-name, .activity-name { font-weight: 600; }
+.element-kind, .node-type { color: #666; font-size: 0.85rem; margin-left: 0.4rem; }
+.element-stereotypes { color: #8a6d1a; font-size: 0.8rem; margin-left: 0.4rem; }
+.element-documentation { color: #444; margin: 0.15rem 0 0; font-size: 0.9rem; }
+table.requirements, table.traceability { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+table.requirements th, table.requirements td, table.traceability th, table.traceability td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+table.requirements th, table.traceability th { background: #f4f4f4; }
+.req-id, .req-num { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+.uncovered { background: #f8d7da; color: #842029; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+.covered { background: #d1e7dd; color: #0f5132; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+.broken { color: #842029; font-weight: 600; }
+.unresolved-edge { border-left: 3px solid #842029; padding-left: 0.5rem; margin-bottom: 0.25rem; }
+.activity { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
+.activity-name { margin-top: 0; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {

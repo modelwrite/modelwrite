@@ -48,6 +48,7 @@ pub fn app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/ui", get(ui::pages::project_list))
         .route("/ui/projects/:project", get(ui::pages::project_page))
+        .route("/ui/projects/:project/model", get(ui::model::model_page))
         .route(
             "/projects",
             post(api::create_project).get(api::list_projects),

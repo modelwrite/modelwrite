@@ -984,6 +984,7 @@ dependencies = [
  "jsonwebtoken",
  "maud",
  "mw-gate",
+ "mw-graph",
  "mw-okf",
  "mw-test-support",
  "postgres",
