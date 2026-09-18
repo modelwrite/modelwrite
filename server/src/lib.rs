@@ -11,6 +11,7 @@ pub mod gate_api;
 pub mod locks_api;
 pub mod merge;
 pub mod merge_api;
+pub mod proposal_api;
 pub mod store;
 pub mod ui;
 
@@ -122,6 +123,22 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/projects/:project/import/:artifactHash/artifact",
             get(binding_api::get_artifact),
+        )
+        .route(
+            "/projects/:project/proposals",
+            post(proposal_api::record_proposal),
+        )
+        .route(
+            "/projects/:project/proposals/:id",
+            get(proposal_api::get_proposal),
+        )
+        .route(
+            "/projects/:project/proposals/:id/accept",
+            post(proposal_api::accept_proposal),
+        )
+        .route(
+            "/projects/:project/proposals/:id/refuse",
+            post(proposal_api::refuse_proposal),
         )
         .route("/projects/:project/merge", post(merge_api::merge_branches))
         .route(

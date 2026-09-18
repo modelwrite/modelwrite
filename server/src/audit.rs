@@ -19,3 +19,6 @@ pub const LOCK_DENIED: &str = "lock.denied";
 pub const GATE_RUN: &str = "gate.run";
 pub const IMPORT_ACCEPT: &str = "import.accept";
 pub const IMPORT_REFUSED: &str = "import.refused";
+pub const PROPOSAL_RECORD: &str = "proposal.record";
+pub const PROPOSAL_ACCEPT: &str = "proposal.accept";
+pub const PROPOSAL_REFUSED: &str = "proposal.refused";

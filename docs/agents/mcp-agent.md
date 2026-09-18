@@ -27,12 +27,26 @@ its only authority.
 
 An agent may **read** and **propose**. It may **not write**: an agent token cannot hold a write
 role (`author`) or the `admin` role, and a deployment that configures one is refused at startup
-with a message saying that an agent proposes and a human commits. There is **no automated
-acceptance path yet** — nothing outside `engine/agent` consumes an agent's proposals — so an
-agent cannot cause a model change at all today. A **human** performs the change through the
-ordinary routes above. There is no review-and-accept workflow to call; the gate is the only
-authority on whether a change is correct — no tool parameter, log line or model output can
-mark a run as passed.
+with a message saying that an agent proposes and a human commits.
+
+An agent's proposals ARE now persisted and addressable, and there IS a review-and-accept route.
+What an agent must understand about it is that **it cannot call it**: acceptance requires the
+`Write` permission, which an agent token cannot hold, and the commit path re-checks the
+acceptance inside its own transaction. So the acceptance route is for the human, and the agent's
+proposals are its input.
+
+The record names both parties. A commit that came from an accepted proposal carries provenance
+naming the proposal, the **agent** that proposed it, the **human** who accepted it, and the items
+accepted — written in the same transaction as the commit, so nobody can produce such a commit
+without the record that justifies it. A refusal is recorded too, because a record that keeps only
+the successes is a record that cannot be trusted.
+
+The acceptance route is currently import-scoped: a proposal whose subject is a migration's loss
+report, with its retained artifact and binding. Other material is refused with a 400 rather than
+accepted into a flow that does not exist for it.
+
+The gate remains the only authority on whether a change is correct — no tool parameter, log line
+or model output can mark a run as passed.
 
 ## Authentication
 

@@ -39,6 +39,7 @@ fn provenance(artifact_hash: &str, accepted_losses: Vec<String>) -> ImportProven
         binding_id: "sysml-v1-xmi".to_string(),
         binding_version: "2.4".to_string(),
         accepted_losses,
+        acceptance: None,
     }
 }
 

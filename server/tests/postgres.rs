@@ -4,7 +4,8 @@
 use postgres::NoTls;
 use server::store::postgres::PostgresStore;
 use server::store::{
-    AuditEntry, CommitGuard, CommitProvenance, GateRun, ImportProvenance, Store, StoreError,
+    AuditEntry, CommitGuard, CommitProvenance, GateRun, ImportProvenance, ProposalAcceptance,
+    ProposalDecision, Store, StoreError,
 };
 
 /// Every test in this file is marked `#[ignore = "requires MW_TEST_DATABASE_URL"]`, so a
@@ -69,6 +70,7 @@ fn provenance(artifact_hash: &str, accepted_losses: Vec<String>) -> ImportProven
         binding_id: "sysml-v1-xmi".to_string(),
         binding_version: "2.4".to_string(),
         accepted_losses,
+        acceptance: None,
     }
 }
 
@@ -1174,4 +1176,148 @@ fn an_older_database_gains_the_provenance_column_instead_of_failing() {
         ))
         .expect("drop scratch database");
     }
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn a_proposal_is_recorded_and_fetched_by_id() {
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+    let id = store
+        .record_proposal(
+            &project,
+            "loss-report-resolver",
+            "resolve the blocking losses",
+            Some("abc123"),
+            Some("sysml-v1-xmi@2.4"),
+            "{\"agent\":\"loss-report-resolver\"}",
+            None,
+        )
+        .unwrap();
+    let record = store
+        .proposal(&project, &id)
+        .unwrap()
+        .expect("the proposal must be fetchable by id");
+    assert_eq!(record.id, id);
+    assert_eq!(record.agent, "loss-report-resolver");
+    assert_eq!(record.artifact_hash.as_deref(), Some("abc123"));
+    assert_eq!(record.decision, None);
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_acceptance_commit_names_both_parties() {
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+    let artifact_hash = store.put_blob(b"source xmi bytes").unwrap();
+    store
+        .record_import(
+            &project,
+            &artifact_hash,
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report(&artifact_hash),
+            "{}",
+        )
+        .unwrap();
+    let id = store
+        .record_proposal(
+            &project,
+            "loss-report-resolver",
+            "resolve the blocking losses",
+            Some(&artifact_hash),
+            Some("sysml-v1-xmi@2.4"),
+            "{\"agent\":\"loss-report-resolver\"}",
+            None,
+        )
+        .unwrap();
+
+    let mut prov = provenance(
+        &artifact_hash,
+        vec!["uml:Model model-grinder [lossy]".to_string()],
+    );
+    prov.acceptance = Some(ProposalAcceptance {
+        proposal_id: id.clone(),
+        agent: "loss-report-resolver".to_string(),
+        accepted_by: "alex".to_string(),
+    });
+
+    let commit = store
+        .commit_model(
+            &project,
+            "main",
+            "okf-hash",
+            "alex",
+            "accept",
+            None,
+            None,
+            Some(&prov),
+        )
+        .unwrap();
+    match commit.provenance {
+        CommitProvenance::Accepted {
+            proposal_id,
+            agent,
+            accepted_by,
+            ..
+        } => {
+            assert_eq!(proposal_id, id);
+            assert_eq!(agent, "loss-report-resolver");
+            assert_eq!(accepted_by, "alex");
+        }
+        other => panic!("expected accepted provenance, got {:?}", other),
+    }
+    let record = store.proposal(&project, &id).unwrap().unwrap();
+    assert_eq!(record.decision, Some(ProposalDecision::Accepted));
+    assert_eq!(record.decided_by, "alex");
+    assert_eq!(record.commit_hash.as_deref(), Some(commit.hash.as_str()));
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_acceptance_whose_proposal_is_missing_is_refused() {
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+    let artifact_hash = store.put_blob(b"source xmi bytes").unwrap();
+    store
+        .record_import(
+            &project,
+            &artifact_hash,
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report(&artifact_hash),
+            "{}",
+        )
+        .unwrap();
+
+    let mut prov = provenance(
+        &artifact_hash,
+        vec!["uml:Model model-grinder [lossy]".to_string()],
+    );
+    prov.acceptance = Some(ProposalAcceptance {
+        proposal_id: "missing-proposal".to_string(),
+        agent: "loss-report-resolver".to_string(),
+        accepted_by: "alex".to_string(),
+    });
+
+    let refused = store.commit_model(
+        &project,
+        "main",
+        "okf-hash",
+        "alex",
+        "accept",
+        None,
+        None,
+        Some(&prov),
+    );
+    match refused {
+        Err(StoreError::NotFound(message)) => {
+            assert!(message.contains("proposal"), "message: {}", message);
+        }
+        other => panic!("expected NotFound, got {:?}", other.map(|c| c.hash)),
+    }
+    assert!(store.commits_on(&project, "main").unwrap().is_empty());
 }
