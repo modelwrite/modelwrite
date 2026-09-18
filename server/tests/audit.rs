@@ -611,3 +611,110 @@ async fn open_mode_records_anonymous() {
         );
     }
 }
+#[tokio::test]
+async fn every_path_records_the_identity_rather_than_the_claimed_name() {
+    // The requirement is not "the actor is written down", it is "the actor is the VERIFIED
+    // subject". In open mode nothing is verified, so the honest subject is "anonymous" -
+    // and a body that claims "alex" must not get that name into the record on ANY path.
+    // Every write path is driven here with a claimed name, which is what makes this test
+    // fail if any single path reverts to recording the request body.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let base = commit(&router, "main", "base", model("Block")).await;
+
+    // A branch, so merge and reset have somewhere to work.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            json!({ "name": "feature", "from": base }),
+        ))
+        .await
+        .unwrap();
+    let on_feature = commit(&router, "feature", "renamed", model("Renamed")).await;
+
+    // A gate run, a lock, and a release: each claims a name in its body.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/gate",
+            json!({ "reference": base, "candidate": on_feature }),
+        ))
+        .await
+        .unwrap();
+    let acquired = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            json!({ "branch": "main", "elements": ["b1"], "holder": "alex", "ttlSeconds": 600 }),
+        ))
+        .await
+        .unwrap();
+    let lock_id = json_body(acquired).await[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks/release",
+            json!({ "holder": "alex", "ids": [lock_id] }),
+        ))
+        .await
+        .unwrap();
+
+    // A merge and a reset, both claiming to be alex.
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/merge",
+            json!({ "branch": "main", "other": "feature", "author": "alex", "message": "merge" }),
+        ))
+        .await
+        .unwrap();
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches/main/reset",
+            json!({ "to": base, "author": "alex", "message": "revert" }),
+        ))
+        .await
+        .unwrap();
+
+    let entries = read_audit(&router).await;
+    let actions: Vec<String> = entries
+        .iter()
+        .map(|e| e["action"].as_str().unwrap_or_default().to_string())
+        .collect();
+    for expected in [
+        "project.create",
+        "commit.create",
+        "branch.create",
+        "gate.run",
+        "lock.acquire",
+        "lock.release",
+        "merge.clean",
+        "branch.reset",
+    ] {
+        assert!(
+            actions.iter().any(|a| a == expected),
+            "the audit must contain a {} entry, saw {:?}",
+            expected,
+            actions
+        );
+    }
+    for entry in &entries {
+        assert_eq!(
+            entry["actor"], "anonymous",
+            "{} recorded a claimed name instead of the verified subject",
+            entry["action"]
+        );
+    }
+}
