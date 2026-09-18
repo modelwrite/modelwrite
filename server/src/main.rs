@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use server::auth::AuthConfig;
-use server::store::sqlite::SqliteStore;
+use server::store::{self, StoreConfig};
 use server::{app, AppState};
 
 #[tokio::main]
@@ -13,7 +12,9 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-    let db_path = std::env::var("MW_DB").unwrap_or_else(|_| "modelwrite.db".to_string());
+    // MW_DATABASE_URL selects the PostgreSQL backend; MW_DB (default modelwrite.db) is a
+    // path to a SQLite file. Both open behind the same Store trait, so nothing else changes.
+    let config = StoreConfig::from_env()?;
     let evidence_dir = std::env::var("MW_EVIDENCE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("docs/evidence"));
@@ -31,10 +32,16 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let store = Arc::new(SqliteStore::open(std::path::Path::new(&db_path))?);
+    let store = store::open_store(&config)?;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("mw-server listening on http://{} (db {})", addr, db_path);
+    // Never print a connection URL: it can carry a password. Report the backend and, for
+    // SQLite, the path.
+    let db_desc = match &config {
+        StoreConfig::Sqlite(path) => path.display().to_string(),
+        StoreConfig::Postgres(_) => "postgres".to_string(),
+    };
+    println!("mw-server listening on http://{} (db {})", addr, db_desc);
     axum::serve(
         listener,
         app(AppState {

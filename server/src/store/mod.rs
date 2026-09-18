@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+use std::sync::Arc;
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "postgres")]
+pub mod postgres;
 pub mod sqlite;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -330,4 +334,47 @@ pub trait Store: Send + Sync {
 
     /// The audit entries for a project, newest first, at most `limit` rows (capped at 1000).
     fn audit(&self, project: &str, limit: i64) -> Result<Vec<AuditEntry>, StoreError>;
+}
+
+/// Which backend the store should open. `Sqlite` takes a filesystem path; `Postgres` takes
+/// a libpq-style connection URL. Chosen from the environment by [`StoreConfig::from_env`]:
+/// `MW_DATABASE_URL` (when set) selects Postgres, otherwise `MW_DB` (default `modelwrite.db`)
+/// selects SQLite.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StoreConfig {
+    Sqlite(std::path::PathBuf),
+    Postgres(String),
+}
+
+impl StoreConfig {
+    /// Read the backend choice from the environment. `MW_DATABASE_URL` takes precedence and
+    /// selects Postgres; otherwise `MW_DB` is a filesystem path for SQLite, defaulting to
+    /// `modelwrite.db`.
+    pub fn from_env() -> Result<Self, StoreError> {
+        if let Ok(url) = std::env::var("MW_DATABASE_URL") {
+            if !url.trim().is_empty() {
+                return Ok(StoreConfig::Postgres(url));
+            }
+        }
+        let path = std::env::var("MW_DB").unwrap_or_else(|_| "modelwrite.db".to_string());
+        Ok(StoreConfig::Sqlite(std::path::PathBuf::from(path)))
+    }
+}
+
+/// Open a store of the configured backend, behind the shared [`Store`] trait, so nothing
+/// above the store changes when the backend does.
+pub fn open_store(config: &StoreConfig) -> Result<Arc<dyn Store>, StoreError> {
+    match config {
+        StoreConfig::Sqlite(path) => sqlite::SqliteStore::open(path)
+            .map(|store| Arc::new(store) as Arc<dyn Store>)
+            .map_err(|e| StoreError::Backend(e.to_string())),
+        #[cfg(feature = "postgres")]
+        StoreConfig::Postgres(url) => postgres::PostgresStore::open(url)
+            .map(|store| Arc::new(store) as Arc<dyn Store>),
+        #[cfg(not(feature = "postgres"))]
+        StoreConfig::Postgres(_) => Err(StoreError::Backend(
+            "this build was compiled without the postgres backend; rebuild with the postgres feature"
+                .to_string(),
+        )),
+    }
 }

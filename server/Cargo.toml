@@ -13,6 +13,20 @@ name = "server"
 name = "mw-server"
 path = "src/main.rs"
 
+[features]
+default = ["postgres"]
+# The PostgreSQL backend is compiled by default so its tests compile and skip cleanly
+# when MW_TEST_DATABASE_URL is unset. Build with --no-default-features to omit it and
+# every dependency it pulls (including the rustls TLS stack).
+postgres = [
+    "dep:postgres",
+    "dep:r2d2",
+    "dep:r2d2_postgres",
+    "dep:tokio-postgres-rustls",
+    "dep:rustls",
+    "dep:rustls-native-certs",
+]
+
 [dependencies]
 mw-okf = { path = "../engine/okf" }
 mw-gate = { path = "../engine/gate" }
@@ -25,6 +39,12 @@ sha2.workspace = true
 hex.workspace = true
 anyhow.workspace = true
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
+postgres = { version = "0.19", optional = true }
+r2d2 = { version = "0.8", optional = true }
+r2d2_postgres = { version = "0.18", optional = true }
+tokio-postgres-rustls = { version = "0.13", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 
 [dev-dependencies]
 mw-test-support = { path = "../engine/test-support" }
@@ -32,3 +52,4 @@ tower.workspace = true
 http-body-util.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
+postgres = { version = "0.19" }
