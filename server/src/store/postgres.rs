@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS audit (
     at BIGINT NOT NULL,
     actor TEXT NOT NULL,
     mechanism TEXT NOT NULL,
+    authorizer TEXT NOT NULL DEFAULT '',
     action TEXT NOT NULL,
     subject TEXT NOT NULL,
     detail TEXT NOT NULL,
@@ -121,6 +122,7 @@ EXECUTE FUNCTION audit_append_only();
 /// those rows — they came from a build where nobody was verified.
 const MIGRATIONS: &str = "
 ALTER TABLE audit ADD COLUMN IF NOT EXISTS mechanism TEXT NOT NULL DEFAULT 'open';
+ALTER TABLE audit ADD COLUMN IF NOT EXISTS authorizer TEXT NOT NULL DEFAULT '';
 ";
 
 type PlainPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
@@ -264,12 +266,13 @@ fn insert_audit<G: postgres::GenericClient>(
 ) -> Result<i64, StoreError> {
     let row = client
         .query_one(
-            "INSERT INTO audit (project, at, actor, mechanism, action, subject, detail) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            "INSERT INTO audit (project, at, actor, mechanism, authorizer, action, subject, detail) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
             &[
                 &entry.project,
                 &entry.at,
                 &entry.actor,
                 &entry.mechanism,
+                &entry.authorizer,
                 &entry.action,
                 &entry.subject,
                 &entry.detail,
@@ -897,7 +900,7 @@ impl Store for PostgresStore {
         self.with_client(|client| {
             let rows = client
                 .query(
-                    "SELECT id, project, at, actor, mechanism, action, subject, detail FROM audit WHERE project = $1 ORDER BY id DESC LIMIT $2",
+                    "SELECT id, project, at, actor, mechanism, authorizer, action, subject, detail FROM audit WHERE project = $1 ORDER BY id DESC LIMIT $2",
                     &[&project, &limit],
                 )
                 .map_err(backend)?;
@@ -909,9 +912,10 @@ impl Store for PostgresStore {
                         at: row.get(2),
                         actor: row.get(3),
                         mechanism: row.get(4),
-                        action: row.get(5),
-                        subject: row.get(6),
-                        detail: row.get(7),
+                        authorizer: row.get(5),
+                        action: row.get(6),
+                        subject: row.get(7),
+                        detail: row.get(8),
                     })
                 })
                 .collect()

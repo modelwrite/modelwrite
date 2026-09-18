@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{
-    commit_json, commit_refusal_guard, load_model, map_store_error, resolve_author,
+    commit_json, commit_refusal_guard_attributed, load_model, map_store_error, resolve_author,
     touched_elements, validate_name, verify_actor, ApiState,
 };
 use crate::audit::{MERGE_CLEAN, MERGE_CONFLICT};
@@ -141,6 +141,7 @@ pub async fn merge_branches(
             holder: body.holder.as_deref(),
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
         },
     )
     .map_err(map_store_error)?
@@ -185,6 +186,7 @@ pub struct MergeCore<'a> {
     pub holder: Option<&'a str>,
     pub actor: &'a str,
     pub mechanism: &'a str,
+    pub authorizer: &'a str,
 }
 
 /// The ONE implementation of a merge: resolve the two branch tips and their lowest common
@@ -224,6 +226,7 @@ pub fn merge_core(
             at: now_seconds(),
             actor: input.actor.to_string(),
             mechanism: input.mechanism.to_string(),
+            authorizer: input.authorizer.to_string(),
             action: MERGE_CONFLICT.to_string(),
             subject: input.branch.to_string(),
             detail: format!(
@@ -290,16 +293,18 @@ pub fn merge_core(
         at: now_seconds(),
         actor: input.actor.to_string(),
         mechanism: input.mechanism.to_string(),
+        authorizer: input.authorizer.to_string(),
         action: MERGE_CLEAN.to_string(),
         subject: input.branch.to_string(),
         detail: format!("merged {} into {}", input.other, input.branch),
     };
-    let commit = commit_refusal_guard(
+    let commit = commit_refusal_guard_attributed(
         store,
         project,
         input.branch,
         input.actor,
         input.mechanism,
+        input.authorizer,
         store.commit_merge(
             project,
             input.branch,

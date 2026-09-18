@@ -20,6 +20,8 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use agent::losses::entry_identity;
+
 use crate::api::{
     commit_core, commit_json, load_model, map_store_error, record_refusal, resolve_author,
     validate_name, verify_actor, ApiState, CommitCore, CommitFailure,
@@ -120,6 +122,17 @@ pub struct ImportCore<'a> {
     pub holder: Option<&'a str>,
     pub actor: &'a str,
     pub mechanism: &'a str,
+    pub authorizer: &'a str,
+}
+
+/// Whether an acceptance name reconciles to a loss mapping, on the ONE key the agent and the
+/// server share. The agent names a loss by its entry identity ("subject [verdict]", from
+/// `agent::losses::entry_identity`); the workbench import form still sends the binding's raw
+/// subject. Both reconcile to the same mapping here, so accepting a proposal by ITS identity
+/// lands on exactly the entry the human chose. The recorded acceptance is always the entry
+/// identity, never the raw subject two losses could share.
+pub fn acceptance_matches(mapping: &binding::Mapping, accepted: &str) -> bool {
+    accepted == mapping.subject || accepted == entry_identity(mapping)
 }
 
 /// The ONE implementation of an import: retain the artifact byte-for-byte, read it through
@@ -192,6 +205,7 @@ pub fn import_core(
             project,
             input.actor,
             input.mechanism,
+            input.authorizer,
             IMPORT_REFUSED,
             &artifact_hash,
             "the binding could not round-trip the imported model",
@@ -204,21 +218,26 @@ pub fn import_core(
         ));
     }
 
-    // Rule 2: every blocking loss must be accepted by name. Anything not accepted refuses
-    // the import and is returned so the caller can decide rather than lose it silently.
+    // Rule 2: every blocking loss must be accepted by name. An acceptance names a loss by
+    // its ENTRY IDENTITY ("subject [verdict]", the ONE key the agent's proposals carry) or by
+    // the binding's raw subject, which the workbench still sends. Both reconcile to the same
+    // mapping, so an acceptance lands on exactly the entry the human chose rather than on a
+    // subject two losses could share. Anything not accepted refuses the import and is
+    // returned so the caller can decide rather than lose it silently.
     let blocking = loss_report.blocking();
     let unaccepted: Vec<binding::Mapping> = blocking
         .iter()
-        .filter(|m| !input.accept_losses.iter().any(|a| a == &m.subject))
+        .filter(|m| !input.accept_losses.iter().any(|a| acceptance_matches(m, a)))
         .map(|m| (*m).clone())
         .collect();
     if !unaccepted.is_empty() {
-        let subjects: Vec<String> = unaccepted.iter().map(|m| m.subject.clone()).collect();
+        let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
         if let Err(e) = record_refusal(
             store,
             project,
             input.actor,
             input.mechanism,
+            input.authorizer,
             IMPORT_REFUSED,
             &artifact_hash,
             &format!("blocking losses not accepted: {}", subjects.join(", ")),
@@ -237,9 +256,11 @@ pub fn import_core(
 
     // The acceptance is recorded BEFORE the commit, so a committed import always has its
     // acceptance on the audit trail; the actor is the verified subject, which is the "who"
-    // of "who accepted what".
-    let accepted_subjects: Vec<String> = blocking.iter().map(|m| m.subject.clone()).collect();
-    if !accepted_subjects.is_empty() {
+    // of "who accepted what". The accepted key is the ENTRY IDENTITY - the same key the
+    // agent's proposal carried - so what the server stores is exactly what a human accepted,
+    // never the raw subject two losses could share.
+    let accepted_identities: Vec<String> = blocking.iter().map(|m| entry_identity(m)).collect();
+    if !accepted_identities.is_empty() {
         store
             .append_audit(&AuditEntry {
                 id: 0,
@@ -247,13 +268,14 @@ pub fn import_core(
                 at: now_seconds(),
                 actor: input.actor.to_string(),
                 mechanism: input.mechanism.to_string(),
+                authorizer: input.authorizer.to_string(),
                 action: IMPORT_ACCEPT.to_string(),
                 subject: artifact_hash.clone(),
                 detail: format!(
                     "binding {}@{}; accepted losses: {}",
                     binding_id,
                     binding_version,
-                    accepted_subjects.join(", ")
+                    accepted_identities.join(", ")
                 ),
             })
             .map_err(map_store_error)?;
@@ -280,7 +302,7 @@ pub fn import_core(
     // source artifact; if the link cannot be written, the commit rolls back with it.
     let provenance = ImportProvenance {
         artifact_hash: artifact_hash.clone(),
-        accepted_losses: accepted_subjects.clone(),
+        accepted_losses: accepted_identities.clone(),
     };
     let commit = commit_core(
         store,
@@ -291,6 +313,7 @@ pub fn import_core(
             message: input.message,
             actor: input.actor,
             mechanism: input.mechanism,
+            authorizer: input.authorizer,
             candidate: &root,
             bytes: &import_bytes,
             import: Some(&provenance),
@@ -312,7 +335,7 @@ pub fn import_core(
         artifact_hash,
         binding_id,
         binding_version,
-        accepted_losses: accepted_subjects,
+        accepted_losses: accepted_identities,
         loss_report,
         fidelity,
     })
@@ -351,6 +374,7 @@ pub async fn import_artifact(
             holder: body.holder.as_deref(),
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
         },
     )? {
         ImportOutcome::Committed {

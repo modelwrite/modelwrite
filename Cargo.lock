@@ -1015,6 +1015,7 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "maud",
+ "mw-agent",
  "mw-binding",
  "mw-binding-xmi",
  "mw-gate",

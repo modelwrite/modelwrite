@@ -197,11 +197,13 @@ pub fn verify_actor(
 /// Record a refusal - an action that was ATTEMPTED but refused - in the audit log. A
 /// refusal is not a mutation, so it appends directly rather than riding a transaction; the
 /// event matters even though nothing changed.
+#[allow(clippy::too_many_arguments)]
 pub fn record_refusal(
     store: &dyn Store,
     project: &str,
     actor: &str,
     mechanism: &str,
+    authorizer: &str,
     action: &str,
     subject: &str,
     detail: &str,
@@ -213,6 +215,7 @@ pub fn record_refusal(
             at: now_seconds(),
             actor: actor.to_string(),
             mechanism: mechanism.to_string(),
+            authorizer: authorizer.to_string(),
             action: action.to_string(),
             subject: subject.to_string(),
             detail: detail.to_string(),
@@ -225,12 +228,32 @@ pub fn record_refusal(
 /// highest-value event this feature produces: it is the overwrite the lock prevented. The
 /// `actor` is the verified identity's subject - a refusal is an audit entry and must carry
 /// the same verified actor as every other entry.
+///
+/// This six-argument form is kept for the offline CLI, which has no authorizer: the refusal
+/// is attributed to the actor alone. Server write paths call
+/// [`commit_refusal_guard_attributed`] so an agent's refusal also names the human it acted
+/// for.
 pub fn commit_refusal_guard(
     store: &dyn Store,
     project: &str,
     branch: &str,
     actor: &str,
     mechanism: &str,
+    result: Result<Commit, StoreError>,
+) -> Result<Commit, StoreError> {
+    commit_refusal_guard_attributed(store, project, branch, actor, mechanism, "", result)
+}
+
+/// The attributed form of [`commit_refusal_guard`]: the authorizer (empty for a human) is
+/// recorded on the refusal, so a reader can tell an agent's refused action from a human's
+/// and know who the agent acted on behalf of.
+pub fn commit_refusal_guard_attributed(
+    store: &dyn Store,
+    project: &str,
+    branch: &str,
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
     result: Result<Commit, StoreError>,
 ) -> Result<Commit, StoreError> {
     match result {
@@ -246,6 +269,7 @@ pub fn commit_refusal_guard(
                 project,
                 actor,
                 mechanism,
+                authorizer,
                 COMMIT_REFUSED,
                 branch,
                 &detail,
@@ -366,6 +390,7 @@ pub struct CommitCore<'a> {
     pub message: &'a str,
     pub actor: &'a str,
     pub mechanism: &'a str,
+    pub authorizer: &'a str,
     pub candidate: &'a okf::types::OkfRoot,
     pub bytes: &'a [u8],
     pub import: Option<&'a ImportProvenance>,
@@ -410,16 +435,18 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
         at: input.now,
         actor: input.actor.to_string(),
         mechanism: input.mechanism.to_string(),
+        authorizer: input.authorizer.to_string(),
         action: COMMIT_CREATE.to_string(),
         subject: input.branch.to_string(),
         detail: input.message.to_string(),
     };
-    commit_refusal_guard(
+    commit_refusal_guard_attributed(
         store,
         input.project,
         input.branch,
         input.actor,
         input.mechanism,
+        input.authorizer,
         store.commit_model(
             input.project,
             input.branch,
@@ -457,6 +484,7 @@ pub async fn create_project(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: PROJECT_CREATE.to_string(),
         subject: body.name.clone(),
         detail: "project created".to_string(),
@@ -587,6 +615,7 @@ pub async fn create_commit(
             message: &body.message,
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
             candidate: &root,
             bytes: &bytes,
             import: None,
@@ -688,6 +717,7 @@ pub async fn create_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: BRANCH_CREATE.to_string(),
         subject: body.name.clone(),
         detail: format!("from {}", body.from),
@@ -750,6 +780,7 @@ pub async fn delete_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: BRANCH_DELETE.to_string(),
         subject: name.clone(),
         detail: "branch deleted".to_string(),
@@ -831,16 +862,18 @@ pub async fn reset_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: BRANCH_RESET.to_string(),
         subject: name.clone(),
         detail: format!("reset to {}", body.to),
     };
-    let commit = commit_refusal_guard(
+    let commit = commit_refusal_guard_attributed(
         state.store.as_ref(),
         &project,
         &name,
         &identity.subject,
         state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
         state.store.commit_model(
             &project,
             &name,

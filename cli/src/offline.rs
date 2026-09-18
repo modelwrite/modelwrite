@@ -308,6 +308,7 @@ fn merge(
                 at: now_seconds(),
                 actor: "anonymous".to_string(),
                 mechanism: "offline".to_string(),
+                authorizer: String::new(),
                 action: "merge.conflict".to_string(),
                 subject: branch.to_string(),
                 detail: format!("merge conflict between {} and {}", branch, other),
@@ -425,6 +426,7 @@ fn gate(
         at: now_seconds(),
         actor: "anonymous".to_string(),
         mechanism: "offline".to_string(),
+        authorizer: String::new(),
         action: "gate.run".to_string(),
         subject: candidate.to_string(),
         detail: format!(
@@ -454,6 +456,7 @@ fn audit_entry(project: &str, action: &str, subject: &str, detail: &str) -> Audi
         at: now_seconds(),
         actor: "anonymous".to_string(),
         mechanism: "offline".to_string(),
+        authorizer: String::new(),
         action: action.to_string(),
         subject: subject.to_string(),
         detail: detail.to_string(),

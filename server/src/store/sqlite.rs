@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS audit (
     at INTEGER NOT NULL,
     actor TEXT NOT NULL,
     mechanism TEXT NOT NULL,
+    authorizer TEXT NOT NULL DEFAULT '',
     action TEXT NOT NULL,
     subject TEXT NOT NULL,
     detail TEXT NOT NULL,
@@ -119,6 +120,15 @@ fn migrate(connection: &Connection) -> anyhow::Result<()> {
         // rows came from a build that had no authentication, so nobody was verified.
         connection
             .execute_batch("ALTER TABLE audit ADD COLUMN mechanism TEXT NOT NULL DEFAULT 'open'")?;
+    }
+    let has_authorizer: bool = connection
+        .prepare("SELECT 1 FROM pragma_table_info('audit') WHERE name = 'authorizer'")?
+        .exists([])?;
+    if !has_authorizer {
+        // Rows written before the field existed were human actions, so the empty default is
+        // the honest value: no agent authorizer existed to record.
+        connection
+            .execute_batch("ALTER TABLE audit ADD COLUMN authorizer TEXT NOT NULL DEFAULT ''")?;
     }
     Ok(())
 }
@@ -187,8 +197,8 @@ fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
 /// atomically with the mutation it describes.
 fn insert_audit(c: &Connection, entry: &AuditEntry) -> rusqlite::Result<i64> {
     c.execute(
-        "INSERT INTO audit (project, at, actor, mechanism, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![entry.project, entry.at, entry.actor, entry.mechanism, entry.action, entry.subject, entry.detail],
+        "INSERT INTO audit (project, at, actor, mechanism, authorizer, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![entry.project, entry.at, entry.actor, entry.mechanism, entry.authorizer, entry.action, entry.subject, entry.detail],
     )?;
     Ok(c.last_insert_rowid())
 }
@@ -830,7 +840,7 @@ impl Store for SqliteStore {
         let limit = limit.clamp(1, 1000);
         self.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, project, at, actor, mechanism, action, subject, detail FROM audit WHERE project = ?1 ORDER BY id DESC LIMIT ?2",
+                "SELECT id, project, at, actor, mechanism, authorizer, action, subject, detail FROM audit WHERE project = ?1 ORDER BY id DESC LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![project, limit], |row| {
                 Ok(AuditEntry {
@@ -839,9 +849,10 @@ impl Store for SqliteStore {
                     at: row.get(2)?,
                     actor: row.get(3)?,
                     mechanism: row.get(4)?,
-                    action: row.get(5)?,
-                    subject: row.get(6)?,
-                    detail: row.get(7)?,
+                    authorizer: row.get(5)?,
+                    action: row.get(6)?,
+                    subject: row.get(7)?,
+                    detail: row.get(8)?,
                 })
             })?;
             rows.collect()

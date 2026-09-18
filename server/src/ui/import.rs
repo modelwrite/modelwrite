@@ -291,6 +291,7 @@ fn perform_import(
             holder,
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
         },
     )? {
         ImportOutcome::Committed {

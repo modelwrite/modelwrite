@@ -33,6 +33,7 @@ mw-graph = { path = "../engine/graph" }
 mw-gate = { path = "../engine/gate" }
 mw-binding = { path = "../engine/binding" }
 mw-binding-xmi = { path = "../engine/binding-xmi" }
+mw-agent = { path = "../engine/agent" }
 axum.workspace = true
 tokio.workspace = true
 rusqlite.workspace = true

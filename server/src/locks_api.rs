@@ -81,6 +81,7 @@ pub async fn acquire_locks(
         at: now,
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: crate::audit::LOCK_ACQUIRE.to_string(),
         subject: elements.join(","),
         detail: format!(
@@ -111,6 +112,7 @@ pub async fn acquire_locks(
                     &project,
                     &identity.subject,
                     state.auth.mechanism(),
+                    state.auth.authorizer().unwrap_or(""),
                     crate::audit::LOCK_DENIED,
                     &elements.join(","),
                     &error.to_string(),
@@ -185,6 +187,7 @@ pub async fn release_locks(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
+        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
         action: crate::audit::LOCK_RELEASE.to_string(),
         subject: body.ids.join(","),
         detail: "released lock(s)".to_string(),

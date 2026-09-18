@@ -105,6 +105,18 @@ pub enum AuthConfig {
         role_claim: String,
         project_claim: String,
     },
+    /// A single agent bearer token. It authenticates a NAMED agent acting under the
+    /// authorisation of a named human or service, with the roles and projects the
+    /// deployment grants it. An agent is a client, never a privileged path: these roles
+    /// bound exactly what it may do, and every action it takes is recorded with mechanism
+    /// "agent" and the authorizer.
+    Agent {
+        token_hash: String,
+        subject: String,
+        authorizer: String,
+        roles: Vec<String>,
+        projects: Vec<String>,
+    },
     /// Every request resolves to this exact identity. Only tests construct this: it lets
     /// the permission and project-scope decisions be exercised with a specific role or
     /// scope. `from_env` never produces it.
@@ -136,6 +148,19 @@ impl std::fmt::Debug for AuthConfig {
                 .field("role_claim", role_claim)
                 .field("project_claim", project_claim)
                 .finish(),
+            AuthConfig::Agent {
+                subject,
+                authorizer,
+                roles,
+                projects,
+                ..
+            } => f
+                .debug_struct("AuthConfig::Agent")
+                .field("subject", subject)
+                .field("authorizer", authorizer)
+                .field("roles", roles)
+                .field("projects", projects)
+                .finish(),
             AuthConfig::Fixed(identity) => f
                 .debug_struct("AuthConfig::Fixed")
                 .field("subject", &identity.subject)
@@ -157,6 +182,29 @@ impl AuthConfig {
                 return Ok(AuthConfig::static_token(token.trim()));
             }
         }
+        if let Ok(token) = std::env::var("MW_AUTH_AGENT_TOKEN") {
+            if !token.trim().is_empty() {
+                let subject = std::env::var("MW_AUTH_AGENT_SUBJECT")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "agent".to_string());
+                let authorizer = std::env::var("MW_AUTH_AGENT_AUTHORIZER")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_default();
+                let roles_vec = env_csv("MW_AUTH_AGENT_ROLES", &["viewer"]);
+                let projects_vec = env_csv("MW_AUTH_AGENT_PROJECTS", &["*"]);
+                let roles: Vec<&str> = roles_vec.iter().map(String::as_str).collect();
+                let projects: Vec<&str> = projects_vec.iter().map(String::as_str).collect();
+                return Ok(AuthConfig::agent_token(
+                    token.trim(),
+                    &subject,
+                    &authorizer,
+                    &roles,
+                    &projects,
+                ));
+            }
+        }
         if let Ok(path) = std::env::var("MW_AUTH_JWKS") {
             if !path.trim().is_empty() {
                 return AuthConfig::from_jwks_file(path.trim());
@@ -170,6 +218,26 @@ impl AuthConfig {
     pub fn static_token(token: &str) -> AuthConfig {
         AuthConfig::Static {
             token_hash: hash_token(token),
+        }
+    }
+
+    /// Build the agent-token configuration, hashing the token ONCE for the same reason as
+    /// the static token. `subject` is the agent's name, `authorizer` is the human or
+    /// service it acts on behalf of, and `roles` and `projects` bound exactly what the
+    /// agent may do. An agent is a client: these roles are its only authority.
+    pub fn agent_token(
+        token: &str,
+        subject: &str,
+        authorizer: &str,
+        roles: &[&str],
+        projects: &[&str],
+    ) -> AuthConfig {
+        AuthConfig::Agent {
+            token_hash: hash_token(token),
+            subject: subject.to_string(),
+            authorizer: authorizer.to_string(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            projects: projects.iter().map(|p| p.to_string()).collect(),
         }
     }
 
@@ -237,7 +305,19 @@ impl AuthConfig {
             AuthConfig::Open => "open",
             AuthConfig::Static { .. } => "static",
             AuthConfig::Jwt { .. } => "jwt",
+            AuthConfig::Agent { .. } => "agent",
             AuthConfig::Fixed(_) => "fixed",
+        }
+    }
+
+    /// The human or service that authorised this configuration's actor, when the mechanism
+    /// is an agent token. Every other mechanism has no authorizer: the actor IS the
+    /// principal. The audit log records this beside the agent's own subject, so a reader can
+    /// tell who an agent acted on behalf of.
+    pub fn authorizer(&self) -> Option<&str> {
+        match self {
+            AuthConfig::Agent { authorizer, .. } => Some(authorizer),
+            _ => None,
         }
     }
 }
@@ -283,6 +363,34 @@ pub fn parse_identity_from_static(token: &str, config: &AuthConfig) -> Option<Id
     let presented = hash_token(token);
     if constant_time_eq(presented.as_bytes(), token_hash.as_bytes()) {
         Some(static_identity())
+    } else {
+        None
+    }
+}
+
+/// Resolve a presented token against the agent configuration: `Some(identity)` when the
+/// SHA-256 of the token equals the configured digest (constant time), `None` otherwise. The
+/// identity carries the agent's subject and the configured roles and projects; the authorizer
+/// stays on the configuration (via `AuthConfig::authorizer`) rather than on the identity,
+/// because it is a property of who granted the token, not of the actor's permissions.
+pub fn parse_identity_from_agent(token: &str, config: &AuthConfig) -> Option<Identity> {
+    let AuthConfig::Agent {
+        token_hash,
+        subject,
+        roles,
+        projects,
+        ..
+    } = config
+    else {
+        return None;
+    };
+    let presented = hash_token(token);
+    if constant_time_eq(presented.as_bytes(), token_hash.as_bytes()) {
+        Some(Identity {
+            subject: subject.clone(),
+            roles: roles.clone(),
+            projects: projects.clone(),
+        })
     } else {
         None
     }
@@ -341,6 +449,23 @@ fn jwt_env_claim(var: &str, default: &str) -> String {
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| default.to_string())
+}
+
+/// A comma-separated environment value, split and trimmed, with a default when unset or
+/// empty. Used for the agent's roles and projects: an agent starts as a viewer over every
+/// project unless a deployment narrows it, because an agent is a client with no authority
+/// beyond what it is granted.
+fn env_csv(var: &str, default: &[&str]) -> Vec<String> {
+    std::env::var(var)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| default.iter().map(|s| s.to_string()).collect())
 }
 
 /// A roles or projects claim is either a JSON array of strings or a single string. Anything
@@ -474,6 +599,12 @@ pub async fn identity(state: &ApiState, headers: &HeaderMap) -> Result<Identity,
             let token = bearer_token(headers)
                 .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
             parse_identity_from_jwt(token, &state.auth)
+                .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))
+        }
+        AuthConfig::Agent { .. } => {
+            let token = bearer_token(headers)
+                .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
+            parse_identity_from_agent(token, &state.auth)
                 .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))
         }
     }
@@ -708,6 +839,56 @@ mod tests {
         assert!(
             !debug.contains("AQID"),
             "a JWKS modulus must not appear in the debug output"
+        );
+    }
+
+    #[test]
+    fn agent_token_records_mechanism_agent_and_its_authorizer() {
+        let config = AuthConfig::agent_token(
+            "agent-secret",
+            "loss-report-resolver",
+            "alex",
+            &["author"],
+            &["coffee"],
+        );
+        assert_eq!(config.mechanism(), "agent");
+        assert_eq!(config.authorizer(), Some("alex"));
+
+        let identity = parse_identity_from_agent("agent-secret", &config)
+            .expect("the correct agent token is accepted");
+        assert_eq!(identity.subject, "loss-report-resolver");
+        assert!(identity.has_role("author"));
+        assert!(identity.may_reach("coffee"));
+        assert!(!identity.may_reach("tea"));
+
+        assert!(parse_identity_from_agent("wrong", &config).is_none());
+        // A wrong-mechanism configuration has no agent token to match.
+        assert!(parse_identity_from_agent("agent-secret", &AuthConfig::Open).is_none());
+        assert!(
+            parse_identity_from_agent("agent-secret", &AuthConfig::static_token("other")).is_none()
+        );
+    }
+
+    #[test]
+    fn a_non_agent_configuration_has_no_authorizer() {
+        assert_eq!(AuthConfig::Open.authorizer(), None);
+        assert_eq!(AuthConfig::static_token("t").authorizer(), None);
+        assert_eq!(
+            AuthConfig::jwt(HashMap::new(), None, None).authorizer(),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_debug_redacts_the_token() {
+        let config = AuthConfig::agent_token("secret", "agent", "alex", &[], &[]);
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("AuthConfig::Agent"));
+        assert!(debug.contains("agent"));
+        assert!(debug.contains("alex"));
+        assert!(
+            !debug.contains("secret"),
+            "the agent token must never appear in debug output"
         );
     }
 }

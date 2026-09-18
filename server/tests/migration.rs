@@ -112,12 +112,12 @@ async fn importing_the_fixture_commits_with_provenance_and_retains_the_artifact(
     assert_eq!(
         provenance["acceptedLosses"],
         serde_json::json!([
-            "uml:Model model-grinder",
-            "uml:Comment doc-grinder",
-            "uml:Property prop-motor",
-            "uml:Property prop-capacity",
-            "uml:Dependency dep-satisfy",
-            "uml:Package pkg-structure (Structure)",
+            "uml:Model model-grinder [lossy]",
+            "uml:Comment doc-grinder [lossy]",
+            "uml:Property prop-motor [lossy]",
+            "uml:Property prop-capacity [lossy]",
+            "uml:Dependency dep-satisfy [lossy]",
+            "uml:Package pkg-structure (Structure) [lossy]",
         ])
     );
 

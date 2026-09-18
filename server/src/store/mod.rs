@@ -94,9 +94,11 @@ pub struct Lock {
 /// inside the store; `actor` is the verified identity's subject - who actually performed
 /// the action - never a name taken from the request body. In open mode that subject is
 /// "anonymous": nobody was authenticated, which is the honest statement. `mechanism` records
-/// HOW the caller authenticated (`open`, `static` or `jwt`) so a shared token is never
-/// recorded byte-identically to a named individual; it is the subject's companion, not a
-/// substitute for it.
+/// HOW the caller authenticated (`open`, `static`, `jwt` or `agent`) so a shared token is
+/// never recorded byte-identically to a named individual; it is the subject's companion,
+/// not a substitute for it. `authorizer` is the human or service on whose behalf an agent
+/// acted; it is empty for every human action, so a reader can tell an agent from a human
+/// from the log alone.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEntry {
@@ -105,6 +107,7 @@ pub struct AuditEntry {
     pub at: i64,
     pub actor: String,
     pub mechanism: String,
+    pub authorizer: String,
     pub action: String,
     pub subject: String,
     pub detail: String,

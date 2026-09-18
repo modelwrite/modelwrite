@@ -426,6 +426,7 @@ fn perform_merge(
             holder,
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
         },
     )
     .map_err(map_store_error)?
