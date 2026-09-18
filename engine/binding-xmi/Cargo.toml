@@ -1,0 +1,19 @@
+[package]
+name = "mw-binding-xmi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "binding_xmi"
+
+[dependencies]
+mw-binding = { path = "../binding" }
+mw-okf = { path = "../okf" }
+roxmltree.workspace = true
+
+[dev-dependencies]
+mw-binding = { path = "../binding" }
+mw-okf = { path = "../okf" }

@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Default values for the modelwrite chart.
+#
+# Secrets are NEVER inlined here. The bearer token, the JWKS document and the
+# database URL (which contains a password) are referenced by the NAME of an
+# existing Secret that the operator creates; see secret.yaml.example
+# for the exact keys this chart reads.
+
+# Single instance. The service has no leader election and no shared write path
+# (the SQLite backend is one file), so leave this at 1: this chart does NOT do
+# high availability.
+replicaCount: 1
+
+image:
+  repository: modelwrite/modelwrite
+  # Empty means "use the chart's appVersion".
+  tag: ""
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+# The image refuses to start in open mode unless MW_ALLOW_OPEN is exactly "yes".
+# Set allowOpen only for a private, single-user pilot.
+auth:
+  allowOpen: false
+  # Shared bearer token (MW_AUTH_TOKEN), read from an existing Secret. Leave empty
+  # to disable. Exactly one of tokenSecret / jwksSecret should be set.
+  tokenSecret: ""     # Secret name
+  tokenKey: "auth-token"
+  # JWKS document (MW_AUTH_JWKS) mounted from an existing Secret, for JWT identity.
+  # This is the air-gapped identity path: ship the JWKS file alongside the image.
+  jwksSecret: ""      # Secret name
+  jwksKey: "jwks.json"
+  # JWT claim configuration (only read when jwksSecret is set).
+  issuer: ""
+  audience: ""
+  rolesClaim: "roles"
+  projectsClaim: "projects"
+
+database:
+  # MW_DATABASE_URL carries a password, so it is read from a Secret, never a value.
+  urlSecret: ""       # Secret name; when set, the service uses PostgreSQL.
+  urlKey: "database-url"
+  # When urlSecret is empty the service runs on SQLite at /data/modelwrite.db
+  # (the air-gapped, no-database path).
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  mountPath: /data
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# uid/gid 65532 match the non-root user baked into the image; fsGroup makes the
+# /data volume writable by that user.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

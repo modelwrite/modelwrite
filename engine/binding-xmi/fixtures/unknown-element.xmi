@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-unknown" name="Unknown Test">
+    <packagedElement xmi:type="uml:Class" xmi:id="block-1" name="Known Block" visibility="public">
+      <Block xmi:id="app-1" base_Class="block-1"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:StateMachine" xmi:id="sm-1" name="Unexpected Machine"/>
+  </uml:Model>
+</xmi:XMI>

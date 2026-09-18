@@ -33,6 +33,25 @@ pub const EDGE_KINDS: &[&str] = &[
     "uses",
 ];
 
+/// Every declared element, paired with the section that declares it, for the cross-check
+/// against the graph. The section name is carried so the warning can say where to look.
+fn element_ids_by_section(root: &OkfRoot) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    for element in &root.structure {
+        out.push(("structure element", element.id.clone()));
+    }
+    for element in &root.interfaces {
+        out.push(("interface", element.id.clone()));
+    }
+    for element in &root.signals {
+        out.push(("signal", element.id.clone()));
+    }
+    for requirement in &root.requirements {
+        out.push(("requirement", requirement.id.clone()));
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationReport {
     pub valid: bool,
@@ -117,6 +136,25 @@ pub fn validate(root: &OkfRoot) -> ValidationReport {
                 report
                     .errors
                     .push(format!("unknown node kind {} on node {}", n.kind, n.id));
+            }
+        }
+        // Every element the document declares should have a node in the graph, because the
+        // graph is how the platform reasons about relationships. When one is missing, the
+        // element is INVISIBLE to every graph-based answer - coverage, traceability, impact -
+        // while still appearing in the document, which is the quiet kind of inconsistency
+        // this platform exists to prevent.
+        //
+        // The commonest cause is a RENAME: changing an element's id without updating the
+        // graph leaves the node under the old name, and nothing else notices, because a
+        // dangling EDGE endpoint is reported but an orphaned ELEMENT was not. A warning
+        // rather than an error, because a document that predates this check must stay
+        // usable - the same reasoning that governs dangling edge endpoints.
+        for (section, id) in element_ids_by_section(root) {
+            if !node_ids.contains(id.as_str()) {
+                report.warnings.push(format!(
+                    "{} {} has no node in the graph, so it is invisible to coverage and traceability",
+                    section, id
+                ));
             }
         }
         for e in &graph.edges {

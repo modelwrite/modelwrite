@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Analytics and data fusion: answers that cross a single model's boundary, fusing
+//! models with external structured and unstructured sources. The ruling that shapes
+//! everything here: A FUSED ANSWER MUST BE TRACEABLE TO ITS SOURCES, AND ITS
+//! CONFIDENCE MUST BE ITS WEAKEST LINK. Analytics reads and produces findings; it
+//! never writes to a model.
+
+pub mod compliance;
+pub mod confidence;
+pub mod cost;
+pub mod dataset;
+pub mod money;
+pub mod source;
+
+pub use compliance::{classify, portfolio_report, Compliance, ModelCompliance, Report};
+pub use confidence::{fused_trust, max, min, sum, FusedValue, FusionError, Value};
+pub use cost::{cost_by_requirement, ColumnMapping, Cost, CostError, CostedRequirement};
+pub use dataset::{CsvError, Dataset};
+pub use money::{Money, MoneyParseError};
+pub use source::{Registry, RegistryError, Source, SourceKind, TrustLevel};

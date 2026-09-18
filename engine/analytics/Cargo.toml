@@ -1,0 +1,21 @@
+[package]
+name = "mw-analytics"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "analytics"
+
+[dependencies]
+mw-okf = { path = "../okf" }
+mw-graph = { path = "../graph" }
+serde.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+mw-test-support = { path = "../test-support" }
+serde_json.workspace = true

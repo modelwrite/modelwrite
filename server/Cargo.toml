@@ -1,0 +1,64 @@
+[package]
+name = "mw-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version = "1.88"
+license.workspace = true
+publish = false
+
+[lib]
+name = "server"
+
+[[bin]]
+name = "mw-server"
+path = "src/main.rs"
+
+[features]
+default = ["postgres"]
+# The PostgreSQL backend is compiled by default so its tests compile and skip cleanly
+# when MW_TEST_DATABASE_URL is unset. Build with --no-default-features to omit it and
+# every dependency it pulls (including the rustls TLS stack).
+postgres = [
+    "dep:postgres",
+    "dep:r2d2",
+    "dep:r2d2_postgres",
+    "dep:tokio-postgres-rustls",
+    "dep:rustls",
+    "dep:rustls-native-certs",
+]
+
+[dependencies]
+mw-okf = { path = "../engine/okf" }
+mw-graph = { path = "../engine/graph" }
+mw-gate = { path = "../engine/gate" }
+mw-binding = { path = "../engine/binding" }
+mw-binding-xmi = { path = "../engine/binding-xmi" }
+mw-agent = { path = "../engine/agent" }
+mw-analytics = { path = "../engine/analytics" }
+axum.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64 = "0.22"
+anyhow.workspace = true
+jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
+maud = "0.27.0"
+postgres = { version = "0.19", optional = true }
+r2d2 = { version = "0.8", optional = true }
+r2d2_postgres = { version = "0.18", optional = true }
+tokio-postgres-rustls = { version = "0.13", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+
+[dev-dependencies]
+mw-mcp = { path = "../engine/mcp" }
+mw-test-support = { path = "../engine/test-support" }
+base64 = "0.22"
+tower.workspace = true
+http-body-util.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+postgres = { version = "0.19" }

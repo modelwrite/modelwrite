@@ -13,6 +13,10 @@ name = "graph"
 mw-okf = { path = "../okf" }
 petgraph.workspace = true
 serde.workspace = true
+# Pinned so the engine layer stays buildable at the workspace rust-version floor
+# (1.75). indexmap is petgraph's transitive dependency; 2.12+ needs 1.82, 2.14+
+# needs 1.85 (edition2024). See the workspace.dependencies entry.
+indexmap.workspace = true
 
 [dev-dependencies]
 mw-test-support = { path = "../test-support" }

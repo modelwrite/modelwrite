@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 name: ci
 on:
   push:
@@ -25,3 +26,142 @@ jobs:
           diff /tmp/self-pass.json docs/evidence/2026-09-17-roundtrip-self-pass.json
           diff /tmp/corrupted-fail.json docs/evidence/2026-09-17-roundtrip-corrupted-fail.json
       - run: python -m unittest discover -s judge/tests -p "test_*.py" -v
+
+  msrv:
+    # Builds each crate with its DECLARED minimum toolchain, not with stable. A
+    # manifest rust-version nobody tests is a claim that drifts: the server
+    # declared 1.85 while its JWT crate (via time@0.3.55) actually needs rustc
+    # 1.88, and nothing caught it because every other toolchain in use was
+    # newer. The workspace has two declared floors, kept distinct here rather
+    # than collapsed to the larger:
+    #   - engine/* inherits workspace.package rust-version = 1.75
+    #   - server and cli declare rust-version = 1.88
+    # The 1.75 engine floor is kept true by pinning indexmap (petgraph's
+    # transitive dependency) to the last release whose MSRV is <= 1.75; indexmap
+    # 2.14 requires edition2024 (rustc 1.85). Keep the two pinned toolchains in
+    # step with workspace.package and server/Cargo.toml + cli/Cargo.toml
+    # rust-version respectively.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: engine layer at the engine floor (1.75)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+      - run: cargo build -p mw-okf -p mw-test-support -p mw-graph -p mw-gate -p mw-binding -p mw-binding-xmi -p mw-agent -p mw-capi -p mw-mcp -p mw-analytics --locked
+      - name: server layer at the server floor (1.88)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - run: cargo build -p mw-server -p mw-cli --locked
+
+  postgres:
+    # This job proves the PostgreSQL backend, which cannot run on a machine
+    # without Docker/PostgreSQL. The tests in server/tests/postgres.rs are
+    # marked #[ignore], so a plain 'cargo test' reports them IGNORED (not
+    # passed). Here a service container provides a real database,
+    # MW_TEST_DATABASE_URL is set, and the ignored suite is run by name.
+    # If the database is unreachable the tests PANIC (require_store fails
+    # loudly) rather than skip, so this job cannot silently pass by running
+    # zero tests.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: modelwrite
+          POSTGRES_PASSWORD: modelwrite
+          POSTGRES_DB: modelwrite
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U modelwrite -d modelwrite"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: run the workspace tests, including the PostgreSQL suite
+        env:
+          # sslmode=disable is explicit: PostgresStore maps the libpq default
+          # 'prefer' to REQUIRED TLS (it never silently downgrades), and the
+          # service container speaks plaintext, so the opt-out is required here.
+          MW_TEST_DATABASE_URL: postgres://modelwrite:modelwrite@localhost:5432/modelwrite?sslmode=disable
+        # The workspace runs WITHOUT --include-ignored: scoping the flag to the
+        # postgres test target means a future #[ignore] test anywhere else would
+        # not silently start running here. The ignored suite then runs by name,
+        # and the tests run in parallel on purpose: each opens its own store, and
+        # the server serialises the schema bootstrap with pg_advisory_xact_lock,
+        # so a parallel run proves concurrent opens no longer race (CI caught
+        # exactly that race the first time these tests ever ran).
+        run: |
+          cargo test --workspace --no-fail-fast
+          cargo test -p mw-server --test postgres --no-fail-fast -- --include-ignored
+
+  deploy:
+    # Proves the parts a Docker-less machine cannot: the container image
+    # actually builds, the Helm chart lints, and every plain YAML file in
+    # deploy/ parses.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install PyYAML
+        run: python -m pip install --quiet PyYAML
+      - name: parse every plain YAML file in deploy/
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import yaml
+
+          root = pathlib.Path("deploy")
+          # Helm templates/*.yaml files are Go templates rendered by helm lint,
+          # not by a YAML parser, so skip everything under templates/. Every
+          # other .yml/.yaml/.yaml.example file under deploy/ must be valid YAML
+          # (that includes the chart-root secret.yaml.example documentation).
+          templates_dir = root / "helm" / "modelwrite" / "templates"
+
+          files = sorted(
+              p
+              for p in root.rglob("*")
+              if p.is_file()
+              and p.suffix in (".yml", ".yaml", ".example")
+              and p.parent != templates_dir
+          )
+
+          if not files:
+              print("no YAML files found under deploy/", file=sys.stderr)
+              sys.exit(1)
+
+          failed = False
+          for path in files:
+              try:
+                  docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+              except Exception as exc:  # a syntax error must fail the build
+                  failed = True
+                  print(f"FAIL {path}: {exc}", file=sys.stderr)
+                  continue
+              if not docs or all(doc is None for doc in docs):
+                  failed = True
+                  print(f"FAIL {path}: no YAML document", file=sys.stderr)
+                  continue
+              print(f"OK   {path}")
+
+          if failed:
+              sys.exit(1)
+          print(f"{len(files)} YAML file(s) in deploy/ parsed cleanly")
+          PY
+      - name: install Helm
+        run: |
+          curl -fsSL "https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz" -o helm.tgz
+          tar -xzf helm.tgz
+          echo "$PWD/linux-amd64" >> "$GITHUB_PATH"
+      - name: lint the Helm chart
+        run: helm lint deploy/helm/modelwrite
+      - name: build the container image
+        run: docker build -f deploy/Dockerfile -t modelwrite/modelwrite:ci .
+

@@ -1,0 +1,2363 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! In-process tests for the workbench pages. They drive the router with tower oneshot and
+//! assert on the HTML body text, so a view that stops rendering a section fails the suite,
+//! and they prove the two guarantees the pages cannot ship without: authentication (an
+//! unauthenticated request is a 401 sign-in prompt) and escaping (a hostile project name
+//! cannot execute as markup).
+
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+use okf::types::OkfRoot;
+use server::auth::{AuthConfig, Identity};
+use server::store::{sqlite::SqliteStore, GateRun, Store};
+use server::AppState;
+
+fn state_with_auth(dir: &std::path::Path, auth: AuthConfig) -> AppState {
+    let store = SqliteStore::open(&dir.join("mw.db")).unwrap();
+    AppState {
+        store: Arc::new(store),
+        evidence_dir: dir.to_path_buf(),
+        auth,
+    }
+}
+
+fn state(dir: &std::path::Path) -> AppState {
+    state_with_auth(dir, AuthConfig::Open)
+}
+
+fn get(uri: &str) -> Request<Body> {
+    Request::builder().uri(uri).body(Body::empty()).unwrap()
+}
+
+fn post(uri: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn post_form(uri: &str, params: &[(&str, &str)]) -> Request<Body> {
+    let body = params
+        .iter()
+        .map(|(key, value)| format!("{}={}", key, percent_encode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// Percent-encode one form value, so a branch name or message with a space or a
+/// non-ASCII character survives the form round-trip.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
+}
+
+async fn body_text(response: axum::response::Response) -> String {
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+async fn json_body(response: axum::response::Response) -> serde_json::Value {
+    serde_json::from_str(&body_text(response).await).unwrap()
+}
+
+fn count(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
+}
+
+fn viewer() -> Identity {
+    Identity {
+        subject: "viewer".to_string(),
+        roles: vec!["viewer".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+#[tokio::test]
+async fn the_project_list_and_page_render_the_coffee_corpus() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "alex",
+                "message": "import the exported model",
+                "okf": expected
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let list = router.clone().oneshot(get("/ui")).await.unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_html = body_text(list).await;
+    assert!(list_html.contains("coffee"), "the project must be listed");
+    assert!(
+        list_html.contains("1 branch"),
+        "the branch count must render, got:\n{}",
+        list_html
+    );
+    assert!(
+        list_html.contains("import the exported model"),
+        "the latest commit must render, got:\n{}",
+        list_html
+    );
+
+    let page = router.oneshot(get("/ui/projects/coffee")).await.unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let page_html = body_text(page).await;
+    assert!(page_html.contains("main"), "the branch must be listed");
+    assert!(
+        page_html.contains("import the exported model"),
+        "the tip message must render"
+    );
+    assert!(page_html.contains("alex"), "the tip author must render");
+}
+
+#[tokio::test]
+async fn a_viewer_sees_the_pages() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let list = router.clone().oneshot(get("/ui")).await.unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let html = body_text(list).await;
+    assert!(html.contains("coffee"), "the project must be listed");
+    assert!(
+        html.contains("viewer via fixed"),
+        "the header must name the identity subject and the auth mechanism"
+    );
+
+    let page = router.oneshot(get("/ui/projects/coffee")).await.unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(html.contains("coffee"), "the project must be named");
+    assert!(!html.contains("not signed in"), "a viewer is authenticated");
+}
+
+#[tokio::test]
+async fn the_import_pages_state_the_fidelity_boundary_and_label_losses() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    // The form states which half of fidelity is measured and which half is the binding's word.
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/import"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        html.contains("NOT independently measured"),
+        "the import page must state the measurement boundary, got:\n{}",
+        html
+    );
+
+    // A refused import renders each blocking loss with its verdict and note, so a person can
+    // tell a dropped id from a dropped body that happen to name the same subject.
+    let fixture = std::fs::read_to_string(format!(
+        "{}/../engine/binding-xmi/fixtures/unknown-element.xmi",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("fixture must exist");
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import"),
+                ("artifact", &fixture),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("(unmappable)"),
+        "each loss must be labelled with its verdict, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("loss-note"),
+        "each loss must show its note, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("NOT independently measured"),
+        "the refusal page must state the measurement boundary"
+    );
+}
+
+#[tokio::test]
+async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state_with_auth(
+        dir.path(),
+        AuthConfig::static_token("the-token"),
+    ));
+
+    for uri in [
+        "/ui",
+        "/ui/projects/coffee",
+        "/ui/projects/coffee/model",
+        "/ui/projects/coffee/diagram",
+        "/ui/projects/coffee/compare?from=a&to=b",
+        "/ui/projects/coffee/import",
+        "/ui/projects/coffee/gate",
+        "/ui/projects/coffee/gate/aaaa/bbbb",
+    ] {
+        let response = router.clone().oneshot(get(uri)).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{} must be refused with 401",
+            uri
+        );
+        let html = body_text(response).await;
+        assert!(html.contains("<html"), "a 401 must be a page, not JSON");
+        assert!(
+            html.contains("Sign in required"),
+            "a 401 must render a sign-in prompt"
+        );
+        assert!(
+            !html.contains("the-token"),
+            "the token must never be echoed"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_hostile_project_name_is_escaped() {
+    // Project names are validated at the API boundary, but a store can hold a name that
+    // never came through that boundary (an import, an old database, a hostile colleague).
+    // The page must escape it regardless, so it can never execute as markup.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store
+        .create_project("<script>alert(1)</script>", None)
+        .unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    let response = router.oneshot(get("/ui")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "the hostile name must appear escaped, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("<script"),
+        "a raw script tag must never appear, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn a_scoped_identity_only_sees_its_projects() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store.create_project("tea", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(Identity {
+            subject: "scoped".to_string(),
+            roles: vec!["viewer".to_string()],
+            projects: vec!["coffee".to_string()],
+        }),
+    });
+
+    let response = router.oneshot(get("/ui")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("coffee"),
+        "the in-scope project must be listed"
+    );
+    assert!(
+        !html.contains("tea"),
+        "the out-of-scope project must not be disclosed"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_project_renders_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let response = router.oneshot(get("/ui/projects/nope")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 404 must be a page, not JSON");
+    assert!(html.contains("Not Found"), "the page must name the status");
+    assert!(
+        html.contains("project nope"),
+        "the page must name the missing project"
+    );
+}
+
+#[tokio::test]
+async fn the_model_page_renders_all_four_sections_of_the_corpus() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // All four sections render, in order.
+    assert!(html.contains("<h2>Structure</h2>"), "structure section");
+    assert!(
+        html.contains("<h2>Requirements</h2>"),
+        "requirements section"
+    );
+    assert!(
+        html.contains("<h2>Traceability</h2>"),
+        "traceability section"
+    );
+    assert!(
+        html.contains("<h2>State and activity</h2>"),
+        "state and activity section"
+    );
+
+    // The corpus counts: 49 structure elements, 9 signals, 25 requirements, 8 activities.
+    assert_eq!(
+        count(&html, "<li class=\"element\""),
+        49,
+        "49 structure elements"
+    );
+    assert_eq!(count(&html, "<li class=\"signal\""), 9, "9 signals");
+    assert_eq!(
+        count(&html, "<tr class=\"requirement\""),
+        25,
+        "25 requirements"
+    );
+    assert_eq!(
+        count(&html, "<tr class=\"trace-row\""),
+        25,
+        "25 matrix rows"
+    );
+    assert_eq!(count(&html, "class=\"activity\""), 8, "8 activities");
+    assert_eq!(count(&html, "class=\"state\""), 7, "7 states");
+    assert_eq!(count(&html, "class=\"transition\""), 8, "8 transitions");
+
+    // The engine's coverage numbers, rendered verbatim rather than recomputed.
+    assert!(
+        html.contains("25 requirements: 15 covered, 10 uncovered"),
+        "the coverage summary must come from the engine, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("20 satisfy, 3 refine, 1 verify, 0 allocate"),
+        "the per-kind coverage counts must come from the engine"
+    );
+
+    // Ten uncovered requirements are visibly marked, fifteen are marked covered.
+    assert_eq!(
+        count(&html, "class=\"uncovered\""),
+        10,
+        "10 uncovered marked"
+    );
+    assert_eq!(count(&html, "class=\"covered\""), 15, "15 covered marked");
+    assert!(
+        html.contains("System Level Requirements"),
+        "an uncovered requirement must render"
+    );
+    assert!(
+        html.contains("Regulatory Compliance Mark"),
+        "the leaf uncovered requirement must render"
+    );
+    assert!(
+        html.contains("Heater Initialization"),
+        "a covered requirement must render"
+    );
+
+    // The two dangling edges render as explicit broken links, not silently dropped.
+    assert_eq!(
+        count(&html, "class=\"unresolved-edge\""),
+        2,
+        "2 unresolved edges"
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789524431087_459748_5711"),
+        "the first dangling endpoint must be shown"
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789524431091_435540_5713"),
+        "the second dangling endpoint must be shown"
+    );
+
+    // The page names what it is rendering.
+    assert!(
+        html.contains("Coffee Machine"),
+        "the root block must render"
+    );
+    assert!(
+        html.contains("import the exported model"),
+        "the commit message must render"
+    );
+    assert!(html.contains("alex"), "the commit author must render");
+}
+
+#[tokio::test]
+async fn the_model_page_resolves_branch_and_commit_and_404s_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for uri in [
+        "/ui/projects/coffee/model?branch=main".to_string(),
+        format!("/ui/projects/coffee/model?commit={}", hash),
+    ] {
+        let response = router.clone().oneshot(get(&uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{} must render", uri);
+        let html = body_text(response).await;
+        assert!(
+            html.contains("<h2>Structure</h2>"),
+            "{} must render structure",
+            uri
+        );
+    }
+
+    let bad_branch = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model?branch=nope"))
+        .await
+        .unwrap();
+    assert_eq!(bad_branch.status(), StatusCode::NOT_FOUND);
+
+    let bad_commit = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model?commit=deadbeef"))
+        .await
+        .unwrap();
+    assert_eq!(bad_commit.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_scoped_identity_cannot_see_another_projects_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store.create_project("tea", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(Identity {
+            subject: "scoped".to_string(),
+            roles: vec!["viewer".to_string()],
+            projects: vec!["coffee".to_string()],
+        }),
+    });
+
+    let response = router.oneshot(get("/ui/projects/tea/model")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("project not in scope"),
+        "the page must name the scope refusal, got:\n{}",
+        html
+    );
+}
+
+/// A minimal two-element model, in the same shape the merge API tests use: one block, one
+/// requirement, one Satisfy edge. The block's name is the only thing a branch changes.
+fn merge_model(block_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": {"name": "sm", "regions": []},
+        "requirements": [{
+            "id": "r1", "name": "r1", "kind": "requirement",
+            "stereotypes": ["Requirement"], "attributes": [], "documentation": "",
+            "reqId": "1.1", "reqText": "text"
+        }],
+        "structure": [{
+            "id": "b1", "name": block_name, "kind": "block",
+            "stereotypes": ["Block"], "attributes": [], "documentation": ""
+        }],
+        "graph": {
+            "nodes": [
+                {"id": "b1", "kind": "block", "name": "Block"},
+                {"id": "r1", "kind": "requirement", "name": "r1"}
+            ],
+            "edges": [{"source": "b1", "target": "r1", "kind": "dependency", "label": "Satisfy"}]
+        }
+    })
+}
+
+/// Commit a document onto a branch and return its commit hash.
+async fn commit_okf(
+    router: &axum::Router,
+    branch: &str,
+    message: &str,
+    okf: serde_json::Value,
+) -> String {
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": branch, "author": "alex", "message": message, "okf": okf }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED, "commit {}", message);
+    json_body(response).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn the_compare_page_shows_the_engine_diff_and_gate_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let broken: serde_json::Value = serde_json::from_str(&test_support::load_okf_broken()).unwrap();
+
+    let imported = commit_okf(&router, "main", "import the exported model", expected).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "corrupted", "from": imported }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+    let corrupted = commit_okf(&router, "corrupted", "drop a requirement", broken).await;
+    assert_ne!(imported, corrupted);
+
+    let uri = format!(
+        "/ui/projects/coffee/compare?from={}&to={}",
+        imported, corrupted
+    );
+    let response = router.clone().oneshot(get(&uri)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // The diff is the engine's: the missing requirement appears with the exact key the
+    // gate's roundtrip reports, and the isolated node appears with the exact id the gate's
+    // integration reports.
+    assert!(
+        html.contains("requirements:_2026x_1_12a70364_1789522470210_613186_5619"),
+        "the missing requirement must render exactly as the gate reports it, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789602694801_483599_6108"),
+        "the isolated node must render exactly as the gate reports it, got:\n{}",
+        html
+    );
+
+    // The gate verdict and its evidence path.
+    assert!(
+        html.contains("<h2>Diff</h2>"),
+        "the diff section must render"
+    );
+    assert!(
+        html.contains("<h2>Gate</h2>"),
+        "the gate section must render"
+    );
+    assert!(
+        html.contains(">failed<"),
+        "the failed verdict must render, got:\n{}",
+        html
+    );
+    // The page must NOT name an evidence file, because a comparison writes one.
+    //
+    // This assertion previously required the evidence PATH here, on the assumption that the
+    // compare page produced a record. It does not: gate::run computes a verdict and writes
+    // nothing, and only the gate endpoint persists a run and its evidence. A page that named
+    // a file it never wrote would tell a reviewer the record lives somewhere it does not -
+    // and this platform exists to avoid exactly that kind of false assurance.
+    assert!(
+        !html.contains(&format!("server-{}-{}.json", imported, corrupted)),
+        "a comparison must not name an evidence file it never writes, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("not recorded"),
+        "the page must say plainly that a comparison leaves no record, got:\n{}",
+        html
+    );
+
+    // The branch-name form of the same pair resolves to the same commit pair.
+    let by_branch = router
+        .oneshot(get("/ui/projects/coffee/compare?from=main&to=corrupted"))
+        .await
+        .unwrap();
+    assert_eq!(by_branch.status(), StatusCode::OK);
+    let branch_html = body_text(by_branch).await;
+    assert!(
+        branch_html.contains(">failed<"),
+        "comparing by branch must resolve to the same failing pair"
+    );
+}
+
+#[tokio::test]
+async fn a_conflicting_merge_renders_base_ours_and_theirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let base = commit_okf(&router, "main", "base", merge_model("Block")).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": base }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+
+    commit_okf(&router, "feature", "theirs", merge_model("Theirs")).await;
+    commit_okf(&router, "main", "ours", merge_model("Ours")).await;
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("author", "alex"),
+                ("message", "merge"),
+            ],
+        ))
+        .await
+        .unwrap();
+
+    // A 409 is information, not a failure: the conflict is a PAGE, not an error page.
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Merge conflict"),
+        "the conflict must render as a page, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("structure:&quot;b1&quot;"),
+        "the conflict subject must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("bothModified"),
+        "the conflict kind must render, got:\n{}",
+        html
+    );
+
+    // Base, ours and theirs render side by side.
+    assert_eq!(
+        count(&html, "class=\"conflict-side\""),
+        3,
+        "three columns must render side by side, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("&quot;name&quot;:&quot;Block&quot;"),
+        "the base value must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("&quot;name&quot;:&quot;Ours&quot;"),
+        "the ours value must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("&quot;name&quot;:&quot;Theirs&quot;"),
+        "the theirs value must render, got:\n{}",
+        html
+    );
+
+    // A resolution form is present, prefilled with the two branches.
+    assert!(
+        html.contains("name=\"branch\""),
+        "the resolution form must render"
+    );
+    assert!(
+        html.contains("value=\"main\""),
+        "the branch must be prefilled"
+    );
+}
+
+#[tokio::test]
+async fn a_clean_merge_through_the_form_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let base = commit_okf(&router, "main", "base", merge_model("Block")).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": base }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+    commit_okf(&router, "feature", "rename", merge_model("Renamed")).await;
+
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("author", "alex"),
+                ("message", "merge feature"),
+            ],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Merge complete"),
+        "the success page must render"
+    );
+    assert!(
+        html.contains("feature"),
+        "the merged-from branch must render"
+    );
+    assert!(html.contains("main"), "the merged-into branch must render");
+
+    // And the merge really happened: main's history now contains a two-parent commit.
+    let history = router
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let history = json_body(history).await;
+    let has_merge = history.as_array().unwrap().iter().any(|commit| {
+        commit["parents"]
+            .as_array()
+            .map(|parents| parents.len())
+            .unwrap_or(0)
+            == 2
+    });
+    assert!(has_merge, "the merge must write a two-parent commit");
+}
+
+#[tokio::test]
+async fn an_unauthenticated_merge_is_a_sign_in_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state_with_auth(
+        dir.path(),
+        AuthConfig::static_token("the-token"),
+    ));
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("message", "merge"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 401 must be a page, not JSON");
+    assert!(
+        html.contains("Sign in required"),
+        "a 401 must be a sign-in prompt"
+    );
+    assert!(
+        !html.contains("the-token"),
+        "the token must never be echoed"
+    );
+}
+
+#[tokio::test]
+async fn a_viewer_cannot_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("message", "merge"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("write permission required"),
+        "the page must name the permission refusal, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn hostile_content_in_a_model_is_escaped_on_the_model_page() {
+    // The project list is not where a supplier's words arrive: requirement text and element
+    // documentation are. The escaping is uniform because maud escapes every splice, but a
+    // test here is what keeps that true if somebody reaches for raw markup later.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let mut okf = test_support::load_okf_expected();
+    let mut value: serde_json::Value = serde_json::from_str(&okf).unwrap();
+    value["structure"][0]["documentation"] = serde_json::json!("<script>alert('docs')</script>");
+    value["requirements"][0]["reqText"] = serde_json::json!("<script>alert('req')</script>");
+    okf = value.to_string();
+
+    let committed = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "hostile", "okf": serde_json::from_str::<serde_json::Value>(&okf).unwrap() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let page = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        html.contains("&lt;script&gt;"),
+        "the hostile content must appear escaped"
+    );
+    assert!(
+        !html.contains("<script"),
+        "no raw script tag may reach the model page"
+    );
+}
+/// The author role: can read and write, so it can both view and submit the edit form.
+fn author() -> Identity {
+    Identity {
+        subject: "alice".to_string(),
+        roles: vec!["author".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+/// Seed a project and a model directly through the store, bypassing the JSON commit
+/// handler's author resolution so a test can fix a specific identity afterwards.
+fn seed_model_directly(store: &dyn Store, okf: serde_json::Value) {
+    store.create_project("coffee", None).unwrap();
+    let root: OkfRoot = serde_json::from_value(okf).unwrap();
+    let bytes = serde_json::to_vec(&root).unwrap();
+    let okf_hash = store.put_blob(&bytes).unwrap();
+    store
+        .commit_model(
+            "coffee", "main", &okf_hash, "seeder", "seed", None, None, None,
+        )
+        .unwrap();
+}
+
+/// The merge model with two attributes on the block, so an edit proves the form round-trips
+/// attributes rather than dropping them.
+fn block_with_attributes() -> serde_json::Value {
+    let mut model = merge_model("Block");
+    model["structure"][0]["attributes"] = serde_json::json!([
+        { "name": "inlet", "type": "Water Inlet", "aggregation": "none", "default": "" },
+        { "name": "outlet", "type": "Water Outlet", "aggregation": "none", "default": "" },
+    ]);
+    model
+}
+
+#[tokio::test]
+async fn editing_a_block_documentation_commits_with_the_identity_author() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), block_with_attributes());
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(author()),
+    });
+
+    let form = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/edit/b1"))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let form_html = body_text(form).await;
+    assert!(
+        form_html.contains("name=\"documentation\""),
+        "the form must render the documentation field"
+    );
+    assert!(
+        form_html.contains("name=\"attr_name_0\""),
+        "the form must render the block's attributes"
+    );
+
+    // The author field the form never asks for is ignored; the commit records the identity.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "document the block"),
+                ("id", "b1"),
+                ("name", "Block"),
+                ("documentation", "Brews coffee on demand."),
+                ("stereotypes", "Block"),
+                ("attr_count", "2"),
+                ("attr_name_0", "inlet"),
+                ("attr_type_0", "Water Inlet"),
+                ("attr_aggregation_0", "none"),
+                ("attr_default_0", ""),
+                ("attr_name_1", "outlet"),
+                ("attr_type_1", "Water Outlet"),
+                ("attr_aggregation_1", "none"),
+                ("attr_default_1", ""),
+                // A SPARSE, absurdly high index. An earlier attempt to bound the attribute
+                // loop took the highest index present and iterated from zero to there, so
+                // this single field would have made the server do a billion iterations of
+                // formatting and lookups before answering. With the bound taken from the
+                // indexes that ACTUALLY EXIST, this costs exactly one iteration. The test
+                // has teeth by construction: under the old code it does not fail, it hangs.
+                ("attr_name_1000000000", "Legacy"),
+                ("attr_type_1000000000", "String"),
+                ("attr_aggregation_1000000000", "none"),
+                ("attr_default_1000000000", ""),
+                ("author", "evil"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Edit committed"),
+        "the success page must render, got:\n{}",
+        html
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    let edited = commits
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["message"] == "document the block")
+        .expect("the edit commit must exist");
+    assert_eq!(
+        edited["author"].as_str().unwrap(),
+        "alice",
+        "the author must be the identity, never a browser field"
+    );
+
+    let hash = edited["hash"].as_str().unwrap();
+    let doc = router
+        .clone()
+        .oneshot(get(&format!("/projects/coffee/commits/{}", hash)))
+        .await
+        .unwrap();
+    let doc = json_body(doc).await;
+    assert_eq!(
+        doc["structure"][0]["documentation"].as_str().unwrap(),
+        "Brews coffee on demand.",
+        "the documentation must change"
+    );
+    // Three, not two: the two real attributes plus the one submitted at the sparse index
+    // 1000000000. The point of that third field is the WORK it must not cause - see the
+    // comment where it is submitted - and this count is what proves it was parsed rather
+    // than skipped.
+    assert_eq!(
+        doc["structure"][0]["attributes"].as_array().unwrap().len(),
+        3,
+        "the attributes must round-trip through the form"
+    );
+
+    // The request-duration lease is released when the edit finishes.
+    assert!(
+        store
+            .locks("coffee", server::store::now_seconds())
+            .unwrap()
+            .is_empty(),
+        "the element must not be left locked"
+    );
+}
+
+#[tokio::test]
+async fn an_element_held_by_another_holder_is_refused_and_names_the_holder() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    // Another holder takes a lease on the element through the JSON locks endpoint.
+    let acquired = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({
+                "branch": "main",
+                "elements": ["b1"],
+                "holder": "bob",
+                "ttlSeconds": 300
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(acquired.status(), StatusCode::CREATED);
+
+    // The form shows the holder and refuses to submit.
+    let form = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/edit/b1"))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let form_html = body_text(form).await;
+    assert!(
+        form_html.contains("Held by another holder"),
+        "the form must say who holds the element, got:\n{}",
+        form_html
+    );
+    assert!(
+        form_html.contains("bob"),
+        "the holder must be named, got:\n{}",
+        form_html
+    );
+    assert!(
+        form_html.contains("<button type=\"submit\" disabled"),
+        "the submit button must be disabled while another holder has it, got:\n{}",
+        form_html
+    );
+
+    // Submitting is refused, the holder is named, and nothing is stored.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal the block"),
+                ("id", "b1"),
+                ("name", "Block"),
+                ("documentation", "overwritten"),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("bob"),
+        "the refusal must name the holder, got:\n{}",
+        html
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the refused edit must not have committed"
+    );
+}
+
+#[tokio::test]
+async fn an_invalid_edit_renders_the_validator_errors_and_stores_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    // Emptying the id is an explicit edit the validator refuses, so the errors render next
+    // to the form rather than crashing with a 500.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "break it"),
+                ("id", ""),
+                ("name", "Block"),
+                ("documentation", ""),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("empty element id"),
+        "the validator's error must render, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("Edit committed"),
+        "an invalid edit must not render success"
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the invalid edit must not have committed"
+    );
+}
+
+#[tokio::test]
+async fn an_unauthenticated_edit_is_a_sign_in_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state_with_auth(
+        dir.path(),
+        AuthConfig::static_token("the-token"),
+    ));
+
+    for uri in ["/ui/projects/coffee/edit/b1"] {
+        let response = router.clone().oneshot(get(uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let html = body_text(response).await;
+        assert!(html.contains("Sign in required"));
+        assert!(
+            !html.contains("the-token"),
+            "the token must never be echoed"
+        );
+    }
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal"),
+                ("id", "b1"),
+                ("name", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let html = body_text(response).await;
+    assert!(html.contains("Sign in required"));
+}
+
+#[tokio::test]
+async fn a_viewer_cannot_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal"),
+                ("id", "b1"),
+                ("name", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("write permission required"),
+        "the page must name the permission refusal, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_edit_form_renders_the_corpus_block_with_its_attributes() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let block_id = expected["structure"][0]["id"].as_str().unwrap().to_string();
+    commit_okf(&router, "main", "import the exported model", expected).await;
+
+    let form = router
+        .oneshot(get(&format!("/ui/projects/coffee/edit/{}", block_id)))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let html = body_text(form).await;
+    assert!(
+        html.contains("Coffee Machine"),
+        "the root block's name must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("water System"),
+        "the block's first attribute must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("name=\"attr_name_0\""),
+        "attribute rows must be indexed"
+    );
+}
+
+/// A tiny document with one block, optionally including a second block whose name the
+/// caller chooses, so two branches can add the SAME element differently.
+fn small_model(second: Option<&str>) -> serde_json::Value {
+    let mut structure = vec![serde_json::json!({
+        "id": "b1", "name": "Block", "kind": "block",
+        "stereotypes": ["Block"], "attributes": [], "documentation": ""
+    })];
+    let mut nodes = vec![serde_json::json!({ "id": "b1", "kind": "block", "name": "Block" })];
+    if let Some(name) = second {
+        structure.push(serde_json::json!({
+            "id": "b9", "name": name, "kind": "block",
+            "stereotypes": ["Block"], "attributes": [], "documentation": ""
+        }));
+        nodes.push(serde_json::json!({ "id": "b9", "kind": "block", "name": name }));
+    }
+    serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "structure": structure,
+        "requirements": [],
+        "graph": { "nodes": nodes, "edges": [] }
+    })
+}
+
+#[tokio::test]
+async fn a_conflict_with_no_base_side_says_absent_rather_than_showing_nothing() {
+    // An element added on BOTH branches has no base version at all. Rendering an empty
+    // cell there would read as "no change" when the truth is that two people invented the
+    // same element differently - which is exactly the reading a reviewer must not make.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let base = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "base", "okf": small_model(None) }),
+        ))
+        .await
+        .unwrap();
+    let base_hash = json_body(base).await["hash"].as_str().unwrap().to_string();
+
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": base_hash }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+
+    // The same NEW element, added on both branches with different content.
+    for (branch, name) in [("main", "Ours"), ("feature", "Theirs")] {
+        let committed = router
+            .clone()
+            .oneshot(post(
+                "/projects/coffee/commits",
+                serde_json::json!({ "branch": branch, "author": "alex", "message": "add", "okf": small_model(Some(name)) }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(committed.status(), StatusCode::CREATED, "{}", branch);
+    }
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("message", "merge"),
+                ("author", "alex"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Merge conflict"),
+        "a conflict must be a page, not an error"
+    );
+    assert!(
+        html.contains("(absent)"),
+        "a missing base side must be named, not left blank"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 5: the gate, rendered where a reviewer looks.
+
+/// The reviewer role: reads gate runs and their evidence, so it may open the detail.
+fn reviewer() -> Identity {
+    Identity {
+        subject: "reviewer".to_string(),
+        roles: vec!["reviewer".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+#[tokio::test]
+async fn the_gate_pages_render_the_self_pass_and_the_corrupted_pair() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let broken: serde_json::Value = serde_json::from_str(&test_support::load_okf_broken()).unwrap();
+
+    let imported = commit_okf(&router, "main", "import the exported model", expected).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "corrupted", "from": imported }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+    let corrupted = commit_okf(&router, "corrupted", "drop a requirement", broken).await;
+
+    // Two recorded runs, in order: the self-pass first, then the corrupted pair.
+    for (reference, candidate) in [
+        (imported.clone(), imported.clone()),
+        (imported.clone(), corrupted.clone()),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(post(
+                "/projects/coffee/gate",
+                serde_json::json!({ "reference": reference, "candidate": candidate }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // The list: both runs, newest first, each with its verdict, hashes and evidence file name.
+    let list = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_html = body_text(list).await;
+    assert_eq!(
+        count(&list_html, "class=\"gate-run\""),
+        2,
+        "two runs must be listed, got:\n{}",
+        list_html
+    );
+    assert!(
+        list_html.contains(">failed<"),
+        "the failed verdict must render in the list"
+    );
+    assert!(
+        list_html.contains(">passed<"),
+        "the passed verdict must render in the list"
+    );
+    let failed_at = list_html.find(">failed<").unwrap();
+    let passed_at = list_html.find(">passed<").unwrap();
+    assert!(
+        failed_at < passed_at,
+        "the most recent run (the corrupted pair) must be listed first"
+    );
+    assert!(
+        list_html.contains(&format!("server-{}-{}.json", imported, corrupted)),
+        "the evidence file name must carry both full hashes"
+    );
+
+    // The self-pass detail renders green with its coverage counts.
+    let self_pass = router
+        .clone()
+        .oneshot(get(&format!(
+            "/ui/projects/coffee/gate/{}/{}",
+            imported, imported
+        )))
+        .await
+        .unwrap();
+    assert_eq!(self_pass.status(), StatusCode::OK);
+    let self_html = body_text(self_pass).await;
+    assert!(
+        self_html.contains(">passed<"),
+        "the self-pass must render passed, got:\n{}",
+        self_html
+    );
+    assert!(
+        self_html.contains("25 requirements: 15 covered, 10 uncovered"),
+        "the coverage counts must come from the evidence, got:\n{}",
+        self_html
+    );
+    assert!(
+        self_html.contains("20 satisfy, 3 refine, 1 verify, 0 allocate"),
+        "the per-kind coverage counts must render"
+    );
+    assert!(
+        self_html.contains("1 connected component"),
+        "the integration section must render"
+    );
+
+    // The corrupted pair renders red, naming the missing element and the isolated node.
+    let corrupted_detail = router
+        .clone()
+        .oneshot(get(&format!(
+            "/ui/projects/coffee/gate/{}/{}",
+            imported, corrupted
+        )))
+        .await
+        .unwrap();
+    assert_eq!(corrupted_detail.status(), StatusCode::OK);
+    let corrupted_html = body_text(corrupted_detail).await;
+    assert!(
+        corrupted_html.contains(">failed<"),
+        "the corrupted pair must render failed, got:\n{}",
+        corrupted_html
+    );
+    assert!(
+        corrupted_html.contains("requirements:_2026x_1_12a70364_1789522470210_613186_5619"),
+        "the missing element must be named exactly as the gate reports it, got:\n{}",
+        corrupted_html
+    );
+    assert!(
+        corrupted_html.contains("_2026x_1_12a70364_1789602694801_483599_6108"),
+        "the isolated node must be named exactly as the gate reports it"
+    );
+    // The evidence record itself renders, not just the summary above it.
+    assert!(
+        corrupted_html.contains("gateVersion"),
+        "the evidence record must render in full"
+    );
+}
+
+#[tokio::test]
+async fn the_gate_pages_enforce_the_api_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store
+        .record_gate_run(
+            &GateRun {
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                reference_hash: "aaaa".to_string(),
+                candidate_hash: "bbbb".to_string(),
+                passed: true,
+                evidence: "{}".to_string(),
+                created_at: "1".to_string(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let app = |identity: Identity| {
+        server::app(AppState {
+            store: store.clone(),
+            evidence_dir: dir.path().to_path_buf(),
+            auth: AuthConfig::fixed(identity),
+        })
+    };
+
+    // A viewer holds neither Write nor Review: the list is a refusal, never an empty page.
+    let viewer_router = app(viewer());
+    let list = viewer_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::FORBIDDEN);
+    let html = body_text(list).await;
+    assert!(
+        html.contains("write or review permission required"),
+        "the refusal must name the permission, got:\n{}",
+        html
+    );
+
+    // An author may RUN a gate (Write), so it may list AND open a run.
+    //
+    // This assertion used to require Review for the detail, on the premise that the evidence
+    // record is a reviewer's artifact. That premise was wrong: the JSON list endpoint already
+    // returns the FULL evidence - failure names, isolated nodes, coverage - to any
+    // Write-or-Review caller, so refusing an author the same record here would hide nothing
+    // and would only teach people that the workbench is the less reliable way to read a run.
+    let author_router = app(author());
+    let list = author_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let detail = author_router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_ne!(
+        detail.status(),
+        StatusCode::FORBIDDEN,
+        "an author may read the same evidence the JSON endpoint returns to it"
+    );
+
+    // A reviewer sees both.
+    let reviewer_router = app(reviewer());
+    let list = reviewer_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let detail = reviewer_router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_unknown_gate_run_or_project_renders_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let unknown_run = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate/deadbeef/cafebabe"))
+        .await
+        .unwrap();
+    assert_eq!(unknown_run.status(), StatusCode::NOT_FOUND);
+    let html = body_text(unknown_run).await;
+    assert!(html.contains("Not Found"));
+
+    let unknown_project = router.oneshot(get("/ui/projects/nope/gate")).await.unwrap();
+    assert_eq!(unknown_project.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn hostile_content_in_the_evidence_record_is_escaped() {
+    // The evidence record carries strings the gate read out of an untrusted model - a
+    // requirement id, an element key. Seeding a hostile one directly through the store
+    // proves the page escapes it rather than trusting it.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store
+        .record_gate_run(
+            &GateRun {
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                reference_hash: "aaaa".to_string(),
+                candidate_hash: "bbbb".to_string(),
+                passed: false,
+                evidence: r#"{"roundtrip":{"equal":false,"missingElements":["requirements:<script>alert(1)</script>"]}}"#.to_string(),
+                created_at: "1".to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("&lt;script&gt;"),
+        "the hostile evidence content must appear escaped, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("<script"),
+        "a raw script tag must never reach the gate page"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 6: the diagram view.
+
+/// Extract the inline SVG from a rendered page, so assertions target the diagram itself
+/// rather than the surrounding shell (which legitimately contains its own navigation links).
+fn extract_svg(html: &str) -> &str {
+    let start = html.find("<svg").expect("an <svg> must be present");
+    let close = html[start..]
+        .find("</svg>")
+        .expect("</svg> must be present");
+    &html[start..start + close + "</svg>".len()]
+}
+
+#[tokio::test]
+async fn the_diagram_renders_the_corpus_deterministically_and_completely() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let first = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_html = body_text(first).await;
+
+    let second = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_html = body_text(second).await;
+
+    // The SAME model produces BYTE-IDENTICAL output, so a diagram can be diffed and cached.
+    assert_eq!(
+        first_html, second_html,
+        "the same model must render byte-identical output"
+    );
+
+    let svg = extract_svg(&first_html);
+
+    // Every node and edge appears: the corpus has 99 graph nodes and 165 graph edges.
+    assert_eq!(
+        count(svg, "class='node'"),
+        99,
+        "every graph node must be drawn"
+    );
+    assert_eq!(
+        count(svg, "class='edge'"),
+        165,
+        "every graph edge must be drawn"
+    );
+
+    // Both dangling endpoints are drawn as explicit markers, never dropped.
+    assert_eq!(
+        count(svg, "class='dangling'"),
+        2,
+        "both dangling endpoints must be drawn as markers"
+    );
+    assert!(
+        svg.contains("_2026x_1_12a70364_1789524431087_459748_5711"),
+        "the first dangling endpoint id must be shown"
+    );
+    assert!(
+        svg.contains("_2026x_1_12a70364_1789524431091_435540_5713"),
+        "the second dangling endpoint id must be shown"
+    );
+
+    // Requirement nodes are visually distinct: 25 of them carry the requirement fill.
+    assert_eq!(
+        count(svg, "fill='#fff3cd'"),
+        25,
+        "25 requirement nodes must be visually distinct"
+    );
+
+    // The SVG contains no script and no external reference.
+    assert!(
+        !svg.contains("<script"),
+        "the SVG must contain no script tag"
+    );
+    assert!(
+        !svg.contains("href"),
+        "the SVG must contain no external reference"
+    );
+    assert!(
+        !svg.contains("xlink:href"),
+        "the SVG must contain no xlink reference"
+    );
+    assert!(
+        !svg.contains("url("),
+        "the SVG must contain no url() reference"
+    );
+    assert!(
+        !svg.contains("<image"),
+        "the SVG must contain no image reference"
+    );
+    assert!(
+        !svg.contains("<use "),
+        "the SVG must contain no use reference"
+    );
+    assert!(
+        !svg.contains("<foreignObject"),
+        "the SVG must contain no foreignObject"
+    );
+
+    // The model page links to the diagram, keeping the two views consistent.
+    let model = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(model.status(), StatusCode::OK);
+    let model_html = body_text(model).await;
+    // The link names the COMMIT being viewed, not the branch. Linked by branch, opening a
+    // historical model and then following the diagram link would show the branch's current
+    // tip - a different model than the one on screen, which is the kind of quiet mismatch a
+    // reader has no way to notice.
+    assert!(
+        model_html.contains("/ui/projects/coffee/diagram?commit="),
+        "the model page must link to the diagram of the commit it is showing, got:\n{}",
+        model_html
+    );
+}
+
+#[tokio::test]
+async fn the_diagram_resolves_branch_and_commit_and_404s_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for uri in [
+        "/ui/projects/coffee/diagram?branch=main".to_string(),
+        format!("/ui/projects/coffee/diagram?commit={}", hash),
+    ] {
+        let response = router.clone().oneshot(get(&uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{} must render", uri);
+        let html = body_text(response).await;
+        assert!(
+            extract_svg(&html).contains("class='node'"),
+            "{} must render the graph",
+            uri
+        );
+    }
+
+    let bad_branch = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram?branch=nope"))
+        .await
+        .unwrap();
+    assert_eq!(bad_branch.status(), StatusCode::NOT_FOUND);
+
+    let bad_commit = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram?commit=deadbeef"))
+        .await
+        .unwrap();
+    assert_eq!(bad_commit.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_hostile_label_in_the_diagram_is_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    // A hostile node name, a hostile dangling endpoint id and a hostile edge label, seeded
+    // straight through the store so the page can never trust any of them.
+    let model = serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "structure": [],
+        "graph": {
+            "nodes": [
+                { "id": "n1", "kind": "block", "name": "<script>alert(1)</script>" }
+            ],
+            "edges": [
+                { "source": "n1", "target": "<script>alert(2)</script>", "kind": "dependency", "label": "<script>alert(3)</script>" }
+            ]
+        }
+    });
+    seed_model_directly(store.as_ref(), model);
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    let svg = extract_svg(&html);
+
+    assert!(
+        svg.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "the hostile node name must be escaped"
+    );
+    assert!(
+        svg.contains("&lt;script&gt;alert(2)&lt;/script&gt;"),
+        "the hostile dangling endpoint id must be escaped"
+    );
+    assert!(
+        svg.contains("&lt;script&gt;alert(3)&lt;/script&gt;"),
+        "the hostile edge label must be escaped"
+    );
+    assert!(
+        !svg.contains("<script"),
+        "a raw script tag must never reach the SVG, got:\n{}",
+        svg
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_element_carries_its_references() {
+    // A rename that does not move the graph is silent corruption: the element stays in the
+    // document, vanishes from coverage and traceability, and the author has no way to put it
+    // right from the workbench. The rename must carry the node and every edge endpoint.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let model = serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "structure": [{ "id": "b1", "name": "Block", "kind": "block", "stereotypes": ["Block"], "attributes": [], "documentation": "" }],
+        "graph": { "nodes": [{ "id": "b1", "kind": "block", "name": "Block" }], "edges": [] }
+    });
+    let base = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "base", "okf": model }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(base.status(), StatusCode::CREATED);
+
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "give the block a real name"),
+                ("id", "brewing_unit"),
+                ("name", "Brewing Unit"),
+                ("documentation", ""),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // The editor answers with a PAGE, not JSON, so the new tip is read back through the
+    // JSON API rather than parsed out of the HTML.
+    let branches = router
+        .clone()
+        .oneshot(get("/projects/coffee/branches"))
+        .await
+        .unwrap();
+    let branches = json_body(branches).await;
+    let hash = branches
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "main")
+        .unwrap()["tip"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let doc = router
+        .oneshot(get(&format!("/projects/coffee/commits/{}", hash)))
+        .await
+        .unwrap();
+    let doc = json_body(doc).await;
+    assert_eq!(doc["structure"][0]["id"], "brewing_unit");
+    assert_eq!(
+        doc["graph"]["nodes"][0]["id"], "brewing_unit",
+        "the graph node must follow the rename"
+    );
+
+    // And the validator must see nothing orphaned: the cross-check that used to be the only
+    // defence is now satisfied by construction.
+    let root: OkfRoot = serde_json::from_value(doc).unwrap();
+    let report = okf::validate::validate(&root);
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.contains("no node in the graph")),
+        "a rename must not orphan the element: {:?}",
+        report.warnings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 4: the import page, where a person decides about a migration.
+
+/// Read a hand-written SysML v1 XMI fixture from the binding's corpus, the same synthetic
+/// documents the migration tests use so the page is pinned to the same hand-checked losses.
+fn xmi_fixture(name: &str) -> String {
+    let path = format!(
+        "{}/../engine/binding-xmi/fixtures/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        name
+    );
+    std::fs::read_to_string(path).expect("fixture must exist")
+}
+
+#[tokio::test]
+async fn the_import_page_offers_the_registry_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/import"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("sysml-v1-xmi@2.4"),
+        "the registry binding must be offered"
+    );
+    assert!(
+        html.contains(r#"name="artifact""#),
+        "the artifact field must render"
+    );
+    assert!(
+        html.contains(r#"name="binding""#),
+        "the binding selector must render"
+    );
+}
+
+#[tokio::test]
+async fn a_lossy_import_shows_its_losses_and_requires_acceptance_before_committing() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let artifact = xmi_fixture("coffee-grinder.xmi");
+    let expected_hash = server::store::blob_hash(artifact.as_bytes());
+
+    // Without acceptance the import is refused, and the page shows the losses by name.
+    let refused = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import coffee-grinder"),
+                ("artifact", artifact.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+
+    // The page must not claim a lossless migration the report contradicts.
+    assert!(
+        html.contains("lossy"),
+        "the page must say the import is lossy"
+    );
+    assert!(
+        !html.contains("lossless"),
+        "the page must not claim a lossless migration"
+    );
+    assert!(
+        !html.contains("Import committed"),
+        "a refused import must not render success"
+    );
+
+    // Blocking entries are named, grouped by verdict, each naming its subject.
+    assert!(
+        html.contains("<h3>Lossy</h3>"),
+        "the lossy group must render"
+    );
+    assert!(
+        html.contains("uml:Model model-grinder"),
+        "a subject must be named"
+    );
+    assert!(
+        html.contains("uml:Package pkg-structure (Structure)"),
+        "a subject must be named"
+    );
+    assert!(
+        html.contains("uml:Comment doc-grinder"),
+        "a subject must be named"
+    );
+
+    // The acceptance checkbox submits the ENTRY IDENTITY, not the raw subject, so what a
+    // human ticks is exactly what the server records.
+    assert!(
+        html.contains(r#"value="uml:Model model-grinder [lossy]""#),
+        "the acceptance checkbox must carry the entry identity"
+    );
+
+    // What was retained is stated on the page, not only in a log.
+    assert!(
+        html.contains(expected_hash.as_str()),
+        "the retained artifact hash must be named"
+    );
+
+    // Accepting the six named losses commits the import, through the SAME core the
+    // endpoint calls.
+    let accepted = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import coffee-grinder"),
+                ("artifact", artifact.as_str()),
+                ("accept_loss_0", "uml:Model model-grinder [lossy]"),
+                ("accept_loss_1", "uml:Comment doc-grinder [lossy]"),
+                ("accept_loss_2", "uml:Property prop-motor [lossy]"),
+                ("accept_loss_3", "uml:Property prop-capacity [lossy]"),
+                ("accept_loss_4", "uml:Dependency dep-satisfy [lossy]"),
+                (
+                    "accept_loss_5",
+                    "uml:Package pkg-structure (Structure) [lossy]",
+                ),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED);
+    let html = body_text(accepted).await;
+    assert!(
+        html.contains("Import committed"),
+        "the success page must render"
+    );
+    assert!(
+        html.contains(expected_hash.as_str()),
+        "the retained artifact hash must be named on success"
+    );
+
+    // The commit landed: the page and the endpoint share the same commit path.
+    let commits = router
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the accepted import must have committed exactly one commit"
+    );
+}
+
+#[tokio::test]
+async fn an_unmapped_import_groups_by_verdict_with_blocking_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let artifact = xmi_fixture("unknown-element.xmi");
+    let refused = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import unknown"),
+                ("artifact", artifact.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+
+    // Both verdict groups render, with the unmapped subjects named.
+    assert!(
+        html.contains("<h3>Unmappable</h3>"),
+        "the unmappable group must render"
+    );
+    assert!(
+        html.contains("<h3>Lossy</h3>"),
+        "the lossy group must render"
+    );
+    assert!(
+        html.contains("uml:StateMachine sm-1"),
+        "the unmapped element must be named"
+    );
+    assert!(
+        html.contains("uml:Class block-1 attribute"),
+        "the unmapped attribute must be named"
+    );
+    assert!(
+        html.contains("uml:Model model-unknown"),
+        "the lossy subject must be named"
+    );
+
+    // Blocking entries render first: unmappable (most severe) precedes lossy.
+    let unmappable_at = html.find("<h3>Unmappable</h3>");
+    let lossy_at = html.find("<h3>Lossy</h3>");
+    assert!(
+        unmappable_at.is_some() && lossy_at.is_some() && unmappable_at.unwrap() < lossy_at.unwrap(),
+        "the blocking unmappable group must render before the lossy group"
+    );
+}
+
+#[tokio::test]
+async fn a_viewer_cannot_start_an_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "steal"),
+                ("artifact", "<xmi/>"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("write permission required"),
+        "the page must name the permission refusal"
+    );
+}

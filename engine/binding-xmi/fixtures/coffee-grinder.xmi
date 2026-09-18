@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-grinder" name="Coffee Grinder">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg-structure" name="Structure">
+      <packagedElement xmi:type="uml:Class" xmi:id="block-grinder" name="Grinder">
+        <Block xmi:id="app-grinder" base_Class="block-grinder"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="prop-motor" name="motor" type="block-motor" aggregation="composite"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="prop-capacity" name="capacity" type="Integer" aggregation="none" default="1"/>
+        <ownedComment xmi:type="uml:Comment" xmi:id="doc-grinder" body="Grinds coffee beans to a selected size."/>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="block-motor" name="Motor">
+        <Block xmi:id="app-motor" base_Class="block-motor"/>
+      </packagedElement>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Dependency" xmi:id="dep-satisfy" client="block-grinder" supplier="block-motor">
+      <Satisfy xmi:id="app-satisfy" base_Dependency="dep-satisfy"/>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>

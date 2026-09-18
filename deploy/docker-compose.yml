@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Trial stack: mw-server plus PostgreSQL, with named volumes for data.
+#
+# This is a TRIAL, not production: no TLS termination, no backups, no high
+# availability, no secret management. The image refuses to start with no
+# authentication configured, so set MW_AUTH_TOKEN (recommended) or
+# MW_ALLOW_OPEN=yes (laptop pilot only) in the environment or a .env file before
+# running `docker compose up`.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # Never inline a real password here; it is interpolated from the environment.
+      POSTGRES_USER: modelwrite
+      POSTGRES_DB: modelwrite
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment or .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modelwrite -d modelwrite"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: modelwrite/modelwrite:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The database password appears only via interpolation; the token is read from
+      # the environment and never inlined. With neither MW_AUTH_TOKEN nor
+      # MW_ALLOW_OPEN=yes the entrypoint refuses to start (by design).
+      # A container must listen beyond loopback to be reachable at all. The server
+      # defaults to 127.0.0.1, which is right for a laptop and useless in a container.
+      MW_BIND: 0.0.0.0
+      # NOTE: the password is interpolated into a URL, so it must not contain @ : / or %
+      # unless it is percent-encoded. A password that does will produce a malformed URL and
+      # the service will fail to connect rather than start with the wrong one.
+      MW_DATABASE_URL: postgres://modelwrite:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/modelwrite
+      MW_AUTH_TOKEN: ${MW_AUTH_TOKEN:-}
+      MW_ALLOW_OPEN: ${MW_ALLOW_OPEN:-}
+      MW_EVIDENCE_DIR: /data/evidence
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
+  data:

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["engine/okf", "engine/test-support", "engine/graph", "engine/gate", "engine/capi", "engine/mcp"]
+members = ["engine/okf", "engine/test-support", "engine/graph", "engine/gate", "engine/binding", "engine/binding-xmi", "engine/agent", "engine/capi", "engine/mcp", "engine/analytics", "server", "cli"]
 
 [workspace.package]
 edition = "2021"
@@ -12,6 +12,20 @@ repository = "https://github.com/modelwrite/modelwrite"
 anyhow = "1.0"
 hex = "0.4"
 petgraph = "0.6"
+# indexmap is petgraph's transitive dependency (via engine/graph). It is pinned
+# to the last release whose rust-version is <= the workspace floor of 1.75:
+# indexmap 2.12 raised its MSRV to 1.82 and 2.14 to 1.85 (edition2024). Without
+# this pin the engine layer resolves indexmap 2.14 and silently breaks the
+# declared 1.75 floor. The msrv CI job builds the engine layer at 1.75 to keep
+# the claim verified.
+indexmap = "=2.11.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+roxmltree = "0.21"

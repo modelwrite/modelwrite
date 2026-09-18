@@ -103,3 +103,44 @@ fn canonical_hash_is_stable() {
     assert_eq!(a, b);
     assert_eq!(a.len(), 64);
 }
+
+#[test]
+fn a_renamed_element_is_reported_as_invisible_to_the_graph() {
+    // Renaming an element's id without updating the graph leaves the element in the
+    // document and its node under the old name. Nothing else notices: a dangling EDGE
+    // endpoint is reported, but an orphaned ELEMENT was not, so the element would quietly
+    // disappear from every coverage and traceability answer while still being visible in
+    // the structure tree - two views of one model disagreeing, with no warning.
+    let mut root = expected();
+    root.structure[0].id = "renamed-and-now-orphaned".to_string();
+    let report = validate::validate(&root);
+    assert!(
+        report.valid,
+        "an orphaned element is not a validation failure: {:?}",
+        report.errors
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("renamed-and-now-orphaned") && w.contains("no node in the graph")),
+        "the orphaned element must be named: {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn the_corpus_has_no_orphaned_elements() {
+    // The reference export has two dangling EDGES, not a missing element: every element it
+    // declares is mirrored by a node, which is why the check above is a warning for other
+    // models rather than a new failure for this one.
+    let report = validate::validate(&expected());
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.contains("no node in the graph")),
+        "unexpected orphaned elements: {:?}",
+        report.warnings
+    );
+}

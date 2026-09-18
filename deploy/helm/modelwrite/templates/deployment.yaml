@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "modelwrite.fullname" . }}
+  labels:
+    {{- include "modelwrite.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "modelwrite.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "modelwrite.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mw-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "modelwrite.fullname" . }}
+          env:
+            {{- if .Values.database.urlSecret }}
+            - name: MW_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.urlSecret }}
+                  key: {{ .Values.database.urlKey }}
+            {{- else }}
+            - name: MW_DB
+              value: {{ printf "%s/modelwrite.db" .Values.persistence.mountPath | quote }}
+            {{- end }}
+            {{- if .Values.auth.tokenSecret }}
+            - name: MW_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.tokenSecret }}
+                  key: {{ .Values.auth.tokenKey }}
+            {{- end }}
+            {{- if .Values.auth.jwksSecret }}
+            - name: MW_AUTH_JWKS
+              value: {{ printf "/jwks/%s" .Values.auth.jwksKey | quote }}
+            {{- end }}
+            {{- if .Values.auth.allowOpen }}
+            - name: MW_ALLOW_OPEN
+              value: "yes"
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.auth.jwksSecret }}
+            - name: jwks
+              mountPath: /jwks
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "modelwrite.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        # readOnlyRootFilesystem is set, so anything that needs to write outside the data
+        # volume needs its own mount. The runtime needs a writable /tmp; compose gives it a
+        # tmpfs and the chart gives it this, so the two deployments agree.
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.auth.jwksSecret }}
+        - name: jwks
+          secret:
+            secretName: {{ .Values.auth.jwksSecret }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

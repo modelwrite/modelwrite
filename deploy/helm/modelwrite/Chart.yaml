@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v2
+name: modelwrite
+description: Modelwrite repository service (mw-server) backed by PostgreSQL or SQLite.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

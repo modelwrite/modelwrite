@@ -1,43 +1,197 @@
-# The modelwrite agent
+# The modelwrite agent contract
 
-Slice 1 provides the contract. Slice 5 provides the agent. This file is the seam
-between them, so the agent is designed for rather than retrofitted.
+This file is the contract between the modelwrite service and any agent — ours or a
+third party's — that drives it. It is enforced, not asserted: `server/tests/agent_contract.rs`
+reads `docs/agents/mcp-tools.json` at runtime, drives the real router for every HTTP endpoint
+named there, and drives the MCP server's own `tools/list` handler for the tool names and their
+required arguments. A route or tool that moves, disappears or changes fails the test before an
+agent calls it in production. The machine-readable form of everything below is
+`docs/agents/mcp-tools.json`.
 
-## What exists after Slice 1
+An agent meets the modelwrite service through TWO surfaces, and it matters which is which:
 
-- The MCP server (mw-mcp): okf.validate, okf.diff, graph.stats, gate.run, plus the
-  resources mw://okf/1.0/spec and mw://evidence/latest.
-- The published manifest docs/agents/mcp-tools.json: tool names, input schemas and the
-  stability rule.
-- The rule pack agents/CLAUDE.md: the invariants any agent, ours or third party, must
-  respect.
+- **The MCP tools** (`mw-mcp`) are document-level. They take an OKF document as an argument,
+  operate on it in memory, and return a report. They never touch a repository and never need
+  authentication. They are `okf.validate`, `graph.stats`, `gate.run` and `okf.diff`.
+- **The repository HTTP surface** (`mw-server`) is where every change happens. Every call is
+  authenticated like a human's, permission-checked like a human's, lock-checked like a human's,
+  and recorded in the audit log with the caller's identity. An agent that wants to read or
+  change a repository uses these routes, never the MCP tools.
 
-## What Slice 5 adds
+## The agent is a client, not a privileged path
 
-- agent/: the shipped MCP client. Skill packs, a provider abstraction (local model
-  first, customer endpoint or approved cloud optionally), step and token budgets, and a
-  replayable run log.
-- The model-edit API and its tools: model.read, model.propose, rules.check,
-  patterns.list, patterns.instantiate, evidence.write.
-- Generation, repair and review skills, and the agent evaluation harness that measures
-  them.
+There is no "agent mode" that skips a check. An agent authenticates with an **agent token**,
+which names the agent and the human or service that authorised it, and grants it roles and a
+project scope exactly like any other caller. Those roles bound what the agent may do; they are
+its only authority.
 
-## The loop
+An agent may **read** and **propose**. It may **not write**: an agent token cannot hold a write
+role (`author`) or the `admin` role, and a deployment that configures one is refused at startup
+with a message saying that an agent proposes and a human commits. There is **no automated
+acceptance path yet** — nothing outside `engine/agent` consumes an agent's proposals — so an
+agent cannot cause a model change at all today. A **human** performs the change through the
+ordinary routes above. There is no review-and-accept workflow to call; the gate is the only
+authority on whether a change is correct — no tool parameter, log line or model output can
+mark a run as passed.
 
-intake -> propose instructions on the model-edit API -> apply them to a draft branch ->
-run the rules -> run the gate -> repair what the gate rejects -> draft commit for human
-review -> evidence.
+## Authentication
 
-Patterns are the generation substrate: the agent instantiates and parameterises known
-patterns rather than inventing structure, which is what makes generated models sound
-before anyone reviews them.
+Authentication is opt-in. The mode is chosen at startup and reported by `GET /health` (the
+mode only — never a token, key or path):
+
+| Mode | How a caller authenticates | Identity produced |
+|------|----------------------------|-------------------|
+| `open` | No credential; the default | `anonymous` admin over every project |
+| `static` | `Authorization: Bearer <MW_AUTH_TOKEN>` | the fixed admin subject |
+| `jwt` | A signed JWT verified against the configured JWKS | the verified `sub` plus `roles`/`projects` claims |
+| `agent` | `Authorization: Bearer <MW_AUTH_AGENT_TOKEN>` | the agent's subject plus the configured roles and projects |
+
+The agent mechanism is configured with `MW_AUTH_AGENT_TOKEN`, `MW_AUTH_AGENT_SUBJECT`,
+`MW_AUTH_AGENT_AUTHORIZER`, `MW_AUTH_AGENT_ROLES` and `MW_AUTH_AGENT_PROJECTS`.
+`MW_AUTH_AGENT_ROLES` may hold only `viewer` and/or `reviewer`: a write role (`author`) or the
+`admin` role is refused at startup, because an agent proposes and a human commits. The
+authorizer names the human or service that authorised the agent.
+
+Every route except `/health` and `/version` requires a bearer token when authentication is
+configured, and refuses a missing or wrong token with `401`.
+
+## Identity, roles and permissions
+
+A verified identity is a subject, a list of roles, and a list of projects the roles reach (a
+project of `*` reaches every project). Four permissions exist, each granted by specific roles:
+
+| Permission | Roles that grant it | What it allows |
+|------------|---------------------|----------------|
+| `read` | `viewer`, `author`, `reviewer`, `admin` | Reading commits, branches, locks, the audit log, imports, gate runs |
+| `write` | `author`, `admin` | Commits, branches, resets, merges, gate runs, imports, lock acquire/release |
+| `review` | `reviewer`, `admin` | Reading gate runs and evidence |
+| `admin` | `admin` | Project creation, branch deletion, lock breaking; holds every lesser permission |
+
+`GET /projects/:project/gate-runs` is the one route that accepts either `write` OR
+`review` (an author may see the run it started; a reviewer reads runs it did not start).
+
+Every route that names a project also enforces **project scope**: a caller whose roles do not
+reach the project is refused `403` before the store is touched. A listing is filtered, not
+refused — an identity scoped to one project sees only that project, and one scoped to nothing
+sees an empty list.
+
+## Refusals
+
+An agent meets exactly the refusals a human meets:
+
+| Status | Meaning |
+|--------|---------|
+| `401` | Missing or invalid bearer token (when authentication is configured) |
+| `403` | The authenticated caller lacks the required permission, or the project is out of scope |
+| `404` | The named project, commit, branch or import does not exist |
+| `409` | A guarded write would change an element another holder has a live lease on, or a merge/reset conflicts |
+| `422` | A well-formed OKF document that fails validation, or an import with blocking losses that were not accepted |
+
+An `author` field that names a different actor than the authenticated subject is refused
+`403` before anything is written — a caller cannot put another person's name into the record.
+
+## Element locks (leases)
+
+Every write computes the elements it would change and refuses to change any element another
+holder has a live lease on, unless the caller supplies the matching `holder` and holds the
+lease itself. Leases always carry an expiry (`ttlSeconds`, 30–86400), so a crashed client
+cannot block an element forever. A lock refusal is recorded in the audit log as an attempt to
+overwrite someone's work.
+
+## The append-only audit log
+
+`GET /projects/:project/audit` returns the audit log, newest first. It records what was
+attempted as well as what succeeded, and it can never be edited: the store exposes only an
+append and this read. Every entry carries:
+
+- `actor` — the verified subject (never a name taken from the request body; in open mode,
+  `anonymous`)
+- `mechanism` — how the caller authenticated: `open`, `static`, `jwt` or `agent`
+- `authorizer` — for agents, the human or service the agent acted for; empty for humans
+- `action` — one of the fixed vocabulary below
+- `subject` and `detail` — what the action touched
+
+The action vocabulary is fixed and lives in `server/src/audit.rs`:
+`project.create`, `commit.create`, `commit.refused`, `branch.create`, `branch.delete`,
+`branch.reset`, `merge.clean`, `merge.conflict`, `lock.acquire`, `lock.release`,
+`lock.denied`, `gate.run`, `import.accept`, `import.refused`.
+
+## The repository HTTP surface
+
+`GET /health` and `GET /version` are public liveness/information endpoints and take no
+identity. Every other route enforces the permission shown (and project scope where a project
+is named) before touching the store. Path segments in `:segment` form are placeholders for a
+project name, commit hash, branch name or artifact hash.
+
+| Method | Path | Permission | What it does |
+|--------|------|------------|--------------|
+| GET | `/health` | public | Liveness; reports the auth mode |
+| GET | `/version` | public | Build information |
+| POST | `/projects` | admin | Create a project |
+| GET | `/projects` | read | List projects, filtered to the caller's scope |
+| POST | `/projects/:project/commits` | write | Commit an OKF document to a branch |
+| GET | `/projects/:project/commits` | read | List commits on a branch (`?branch=`, default `main`) |
+| GET | `/projects/:project/commits/:hash` | read | Fetch the OKF document behind a commit |
+| POST | `/projects/:project/branches` | write | Create a branch |
+| GET | `/projects/:project/branches` | read | List branches and their tips |
+| DELETE | `/projects/:project/branches/:name` | admin | Delete a branch |
+| POST | `/projects/:project/branches/:name/reset` | write | Revert a branch to an earlier commit as a new commit |
+| POST | `/projects/:project/gate` | write | Run the round-trip fidelity gate and record the run |
+| GET | `/projects/:project/gate-runs` | write-or-review | List recorded gate runs |
+| POST | `/projects/:project/import` | write | Import a source artifact through a binding; gated and measured |
+| GET | `/projects/:project/import/:artifactHash/report` | read | Read an import's loss report and fidelity measurement |
+| POST | `/projects/:project/merge` | write | Three-way merge one branch into another |
+| GET | `/projects/:project/audit` | read | Read the append-only audit log |
+| POST | `/projects/:project/locks` | write | Acquire element leases |
+| GET | `/projects/:project/locks` | read | List live element leases |
+| DELETE | `/projects/:project/locks` | write | Release element leases |
+| POST | `/projects/:project/locks/release` | write | Release element leases (POST form) |
+
+### The import and its loss report
+
+`POST /projects/:project/import` migrates a source artifact through a binding and obeys the
+same four rules as any other change: the artifact is retained byte-for-byte and
+content-addressed before import is attempted; blocking losses refuse the import unless the
+request names them as accepted; the binding's own round trip is measured by the engine and
+must be lossless; and the commit is linked to the source artifact in one transaction. A
+refused import returns `422` with the unaccepted losses. `GET /projects/:project/import/:artifactHash/report`
+returns the import's loss report and fidelity measurement whether or not it was committed.
+
+## The MCP tools (document-level)
+
+The MCP server (`mw-mcp`) exposes four tools that operate on documents supplied in the
+request and never touch a repository. Their names and input schemas are in
+`docs/agents/mcp-tools.json` and are additive. `gate.run` also accepts an optional
+`strictCoverage` boolean, named in the manifest rather than below.
+
+| Tool | Required arguments | What it returns |
+|------|--------------------|-----------------|
+| `okf.validate` | `okf` | The validation report |
+| `graph.stats` | `okf` | Node, edge, isolated-node and component counts |
+| `gate.run` | `reference`, `candidate` | The round-trip fidelity gate's evidence record |
+| `okf.diff` | `reference`, `candidate` | The semantic diff: elements, edges and attributes |
 
 ## Rules that bind the agent
 
-1. The gate is the only authority on correctness; no agent, log line or tool parameter
+1. The gate is the only authority on correctness; no tool parameter, log line or model output
    can mark a run as passed.
-2. Every action is an instruction on the model-edit API, never a direct edit.
-3. Every iteration ends in a gate run, and the output is a draft commit for human review.
-4. Ambiguity is a question, not an invention: the agent asks rather than guessing.
-5. Every run is replayable: prompts, tool calls and results are logged, and step, token
-   and wall-clock budgets are enforced.
+2. Every repository change is an HTTP call on the surface above, authenticated and
+   permission-checked like a human's — never a direct edit and never a privileged path.
+3. The agent's output is a proposal for a human to read. The agent loop is NOT wired today:
+   nothing outside `engine/agent` consumes `propose_loss_resolutions`, so a proposal never
+   reaches the server on its own; a human acts on it through the ordinary routes.
+4. Attribution is not optional: the agent token carries the agent's identity and the
+   authorizer, so any action it takes in future is attributable to the agent and who authorised
+   it. An agent cannot write today, so no agent write is recorded yet.
+5. Ambiguity is a question, not an invention: the agent asks rather than guessing.
+
+## Enforcement
+
+`server/tests/agent_contract.rs` reads `docs/agents/mcp-tools.json` and asserts, against the
+real router, that every HTTP endpoint named there resolves on the method named, that every
+permissioned endpoint refuses a caller with no role, and — by driving the MCP server's own
+`tools/list` handler — that the manifest names exactly the tools the MCP server exposes with
+the same required arguments. The MCP tool list is ENFORCED, and the HTTP surface is ENFORCED.
+It also proves the agent mechanism: an agent token authenticates a named agent that may read,
+and `server/tests/agent_audit.rs` proves an agent cannot commit, merge, reset or import, and
+that the import acceptance key names exactly the entry a human chose.
