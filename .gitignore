@@ -4,3 +4,13 @@
 .cache/
 .DS_Store
 Thumbs.db
+
+# Local secrets and state - never commit these
+.env
+.env.*
+*.log
+*.db
+*.db-wal
+*.db-shm
+trial-*
+e2e-*
