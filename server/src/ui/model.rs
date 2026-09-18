@@ -139,6 +139,9 @@ fn model_markup(
         nodes,
         allocations,
     };
+    // The edit link is offered only to a caller who may write, so a read-only reviewer is
+    // not invited into a form that will only be refused on submit.
+    let can_edit = identity.may(Permission::Write);
     let body = html! {
         h1 { "Model" }
         p class="meta" {
@@ -153,7 +156,7 @@ fn model_markup(
             // branch's current diagram would show a different model than the one being read.
             a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram?commit=" (crate::ui::urlencode(commit.hash.as_str())) } { "View diagram" }
         }
-        (structure_section(root, project, &commit.branch))
+        (structure_section(root, project, &commit.branch, can_edit))
         (requirements_section(root, &ctx))
         (traceability_section(root, &ctx))
         (state_activity_section(root, &ctx))
@@ -176,7 +179,7 @@ struct TreeNode<'a> {
     children: Vec<TreeNode<'a>>,
 }
 
-fn structure_section(root: &OkfRoot, project: &str, branch: &str) -> Markup {
+fn structure_section(root: &OkfRoot, project: &str, branch: &str, can_edit: bool) -> Markup {
     let tree = structure_tree(root);
     html! {
         section class="model-section" id="structure" {
@@ -184,7 +187,7 @@ fn structure_section(root: &OkfRoot, project: &str, branch: &str) -> Markup {
             @if tree.is_empty() {
                 p { "This model has no structure elements." }
             } @else {
-                ul class="structure-tree" { (render_tree(&tree, project, branch)) }
+                ul class="structure-tree" { (render_tree(&tree, project, branch, can_edit)) }
             }
             @if !root.signals.is_empty() {
                 h3 { "Signals" }
@@ -311,7 +314,7 @@ fn build_node<'a>(
     }
 }
 
-fn render_tree(nodes: &[TreeNode<'_>], project: &str, branch: &str) -> Markup {
+fn render_tree(nodes: &[TreeNode<'_>], project: &str, branch: &str, can_edit: bool) -> Markup {
     html! {
         @for node in nodes {
             li class="element" {
@@ -325,9 +328,11 @@ fn render_tree(nodes: &[TreeNode<'_>], project: &str, branch: &str) -> Markup {
                 @if !node.element.documentation.is_empty() {
                     p class="element-documentation" { (node.element.documentation) }
                 }
-                a class="element-edit" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/edit/" (crate::ui::urlencode(node.element.id.as_str())) "?branch=" (crate::ui::urlencode(branch)) } { "edit" }
+                @if can_edit {
+                    a class="element-edit" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/edit/" (crate::ui::urlencode(node.element.id.as_str())) "?branch=" (crate::ui::urlencode(branch)) } { "edit" }
+                }
                 @if !node.children.is_empty() {
-                    ul { (render_tree(&node.children, project, branch)) }
+                    ul { (render_tree(&node.children, project, branch, can_edit)) }
                 }
             }
         }

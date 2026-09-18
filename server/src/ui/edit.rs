@@ -18,12 +18,12 @@ use maud::{html, Markup};
 use okf::types::{Attribute, Element, OkfRoot};
 
 use crate::api::{
-    commit_refusal_guard, load_model, lock_refusal_message, map_store_error, record_refusal,
-    touched_elements, validate_element_name, validate_name, ApiState,
+    commit_core, load_model, lock_refusal_message, map_store_error, record_refusal,
+    validate_element_name, validate_name, ApiState, CommitCore, CommitFailure,
 };
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
-use crate::store::{now_seconds, AuditEntry, Commit, CommitGuard, Lock, StoreError};
+use crate::store::{now_seconds, Commit, Lock, StoreError};
 use crate::ui::layout;
 
 /// The branch the editor targets. One branch keeps the first editing form simple; the model
@@ -242,11 +242,12 @@ pub async fn submit_edit(
     }
 }
 
-/// The edit itself, mirroring [crate::api::create_commit] step for step with the same public
-/// functions and the same permission decisions. Validation runs BEFORE anything is stored or
-/// locked, so an invalid edit leaves no blob and no lock behind. A lock is then taken on the
-/// element for the duration of the request and released before returning, whatever the
-/// commit's result.
+/// The edit itself, committing through the SAME core as the JSON handler
+/// ([crate::api::commit_core]), with the same permission decisions and the same audit entry.
+/// Validation runs BEFORE anything is stored or locked, so an invalid edit leaves no blob and
+/// no lock behind. A lock is then taken on the element for the duration of the request and
+/// released before returning, whatever the commit's result - this is the ONE deliberate
+/// difference from a plain commit, which holds no element for the request.
 fn perform_edit(
     state: &ApiState,
     identity: &Identity,
@@ -337,7 +338,7 @@ fn perform_edit(
                 project,
                 &identity.subject,
                 state.auth.mechanism(),
-                "commit.refused",
+                crate::audit::COMMIT_REFUSED,
                 &input.branch,
                 &message,
             ) {
@@ -353,46 +354,46 @@ fn perform_edit(
     // same lock that writes the commit, the lock guard runs inside that transaction, and the
     // audit row rides the SAME transaction, so the commit and its record succeed or fail
     // together. The author is the verified identity's subject.
+    //
+    // The editor's lease is the ONE deliberate difference from a plain commit: it holds the
+    // element for the request so a second editor cannot slip in between validation and
+    // commit, while a plain commit has no such lease and guards only inside the transaction.
+    // The held lease is passed as the guard's holder, which the core accepts as an input.
     let author = identity.subject.clone();
     let commit_result: Result<Commit, StoreError> = (|| {
         let bytes = serde_json::to_vec(&candidate).map_err(|error| {
             eprintln!("edited model could not be serialised: {}", error);
             StoreError::Backend("the edited model could not be stored".to_string())
         })?;
-        let okf_hash = state.store.put_blob(&bytes)?;
-        let touched = touched_elements(&root, &candidate);
-        let guard = CommitGuard {
-            holder,
-            elements: &touched,
-            now,
-            expected_tip: Some(&tip),
-        };
-        let audit = AuditEntry {
-            id: 0,
-            project: project.to_string(),
-            at: now,
-            actor: identity.subject.clone(),
-            mechanism: state.auth.mechanism().to_string(),
-            action: "commit.create".to_string(),
-            subject: input.branch.clone(),
-            detail: input.message.clone(),
-        };
-        commit_refusal_guard(
+        commit_core(
             state.store.as_ref(),
-            project,
-            &input.branch,
-            &identity.subject,
-            state.auth.mechanism(),
-            state.store.commit_model(
+            &CommitCore {
                 project,
-                &input.branch,
-                &okf_hash,
-                &author,
-                &input.message,
-                Some(guard),
-                Some(&audit),
-            ),
+                branch: &input.branch,
+                author: &author,
+                message: &input.message,
+                actor: &identity.subject,
+                mechanism: state.auth.mechanism(),
+                candidate: &candidate,
+                bytes: &bytes,
+                holder,
+                now,
+                tip: Some(&tip),
+                reference: Some(&root),
+            },
         )
+        .map_err(|failure| match failure {
+            // Unreachable: the candidate passed the same validation above, before the lease
+            // was taken. Kept as a defensive mapping so a disagreement between the two checks
+            // is a 500 rather than a silently different refusal.
+            CommitFailure::Invalid { errors } => {
+                eprintln!("edited model re-validation failed: {:?}", errors);
+                StoreError::Backend(
+                    "the edited model failed validation and was not stored".to_string(),
+                )
+            }
+            CommitFailure::Store(error) => error,
+        })
     })();
 
     // The lease was for the duration of the request. Release it whatever the commit did, so
@@ -440,7 +441,10 @@ fn edit_page(
         .iter()
         .filter(|lock| lock.holder != identity.subject)
         .collect();
-    let editable = blocked.is_empty();
+    // The submit is offered only to a caller who may write: a reviewer who cannot write
+    // must not be invited to fill a form that will only be refused on submit, exactly as the
+    // merge form is only offered to writers.
+    let editable = identity.may(Permission::Write) && blocked.is_empty();
     let title = format!("modelwrite — {} — edit {}", project, element_id);
     let body = html! {
         h1 { "Edit element" }

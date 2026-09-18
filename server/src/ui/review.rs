@@ -14,14 +14,11 @@ use axum::response::Response;
 use maud::{html, Markup};
 use serde::Deserialize;
 
-use crate::api::{
-    commit_refusal_guard, load_model, lock_refusal_message, map_store_error, resolve_author,
-    touched_elements, validate_name, verify_actor, ApiState,
-};
+use crate::api::{load_model, map_store_error, validate_name, verify_actor, ApiState};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
-use crate::merge_api::common_ancestor;
-use crate::store::{now_seconds, AuditEntry, Commit, CommitGuard, Store};
+use crate::merge_api::{merge_core, MergeCore, MergeOutcome};
+use crate::store::{Commit, Store};
 use crate::ui::layout;
 
 /// The query parameters of the compare page: two endpoints, each a commit hash or a branch
@@ -32,15 +29,14 @@ pub struct CompareQuery {
     pub to: Option<String>,
 }
 
-/// The merge form body, submitted as `application/x-www-form-urlencoded`. `author` and
-/// `holder` are optional; the empty string means "no name supplied", exactly as an absent
-/// field does in the JSON request.
+/// The merge form body, submitted as `application/x-www-form-urlencoded`. There is no
+/// author field: like the editor, the merge takes the author from the verified identity, so
+/// a browser cannot put a name into the commit record. `holder` is optional; the empty string
+/// means "no holder supplied", exactly as an absent field does in the JSON request.
 #[derive(Deserialize)]
 pub struct MergeForm {
     pub branch: String,
     pub other: String,
-    #[serde(default)]
-    pub author: String,
     pub message: String,
     #[serde(default)]
     pub holder: String,
@@ -389,10 +385,11 @@ struct MergeResult {
     outcome: MergeOutcomeKind,
 }
 
-/// The merge itself, mirroring [crate::merge_api::merge_branches] step for step with the same
-/// public functions, the same permission decisions and the same audit entries. A conflict is
-/// a RESULT here, not an error: it carries every conflicting subject's base, ours and theirs
-/// values for the page to render.
+/// The merge itself, through the SAME core the JSON handler uses
+/// ([crate::merge_api::merge_core]), with the same permission decisions and the same audit
+/// entries. A conflict is a RESULT here, not an error: it carries every conflicting subject's
+/// base, ours and theirs values for the page to render. The author is the verified identity,
+/// never a browser field.
 fn perform_merge(
     state: &ApiState,
     identity: &Identity,
@@ -411,139 +408,41 @@ fn perform_merge(
     } else {
         Some(holder)
     };
-    let author = resolve_author(&state.auth, identity, &form.author)?;
     verify_actor(&state.auth, identity, holder)?;
     validate_name("branch name", &form.branch)?;
     validate_name("branch name", &form.other)?;
-    if state
-        .store
-        .project(project)
-        .map_err(map_store_error)?
-        .is_none()
-    {
-        return Err(ApiError::not_found(format!("project {}", project)));
-    }
+    // The author is the verified identity's subject, exactly as the editor resolves it: the
+    // form has no author field, so a browser cannot put a name into the commit record.
+    let author = identity.subject.clone();
 
-    let ours_tip = state
-        .store
-        .branch_tip(project, &form.branch)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {}", form.branch)))?;
-    let theirs_tip = state
-        .store
-        .branch_tip(project, &form.other)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {}", form.other)))?;
-
-    let base_hash = common_ancestor(state.store.as_ref(), project, &ours_tip, &theirs_tip)
-        .map_err(map_store_error)?;
-    let base = load_model(state.store.as_ref(), project, &base_hash).map_err(map_store_error)?;
-    let ours = load_model(state.store.as_ref(), project, &ours_tip).map_err(map_store_error)?;
-    let theirs = load_model(state.store.as_ref(), project, &theirs_tip).map_err(map_store_error)?;
-
-    let outcome = crate::merge::merge(&base, &ours, &theirs);
-    if !outcome.conflicts.is_empty() {
-        // The attempt is recorded, exactly as the JSON handler records it, so the audit log
-        // shows what was tried rather than only what succeeded.
-        state
-            .store
-            .append_audit(&AuditEntry {
-                id: 0,
-                project: project.to_string(),
-                at: now_seconds(),
-                actor: identity.subject.clone(),
-                mechanism: state.auth.mechanism().to_string(),
-                action: "merge.conflict".to_string(),
-                subject: form.branch.clone(),
-                detail: format!("merge conflict between {} and {}", form.branch, form.other),
-            })
-            .map_err(map_store_error)?;
-        return Ok(MergeResult {
-            branch: form.branch.clone(),
-            other: form.other.clone(),
-            base: base_hash,
-            outcome: MergeOutcomeKind::Conflict {
-                conflicts: outcome.conflicts,
-            },
-        });
-    }
-
-    let merged = outcome.merged.ok_or_else(|| {
-        ApiError::internal("the merge reported no conflicts but produced nothing")
-    })?;
-
-    let report = okf::validate::validate(&merged);
-    if !report.valid {
-        eprintln!("merged model failed validation: {:?}", report.errors);
-        return Err(ApiError::internal(
-            "the merged model failed validation and was not stored",
-        ));
-    }
-
-    {
-        let touched = touched_elements(&ours, &merged);
-        let held = state
-            .store
-            .holders_of(project, &touched, now_seconds())
-            .map_err(map_store_error)?;
-        let holder = holder.unwrap_or("");
-        if let Some(blocked) = held.iter().find(|lock| lock.holder != holder) {
-            return Err(ApiError::conflict(lock_refusal_message(
-                &blocked.element,
-                &blocked.holder,
-                blocked.expires_at,
-            )));
-        }
-    }
-
-    let bytes = serde_json::to_vec(&merged).map_err(|e| {
-        eprintln!("merged model could not be serialised: {}", e);
-        ApiError::internal("the merged model could not be stored")
-    })?;
-    let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
-    let touched = touched_elements(&ours, &merged);
-    let parents = vec![ours_tip.clone(), theirs_tip.clone()];
-    let guard = CommitGuard {
-        holder: holder.unwrap_or(""),
-        elements: &touched,
-        now: now_seconds(),
-        expected_tip: Some(&parents[0]),
-    };
-    let audit = AuditEntry {
-        id: 0,
-        project: project.to_string(),
-        at: now_seconds(),
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        action: "merge.clean".to_string(),
-        subject: form.branch.clone(),
-        detail: format!("merged {} into {}", form.other, form.branch),
-    };
-    let commit = commit_refusal_guard(
+    match merge_core(
         state.store.as_ref(),
         project,
-        &form.branch,
-        &identity.subject,
-        state.auth.mechanism(),
-        state.store.commit_merge(
-            project,
-            &form.branch,
-            &parents,
-            &okf_hash,
-            &author,
-            &form.message,
-            Some(guard),
-            Some(&audit),
-        ),
+        &MergeCore {
+            branch: &form.branch,
+            other: &form.other,
+            author: &author,
+            message: &form.message,
+            holder,
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+        },
     )
-    .map_err(map_store_error)?;
-
-    Ok(MergeResult {
-        branch: form.branch.clone(),
-        other: form.other.clone(),
-        base: base_hash,
-        outcome: MergeOutcomeKind::Clean { commit },
-    })
+    .map_err(map_store_error)?
+    {
+        MergeOutcome::Merged { commit, base } => Ok(MergeResult {
+            branch: form.branch.clone(),
+            other: form.other.clone(),
+            base,
+            outcome: MergeOutcomeKind::Clean { commit },
+        }),
+        MergeOutcome::Conflict { base, conflicts } => Ok(MergeResult {
+            branch: form.branch.clone(),
+            other: form.other.clone(),
+            base,
+            outcome: MergeOutcomeKind::Conflict { conflicts },
+        }),
+    }
 }
 
 fn merge_result_page(
@@ -626,10 +525,6 @@ pub fn merge_form_markup(project: &str, branch: &str, other: &str) -> Markup {
             p {
                 label for="other" { "from branch" }
                 input type="text" id="other" name="other" value=(other) required;
-            }
-            p {
-                label for="author" { "author" }
-                input type="text" id="author" name="author";
             }
             p {
                 label for="message" { "message" }
