@@ -5,8 +5,10 @@
 //! CONFIDENCE MUST BE ITS WEAKEST LINK. Analytics reads and produces findings; it
 //! never writes to a model.
 
+pub mod confidence;
 pub mod dataset;
 pub mod source;
 
+pub use confidence::{fused_trust, max, min, sum, FusedValue, FusionError, Value};
 pub use dataset::{CsvError, Dataset};
 pub use source::{Registry, RegistryError, Source, SourceKind, TrustLevel};
