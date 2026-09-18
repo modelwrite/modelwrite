@@ -11,9 +11,12 @@ use super::{
 /// The schema, ported from the SQLite reference implementation. TEXT stays TEXT, the
 /// INTEGER seconds columns become BIGINT, the audit id becomes BIGSERIAL (a monotonic
 /// insertion key, so the log is ordered by insertion rather than wall-clock time), and the
-/// implicit SQLite rowid that ordered commits becomes an explicit BIGSERIAL id for the
-/// same reason. Every CHECK constraint is carried over, and the append-only property of the
-/// audit table is enforced by triggers exactly as it is on SQLite.
+/// implicit SQLite rowid that ordered commits becomes an explicit BIGSERIAL PRIMARY KEY id
+/// for the same reason. Every CHECK constraint is carried over, and the append-only
+/// property of the audit table is enforced by triggers exactly as it is on SQLite. The
+/// locks table carries a UNIQUE(project, element) constraint so "one holder per element"
+/// is a property of the DATABASE, not of the acquire code: two concurrent acquires by
+/// different holders serialise on the constraint and only one can win.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
     name TEXT PRIMARY KEY,
@@ -24,8 +27,8 @@ CREATE TABLE IF NOT EXISTS blobs (
     bytes BYTEA NOT NULL
 );
 CREATE TABLE IF NOT EXISTS commits (
-    id BIGSERIAL NOT NULL,
-    hash TEXT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    hash TEXT NOT NULL UNIQUE,
     project TEXT NOT NULL,
     branch TEXT NOT NULL,
     parents TEXT NOT NULL,
@@ -58,9 +61,9 @@ CREATE TABLE IF NOT EXISTS locks (
     element TEXT NOT NULL,
     holder TEXT NOT NULL,
     acquired_at BIGINT NOT NULL,
-    expires_at BIGINT NOT NULL
+    expires_at BIGINT NOT NULL,
+    UNIQUE (project, element)
 );
-CREATE INDEX IF NOT EXISTS locks_element ON locks(project, element);
 CREATE TABLE IF NOT EXISTS audit (
     id BIGSERIAL PRIMARY KEY,
     project TEXT NOT NULL,
@@ -146,11 +149,16 @@ impl PostgresStore {
     pub fn open(url: &str) -> Result<Self, StoreError> {
         let config: postgres::Config = url.parse().map_err(backend)?;
         let pool = match config.get_ssl_mode() {
-            SslMode::Disable | SslMode::Prefer => {
+            // `disable` is an explicit opt-out of transport security, so plaintext is
+            // exactly what was asked for.
+            SslMode::Disable => {
                 let manager = PostgresConnectionManager::new(config, NoTls);
                 Pool::Plain(r2d2::Pool::new(manager).map_err(backend)?)
             }
-            SslMode::Require => {
+            // `prefer` asks for TLS with a plaintext fallback. This client cannot negotiate
+            // that fallback, so it honours the preference by REQUIRING TLS instead of
+            // silently downgrading a transport-security setting to plaintext.
+            SslMode::Prefer | SslMode::Require => {
                 let manager = PostgresConnectionManager::new(config, rustls_connector()?);
                 Pool::Tls(r2d2::Pool::new(manager).map_err(backend)?)
             }
@@ -589,10 +597,20 @@ impl Store for PostgresStore {
         from: &str,
         audit: Option<&AuditEntry>,
     ) -> Result<(), StoreError> {
-        if self.commit(project, from)?.is_none() {
-            return Err(StoreError::NotFound(format!("commit {}", from)));
-        }
         self.with_tx(|tx| {
+            // The source commit must exist, checked inside the transaction that writes the
+            // branch, so the check and the write see the same state.
+            let from_exists: bool = tx
+                .query_opt(
+                    "SELECT 1 FROM commits WHERE project = $1 AND hash = $2",
+                    &[&project, &from],
+                )
+                .map_err(backend)?
+                .is_some();
+            if !from_exists {
+                return Err(StoreError::NotFound(format!("commit {}", from)));
+            }
+
             let inserted = tx
                 .execute(
                     "INSERT INTO branches (project, name, tip) VALUES ($1, $2, $3) ON CONFLICT (project, name) DO NOTHING",
@@ -618,10 +636,17 @@ impl Store for PostgresStore {
         name: &str,
         audit: Option<&AuditEntry>,
     ) -> Result<(), StoreError> {
-        if self.project(project)?.is_none() {
-            return Err(StoreError::NotFound(format!("project {}", project)));
-        }
         self.with_tx(|tx| {
+            // Ask which thing is missing inside the transaction that deletes, so the check
+            // and the delete see the same state.
+            let project_exists: bool = tx
+                .query_opt("SELECT 1 FROM projects WHERE name = $1", &[&project])
+                .map_err(backend)?
+                .is_some();
+            if !project_exists {
+                return Err(StoreError::NotFound(format!("project {}", project)));
+            }
+
             let removed = tx
                 .execute(
                     "DELETE FROM branches WHERE project = $1 AND name = $2",
@@ -740,62 +765,53 @@ impl Store for PostgresStore {
         audit: Option<&AuditEntry>,
     ) -> Result<Vec<Lock>, StoreError> {
         self.with_tx(|tx| {
+            // Sweep dead leases first, so an expired lock never blocks a new holder.
             tx.execute("DELETE FROM locks WHERE expires_at <= $1", &[&now])
                 .map_err(backend)?;
 
+            let expires_at = now + ttl_seconds;
+            let mut locks = Vec::with_capacity(elements.len());
             for element in elements {
-                let conflict: Option<(String, i64)> = tx
+                // One statement, settled by the database: insert a fresh lease, or extend
+                // this holder's existing lease. The UNIQUE(project, element) constraint is
+                // the arbiter between two concurrent acquires by different holders - the
+                // loser's DO UPDATE ... WHERE fails its holder test and returns no row, so
+                // it is refused with the winner's identity instead of both holding it.
+                let id = super::lock_id(project, branch, element, holder, now);
+                let taken: Option<(String, i64)> = tx
                     .query_opt(
-                        "SELECT holder, expires_at FROM locks WHERE project = $1 AND element = $2 AND holder != $3",
-                        &[&project, &element, &holder],
+                        "INSERT INTO locks (id, project, branch, element, holder, acquired_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (project, element) DO UPDATE SET branch = EXCLUDED.branch, expires_at = EXCLUDED.expires_at WHERE locks.holder = EXCLUDED.holder RETURNING id, acquired_at",
+                        &[&id, &project, &branch, &element, &holder, &now, &expires_at],
                     )
                     .map_err(backend)?
                     .map(|row| (row.get(0), row.get(1)));
-                if let Some((other, expires_at)) = conflict {
-                    return Err(super::lock_refusal(element, &other, expires_at));
-                }
-            }
 
-            let mut locks = Vec::with_capacity(elements.len());
-            for element in elements {
-                let existing: Option<(String, String, i64)> = tx
-                    .query_opt(
-                        "SELECT id, branch, acquired_at FROM locks WHERE project = $1 AND element = $2 AND holder = $3",
-                        &[&project, &element, &holder],
-                    )
-                    .map_err(backend)?
-                    .map(|row| (row.get(0), row.get(1), row.get(2)));
-
-                let expires_at = now + ttl_seconds;
-                let (id, acquired_at) = match existing {
-                    Some((id, _branch, acquired_at)) => {
-                        tx.execute(
-                            "UPDATE locks SET branch = $1, expires_at = $2 WHERE id = $3",
-                            &[&branch, &expires_at, &id],
-                        )
-                        .map_err(backend)?;
-                        (id, acquired_at)
+                match taken {
+                    Some((id, acquired_at)) => {
+                        locks.push(Lock {
+                            id,
+                            project: project.to_string(),
+                            branch: branch.to_string(),
+                            element: element.clone(),
+                            holder: holder.to_string(),
+                            acquired_at,
+                            expires_at,
+                        });
                     }
                     None => {
-                        let id = super::lock_id(project, branch, element, holder, now);
-                        tx.execute(
-                            "INSERT INTO locks (id, project, branch, element, holder, acquired_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                            &[&id, &project, &branch, &element, &holder, &now, &expires_at],
-                        )
-                        .map_err(backend)?;
-                        (id, now)
+                        // A different holder owns a live lease on this element. Returning
+                        // the error rolls back the whole transaction, so acquiring is all
+                        // or nothing for the requested elements.
+                        let (winner, winner_expires): (String, i64) = tx
+                            .query_one(
+                                "SELECT holder, expires_at FROM locks WHERE project = $1 AND element = $2",
+                                &[&project, &element],
+                            )
+                            .map_err(backend)
+                            .map(|row| (row.get(0), row.get(1)))?;
+                        return Err(super::lock_refusal(element, &winner, winner_expires));
                     }
-                };
-
-                locks.push(Lock {
-                    id,
-                    project: project.to_string(),
-                    branch: branch.to_string(),
-                    element: element.clone(),
-                    holder: holder.to_string(),
-                    acquired_at,
-                    expires_at,
-                });
+                }
             }
 
             if let Some(audit) = audit {

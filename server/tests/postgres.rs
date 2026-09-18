@@ -5,17 +5,20 @@ use postgres::NoTls;
 use server::store::postgres::PostgresStore;
 use server::store::{AuditEntry, CommitGuard, GateRun, Store, StoreError};
 
-/// Every test in this file is skipped - not failed, and not passed - when
-/// MW_TEST_DATABASE_URL is unset, so the local suite (no PostgreSQL) stays green without
-/// pretending the backend was exercised. A test that cannot open the configured database
-/// panics: a misconfigured URL must fail loudly, not quietly skip.
-fn require_store() -> Option<PostgresStore> {
-    let url = std::env::var("MW_TEST_DATABASE_URL").ok()?;
+/// Every test in this file is marked `#[ignore = "requires MW_TEST_DATABASE_URL"]`, so a
+/// plain `cargo test` reports them as IGNORED (not passed) and they do no work. A developer
+/// who has a database runs them with `--include-ignored` after setting MW_TEST_DATABASE_URL;
+/// this helper then opens the configured database and panics - not skips - when the URL is
+/// unset, empty or unreachable, because a misconfigured URL must fail loudly.
+fn require_store() -> PostgresStore {
+    let url = std::env::var("MW_TEST_DATABASE_URL").expect(
+        "MW_TEST_DATABASE_URL must be set to run the ignored postgres tests (use --include-ignored)",
+    );
     if url.trim().is_empty() {
-        return None;
+        panic!("MW_TEST_DATABASE_URL is set but empty");
     }
     match PostgresStore::open(&url) {
-        Ok(store) => Some(store),
+        Ok(store) => store,
         Err(error) => panic!(
             "could not open the configured PostgreSQL database: {}",
             error
@@ -37,11 +40,9 @@ fn unique_project() -> String {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn blobs_are_content_addressed() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let a = store.put_blob(b"model-one").unwrap();
     let b = store.put_blob(b"model-one").unwrap();
     let c = store.put_blob(b"model-two").unwrap();
@@ -51,11 +52,9 @@ fn blobs_are_content_addressed() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn commits_land_on_a_branch_and_move_its_tip() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let first = store
@@ -87,11 +86,9 @@ fn commits_land_on_a_branch_and_move_its_tip() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn duplicate_projects_and_branches_are_conflicts() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     match store.create_project(&project, None) {
@@ -115,11 +112,9 @@ fn duplicate_projects_and_branches_are_conflicts() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn concurrent_commits_to_one_branch_form_a_linear_chain() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let store = std::sync::Arc::new(store);
@@ -193,11 +188,9 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn a_merge_refuses_when_the_branch_moved_under_it() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let root = store
@@ -259,11 +252,9 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn a_guarded_commit_is_refused_inside_the_transaction() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let root = store
@@ -356,11 +347,9 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn a_guard_computed_against_an_old_tip_is_refused() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let root = store
@@ -404,11 +393,9 @@ fn a_guard_computed_against_an_old_tip_is_refused() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn audit_rows_ride_each_mutation_transaction() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     let entry = |action: &str| AuditEntry {
         id: 0,
@@ -496,11 +483,9 @@ fn audit_rows_ride_each_mutation_transaction() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn the_audit_table_refuses_update_and_delete() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let id = store
@@ -536,11 +521,9 @@ fn the_audit_table_refuses_update_and_delete() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn a_mutation_rolls_back_when_its_audit_entry_cannot_be_written() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     let unwritable = AuditEntry {
         id: 0,
@@ -565,11 +548,9 @@ fn a_mutation_rolls_back_when_its_audit_entry_cannot_be_written() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn an_expired_lease_stops_blocking() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
 
     // A acquires b1 at now = 1000 with ttl 30, so the lease expires at 1030.
@@ -600,11 +581,9 @@ fn an_expired_lease_stops_blocking() {
 }
 
 #[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn deleting_a_branch_leaves_its_commits_readable() {
-    let Some(store) = require_store() else {
-        eprintln!("skipped: MW_TEST_DATABASE_URL is not set");
-        return;
-    };
+    let store = require_store();
     let project = unique_project();
     store.create_project(&project, None).unwrap();
     let commit = store
@@ -620,4 +599,63 @@ fn deleting_a_branch_leaves_its_commits_readable() {
     let still = store.commit(&project, &commit.hash).unwrap();
     assert!(still.is_some(), "the commit must survive its branch");
     assert_eq!(still.unwrap().hash, commit.hash);
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn two_concurrent_acquires_by_different_holders_cannot_both_succeed() {
+    let store = require_store();
+    let project = unique_project();
+    let store = std::sync::Arc::new(store);
+
+    // Two holders race for the same element. The UNIQUE(project, element) constraint is
+    // the arbiter: exactly one INSERT ... ON CONFLICT wins, and the loser is refused with
+    // the winner's identity rather than also holding the element.
+    let handles: Vec<_> = ["alex".to_string(), "bob".to_string()]
+        .into_iter()
+        .map(|holder| {
+            let store = store.clone();
+            let project = project.clone();
+            std::thread::spawn(move || {
+                store.acquire_locks(
+                    &project,
+                    "main",
+                    &["b1".to_string()],
+                    &holder,
+                    600,
+                    1000,
+                    None,
+                )
+            })
+        })
+        .collect();
+
+    let results: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("worker thread"))
+        .collect();
+
+    let mut winners = 0;
+    let mut refusals: Vec<String> = Vec::new();
+    for result in results {
+        match result {
+            Ok(_) => winners += 1,
+            Err(StoreError::Locked {
+                element, holder, ..
+            }) => {
+                assert_eq!(element, "b1", "the refusal must name the element");
+                refusals.push(holder);
+            }
+            Err(other) => panic!("expected a lock refusal, got {:?}", other),
+        }
+    }
+    assert_eq!(winners, 1, "exactly one holder may win the lease");
+    assert_eq!(refusals.len(), 1, "the loser must be refused as Locked");
+
+    let locks = store.locks(&project, 1000).unwrap();
+    assert_eq!(locks.len(), 1, "exactly one live lock must exist");
+    assert_eq!(
+        locks[0].holder, refusals[0],
+        "the refusal must name the holder that actually won"
+    );
 }
