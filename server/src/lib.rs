@@ -3,6 +3,8 @@ pub mod api;
 pub mod audit;
 pub mod audit_api;
 pub mod auth;
+pub mod binding_api;
+pub mod binding_registry;
 pub mod error;
 pub mod gate_api;
 pub mod locks_api;
@@ -96,6 +98,14 @@ pub fn app(state: AppState) -> Router {
             post(api::reset_branch),
         )
         .route("/projects/:project/gate", post(gate_api::run_gate))
+        .route(
+            "/projects/:project/import",
+            post(binding_api::import_artifact),
+        )
+        .route(
+            "/projects/:project/import/:artifactHash/report",
+            get(binding_api::import_report),
+        )
         .route("/projects/:project/merge", post(merge_api::merge_branches))
         .route(
             "/projects/:project/gate-runs",

@@ -1000,10 +1000,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "hex",
  "http-body-util",
  "jsonwebtoken",
  "maud",
+ "mw-binding",
+ "mw-binding-xmi",
  "mw-gate",
  "mw-graph",
  "mw-okf",

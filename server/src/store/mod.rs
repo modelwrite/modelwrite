@@ -26,6 +26,29 @@ pub struct Commit {
     pub created_at: String,
 }
 
+/// The durable record of one import: the retained artifact's content address, the binding
+/// that read it, the binding's own loss report and the engine's fidelity measurement, plus -
+/// once the import is committed - the commit and the losses the request accepted by name.
+/// The artifact bytes themselves live in the blob store under `artifact_hash`, so the record
+/// and the artifact are always addressable together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportRecord {
+    pub artifact_hash: String,
+    pub project: String,
+    pub binding_id: String,
+    pub binding_version: String,
+    /// The binding's own claim, as JSON (a `binding::LossReport`).
+    pub loss_report: String,
+    /// The engine's measurement, as JSON (an `okf::diff::DiffReport`), produced by the
+    /// round-trip harness rather than taken from the binding.
+    pub fidelity_diff: String,
+    /// The commit that landed this import, once it has been committed.
+    pub commit_hash: Option<String>,
+    /// The blocking loss subjects the request accepted by name, in request order.
+    pub accepted_losses: Vec<String>,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateRun {
     pub project: String,
@@ -286,6 +309,40 @@ pub trait Store: Send + Sync {
     fn list_branches(&self, project: &str) -> Result<Vec<(String, String)>, StoreError>;
     fn record_gate_run(&self, run: &GateRun, audit: Option<&AuditEntry>) -> Result<(), StoreError>;
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError>;
+
+    /// Record an import's loss report and fidelity measurement, keyed by the retained
+    /// artifact's content address. This runs BEFORE the commit is attempted, so a refused
+    /// import still has its report retrievable - the caller must be able to read exactly
+    /// which losses to accept. Re-recording an artifact already recorded is a no-op, since
+    /// the same bytes always produce the same report.
+    #[allow(clippy::too_many_arguments)]
+    fn record_import(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        binding_id: &str,
+        binding_version: &str,
+        loss_report: &str,
+        fidelity_diff: &str,
+    ) -> Result<(), StoreError>;
+
+    /// The import record for a retained artifact, if one was recorded.
+    fn import_report(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+    ) -> Result<Option<ImportRecord>, StoreError>;
+
+    /// Attach the landed commit and the named accepted losses to an import record, so the
+    /// commit's provenance (artifact hash, binding and accepted losses) is durable beside
+    /// the report it was admitted on.
+    fn attach_import_commit(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        commit_hash: &str,
+        accepted_losses: &[String],
+    ) -> Result<(), StoreError>;
 
     /// Acquire a lease on each of `elements`, all or nothing. If any element is held by a
     /// live lease owned by a DIFFERENT holder, nothing is acquired and a Conflict is

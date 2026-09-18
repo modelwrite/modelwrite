@@ -5,7 +5,8 @@ use r2d2_postgres::PostgresConnectionManager;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, Lock, Project, Store, StoreError,
+    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportRecord, Lock, Project, Store,
+    StoreError,
 };
 
 /// The schema, ported from the SQLite reference implementation. TEXT stays TEXT, the
@@ -54,6 +55,19 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     evidence TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS imports (
+    artifact_hash TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    binding_id TEXT NOT NULL,
+    binding_version TEXT NOT NULL,
+    loss_report TEXT NOT NULL,
+    fidelity_diff TEXT NOT NULL,
+    commit_hash TEXT,
+    accepted_losses TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS imports_by_project ON imports (project);
+CREATE INDEX IF NOT EXISTS imports_by_commit ON imports (commit_hash);
 CREATE TABLE IF NOT EXISTS locks (
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
@@ -783,6 +797,98 @@ impl Store for PostgresStore {
                     })
                 })
                 .collect()
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_import(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        binding_id: &str,
+        binding_version: &str,
+        loss_report: &str,
+        fidelity_diff: &str,
+    ) -> Result<(), StoreError> {
+        let created_at = now_epoch();
+        self.with_client(|client| {
+            client
+                .execute(
+                    "INSERT INTO imports (artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at) VALUES ($1, $2, $3, $4, $5, $6, NULL, '[]', $7) ON CONFLICT (artifact_hash) DO NOTHING",
+                    &[
+                        &artifact_hash,
+                        &project,
+                        &binding_id,
+                        &binding_version,
+                        &loss_report,
+                        &fidelity_diff,
+                        &created_at,
+                    ],
+                )
+                .map_err(backend)?;
+            Ok(())
+        })
+    }
+
+    fn import_report(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+    ) -> Result<Option<ImportRecord>, StoreError> {
+        self.with_client(|client| {
+            let row = client
+                .query_opt(
+                    "SELECT artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at FROM imports WHERE project = $1 AND artifact_hash = $2",
+                    &[&project, &artifact_hash],
+                )
+                .map_err(backend)?;
+            match row {
+                None => Ok(None),
+                Some(row) => {
+                    let accepted_losses: String = row.get(7);
+                    let accepted_losses: Vec<String> = serde_json::from_str(&accepted_losses)
+                        .map_err(|e| {
+                            backend(format!(
+                                "corrupt accepted_losses column for import {}: {}",
+                                artifact_hash, e
+                            ))
+                        })?;
+                    Ok(Some(ImportRecord {
+                        artifact_hash: row.get(0),
+                        project: row.get(1),
+                        binding_id: row.get(2),
+                        binding_version: row.get(3),
+                        loss_report: row.get(4),
+                        fidelity_diff: row.get(5),
+                        commit_hash: row.get(6),
+                        accepted_losses,
+                        created_at: row.get(8),
+                    }))
+                }
+            }
+        })
+    }
+
+    fn attach_import_commit(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        commit_hash: &str,
+        accepted_losses: &[String],
+    ) -> Result<(), StoreError> {
+        let accepted_json = serde_json::to_string(accepted_losses)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        self.with_client(|client| {
+            let updated = client
+                .execute(
+                    "UPDATE imports SET commit_hash = $1, accepted_losses = $2 WHERE project = $3 AND artifact_hash = $4",
+                    &[&commit_hash, &accepted_json, &project, &artifact_hash],
+                )
+                .map_err(backend)?;
+            if updated == 0 {
+                return Err(StoreError::NotFound(format!("import {}", artifact_hash)));
+            }
+            Ok(())
         })
     }
 

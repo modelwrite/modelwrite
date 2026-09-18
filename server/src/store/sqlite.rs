@@ -4,7 +4,8 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, Lock, Project, Store, StoreError,
+    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportRecord, Lock, Project, Store,
+    StoreError,
 };
 
 const SCHEMA: &str = "
@@ -43,6 +44,19 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     evidence TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS imports (
+    artifact_hash TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    binding_id TEXT NOT NULL,
+    binding_version TEXT NOT NULL,
+    loss_report TEXT NOT NULL,
+    fidelity_diff TEXT NOT NULL,
+    commit_hash TEXT,
+    accepted_losses TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS imports_by_project ON imports (project);
+CREATE INDEX IF NOT EXISTS imports_by_commit ON imports (commit_hash);
 CREATE TABLE IF NOT EXISTS locks (
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
@@ -141,6 +155,20 @@ type CommitRow = (
     String,
     String,
     String,
+    String,
+    String,
+);
+
+/// One import row exactly as stored: artifact_hash, project, binding_id, binding_version,
+/// loss_report, fidelity_diff, commit_hash, accepted_losses, created_at.
+type ImportRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
     String,
     String,
 );
@@ -687,6 +715,112 @@ impl Store for SqliteStore {
             })?;
             rows.collect()
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_import(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        binding_id: &str,
+        binding_version: &str,
+        loss_report: &str,
+        fidelity_diff: &str,
+    ) -> Result<(), StoreError> {
+        // The same bytes always produce the same report, so re-recording is a no-op. A
+        // record must exist BEFORE the commit is attempted, so a refused import still has
+        // a retrievable report.
+        self.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO imports (artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, '[]', ?7)",
+                params![artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, now_epoch()],
+            )
+        })?;
+        Ok(())
+    }
+
+    fn import_report(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+    ) -> Result<Option<ImportRecord>, StoreError> {
+        // The row is read under the lock and the two JSON columns are parsed outside it, so
+        // corruption surfaces as a storage error rather than a query error.
+        let row: Option<ImportRow> = self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at FROM imports WHERE project = ?1 AND artifact_hash = ?2",
+            )?;
+            let mut rows = stmt.query(params![project, artifact_hash])?;
+            match rows.next()? {
+                Some(row) => Ok(Some((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))),
+                None => Ok(None),
+            }
+        })?;
+
+        match row {
+            None => Ok(None),
+            Some((
+                artifact_hash,
+                project,
+                binding_id,
+                binding_version,
+                loss_report,
+                fidelity_diff,
+                commit_hash,
+                accepted_losses,
+                created_at,
+            )) => {
+                let accepted_losses: Vec<String> =
+                    serde_json::from_str(&accepted_losses).map_err(|e| {
+                        StoreError::Backend(format!(
+                            "corrupt accepted_losses column for import {}: {}",
+                            artifact_hash, e
+                        ))
+                    })?;
+                Ok(Some(ImportRecord {
+                    artifact_hash,
+                    project,
+                    binding_id,
+                    binding_version,
+                    loss_report,
+                    fidelity_diff,
+                    commit_hash,
+                    accepted_losses,
+                    created_at,
+                }))
+            }
+        }
+    }
+
+    fn attach_import_commit(
+        &self,
+        project: &str,
+        artifact_hash: &str,
+        commit_hash: &str,
+        accepted_losses: &[String],
+    ) -> Result<(), StoreError> {
+        let accepted_json = serde_json::to_string(accepted_losses)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let updated = self.with(|c| {
+            c.execute(
+                "UPDATE imports SET commit_hash = ?1, accepted_losses = ?2 WHERE project = ?3 AND artifact_hash = ?4",
+                params![commit_hash, accepted_json, project, artifact_hash],
+            )
+        })?;
+        if updated == 0 {
+            return Err(StoreError::NotFound(format!("import {}", artifact_hash)));
+        }
+        Ok(())
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<i64, StoreError> {

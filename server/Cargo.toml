@@ -31,6 +31,8 @@ postgres = [
 mw-okf = { path = "../engine/okf" }
 mw-graph = { path = "../engine/graph" }
 mw-gate = { path = "../engine/gate" }
+mw-binding = { path = "../engine/binding" }
+mw-binding-xmi = { path = "../engine/binding-xmi" }
 axum.workspace = true
 tokio.workspace = true
 rusqlite.workspace = true
@@ -38,6 +40,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
+base64 = "0.22"
 anyhow.workspace = true
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
 maud = "0.27.0"
@@ -50,6 +53,7 @@ rustls-native-certs = { version = "0.8", optional = true }
 
 [dev-dependencies]
 mw-test-support = { path = "../engine/test-support" }
+base64 = "0.22"
 tower.workspace = true
 http-body-util.workspace = true
 tempfile.workspace = true

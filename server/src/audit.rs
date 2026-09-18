@@ -17,3 +17,5 @@ pub const LOCK_ACQUIRE: &str = "lock.acquire";
 pub const LOCK_RELEASE: &str = "lock.release";
 pub const LOCK_DENIED: &str = "lock.denied";
 pub const GATE_RUN: &str = "gate.run";
+pub const IMPORT_ACCEPT: &str = "import.accept";
+pub const IMPORT_REFUSED: &str = "import.refused";
