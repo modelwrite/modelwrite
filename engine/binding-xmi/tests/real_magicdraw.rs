@@ -4,8 +4,10 @@
 //! This is the test the project has been missing. Every other XMI fixture is
 //! either hand-written or a Papyrus skeleton with no elements. This file came
 //! out of a MagicDraw `.mdzip` (the `com.nomagic.magicdraw.uml_model.model`
-//! entry) and contains 148 packagedElements, 57 ownedAttributes, 55 Blocks and
-//! 45 Requirements with Satisfy and Allocate links.
+//! entry) and contains 148 packagedElement, 57 ownedAttribute, 34 Blocks and
+//! 25 Requirements, with 20 Satisfy and 3 Allocate links. (These are ELEMENT
+//! counts, not substring counts: an earlier comment said 55/45/27/9 by counting
+//! occurrences of the word inside reference strings and attribute values.)
 //!
 //! It is also, embarrassingly, something the repository already had: it sat in
 //! `sample/corpus/coffee-machine/legacy/` from the beginning and no test ever
