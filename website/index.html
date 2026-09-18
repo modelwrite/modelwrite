@@ -49,8 +49,9 @@ models, while a human makes every commit. Agents draft; the gate and the human c
 
 <section id="run">
 <h2>Install and run</h2>
-<p>Nothing is published to a package registry yet, so there is no working
-<code>cargo install</code> or <code>docker pull</code>. Build from this repository.</p>
+<p>The Rust crates are not published to crates.io — both declare
+<code>publish = false</code> in their manifests — so <code>cargo install</code> will not
+work. Build from this repository.</p>
 <p>The crates build and run from source. The service is <code>mw-server</code>; the CLI is
 <code>mw-cli</code>, which builds the <code>mw</code> binary:</p>
 <pre><code>cargo build --workspace

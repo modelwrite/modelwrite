@@ -45,9 +45,8 @@ Expected output: GATE PASS.
 
 ## Install and run
 
-Nothing is published to a package registry yet, so there is no working
-`cargo install` or `docker pull`. Both crates declare `publish = false`
-(`server/Cargo.toml`, `cli/Cargo.toml`) and there is no public container image.
+The Rust crates are not published to crates.io — both declare `publish = false`
+(`server/Cargo.toml`, `cli/Cargo.toml`) — so there is no working `cargo install`.
 Build from this repository:
 
 - **Crates** — `cargo build --workspace` (see Quickstart above). The service is the
