@@ -190,10 +190,11 @@ fn the_artifact_names_the_entries_the_reasoner_had_nothing_to_say_about() {
 
 #[test]
 fn two_entries_sharing_a_subject_are_two_decisions() {
-    // A single XMI comment can produce a Lossy entry for its dropped id and an
-    // Unmappable entry for its dropped body. A resolver keyed on the subject
-    // alone would collapse them; the (subject, verdict) identity keeps them two
-    // decisions, so an acceptance of one never silently accepts the other.
+    // A synthetic scenario: two entries share a subject. The binding in use today
+    // names the two losses distinctly, but the identity must hold even if one did
+    // not. A resolver keyed on the subject alone would collapse them; the
+    // (subject, verdict) identity keeps them two decisions, so an acceptance of one
+    // never silently accepts the other.
     let report = LossReport {
         binding: BindingInfo {
             id: "test-binding".to_string(),

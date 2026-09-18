@@ -125,14 +125,65 @@ pub struct ImportCore<'a> {
     pub authorizer: &'a str,
 }
 
-/// Whether an acceptance name reconciles to a loss mapping, on the ONE key the agent and the
-/// server share. The agent names a loss by its entry identity ("subject [verdict]", from
-/// `agent::losses::entry_identity`); the workbench import form still sends the binding's raw
-/// subject. Both reconcile to the same mapping here, so accepting a proposal by ITS identity
-/// lands on exactly the entry the human chose. The recorded acceptance is always the entry
-/// identity, never the raw subject two losses could share.
+/// Whether an acceptance name, as an ENTRY IDENTITY, names this loss mapping. The entry
+/// identity ("subject [verdict]", from `agent::losses::entry_identity`) is the ONE key an
+/// agent's proposal and the workbench form carry, and it names exactly one entry even when two
+/// entries share a subject. A raw subject is NOT an entry identity: see [`resolve_acceptances`]
+/// for how a legacy raw subject is reconciled against the whole blocking set.
 pub fn acceptance_matches(mapping: &binding::Mapping, accepted: &str) -> bool {
-    accepted == mapping.subject || accepted == entry_identity(mapping)
+    accepted == entry_identity(mapping)
+}
+
+/// Resolve the acceptance names against the blocking entries, returning the entry identities
+/// actually accepted, in the order they were named.
+///
+/// An acceptance name is either an ENTRY IDENTITY ("subject [verdict]") or a legacy raw
+/// subject. An entry identity names exactly one entry. A raw subject names every blocking
+/// entry that shares it: when it matches exactly one it is accepted for backwards
+/// compatibility with callers that still send raw subjects; when it matches more than one the
+/// request is REFUSED (400) rather than silently accepting both, because two entries sharing a
+/// subject are two decisions and the caller must name each by its entry identity. A name that
+/// matches nothing names a non-blocking loss and is ignored.
+pub fn resolve_acceptances(
+    blocking: &[&binding::Mapping],
+    accept_losses: &[String],
+) -> Result<Vec<String>, ApiError> {
+    let mut accepted: Vec<String> = Vec::new();
+    for name in accept_losses {
+        if let Some(mapping) = blocking
+            .iter()
+            .copied()
+            .find(|m| entry_identity(m) == *name)
+        {
+            let identity = entry_identity(mapping);
+            if !accepted.contains(&identity) {
+                accepted.push(identity);
+            }
+            continue;
+        }
+        let matches: Vec<&binding::Mapping> = blocking
+            .iter()
+            .copied()
+            .filter(|m| m.subject == *name)
+            .collect();
+        match matches.len() {
+            0 => {}
+            1 => {
+                let identity = entry_identity(matches[0]);
+                if !accepted.contains(&identity) {
+                    accepted.push(identity);
+                }
+            }
+            n => {
+                return Err(ApiError::bad_request(format!(
+                    "acceptLosses entry {:?} matches {} blocking entries; name each loss \
+                     by its entry identity (subject [verdict])",
+                    name, n
+                )));
+            }
+        }
+    }
+    Ok(accepted)
 }
 
 /// The ONE implementation of an import: retain the artifact byte-for-byte, read it through
@@ -219,16 +270,21 @@ pub fn import_core(
     }
 
     // Rule 2: every blocking loss must be accepted by name. An acceptance names a loss by
-    // its ENTRY IDENTITY ("subject [verdict]", the ONE key the agent's proposals carry) or by
-    // the binding's raw subject, which the workbench still sends. Both reconcile to the same
-    // mapping, so an acceptance lands on exactly the entry the human chose rather than on a
-    // subject two losses could share. Anything not accepted refuses the import and is
-    // returned so the caller can decide rather than lose it silently.
+    // its ENTRY IDENTITY ("subject [verdict]", the ONE key the agent's proposals and the
+    // workbench form now carry) or, for backwards compatibility, by the binding's raw subject
+    // when that subject names exactly one blocking entry. A raw subject shared by two blocking
+    // entries is refused here (400) rather than silently accepting both. Anything not accepted
+    // refuses the import and is returned so the caller can decide rather than lose it silently.
     let blocking = loss_report.blocking();
+    let accepted_identities = resolve_acceptances(&blocking, input.accept_losses)?;
     let unaccepted: Vec<binding::Mapping> = blocking
         .iter()
-        .filter(|m| !input.accept_losses.iter().any(|a| acceptance_matches(m, a)))
-        .map(|m| (*m).clone())
+        .filter(|m| {
+            !accepted_identities
+                .iter()
+                .any(|id| id == &entry_identity(m))
+        })
+        .map(|m| (**m).clone())
         .collect();
     if !unaccepted.is_empty() {
         let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
@@ -256,10 +312,9 @@ pub fn import_core(
 
     // The acceptance is recorded BEFORE the commit, so a committed import always has its
     // acceptance on the audit trail; the actor is the verified subject, which is the "who"
-    // of "who accepted what". The accepted key is the ENTRY IDENTITY - the same key the
-    // agent's proposal carried - so what the server stores is exactly what a human accepted,
-    // never the raw subject two losses could share.
-    let accepted_identities: Vec<String> = blocking.iter().map(|m| entry_identity(m)).collect();
+    // of "who accepted what". `accepted_identities` is the set `resolve_acceptances` produced
+    // above: the entry identities the human accepted, never a raw subject two losses could
+    // share.
     if !accepted_identities.is_empty() {
         store
             .append_audit(&AuditEntry {

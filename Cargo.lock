@@ -1020,6 +1020,7 @@ dependencies = [
  "mw-binding-xmi",
  "mw-gate",
  "mw-graph",
+ "mw-mcp",
  "mw-okf",
  "mw-test-support",
  "postgres",

@@ -20,6 +20,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use maud::{html, Markup};
 
+use agent::losses::entry_identity;
 use binding::{BindingInfo, Direction, LossReport, Mapping, MappingVerdict};
 
 use crate::api::{map_store_error, validate_name, verify_actor, ApiState};
@@ -94,7 +95,7 @@ impl ImportForm {
 }
 
 /// The checked acceptance boxes, in checkbox order. A checkbox submits its value only when
-/// checked, so the indexes that actually appear are exactly the subjects the person
+/// checked, so the indexes that actually appear are exactly the entry identities the person
 /// accepted.
 fn parse_accept_losses(form: &HashMap<String, String>) -> Vec<String> {
     let mut indexes: Vec<usize> = form
@@ -481,8 +482,8 @@ fn accept_form_markup(
                         label {
                             input type="checkbox"
                                 name=(format!("accept_loss_{}", index))
-                                value=(mapping.subject.as_str())
-                                checked[!unaccepted.iter().any(|m| m.subject == mapping.subject)];
+                                value=(entry_identity(mapping))
+                                checked[!unaccepted.iter().any(|m| entry_identity(m) == entry_identity(mapping))];
                             span class="loss-subject" { (mapping.subject.as_str()) }
                             span class="loss-verdict" { " (" (verdict_label(mapping.verdict)) ")" }
                             @if !mapping.note.is_empty() {

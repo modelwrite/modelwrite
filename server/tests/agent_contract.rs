@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The published agent contract is enforced against the live router, not trusted as prose.
+//! The published agent contract is enforced against the live surfaces, not trusted as prose.
 //!
 //! `docs/agents/mcp-tools.json` is the machine-readable contract: its `tools` array names
 //! the document-level MCP tools, and its `repositoryHttpSurface.endpoints` array names every
 //! repository HTTP endpoint an agent may call. This test reads that file at RUNTIME and
-//! drives the real `server::app` router for every endpoint, so a route that is renamed,
-//! removed, or added without a contract entry fails here — before an agent calls a route
-//! that no longer exists in production.
+//! drives the real surfaces: the `server::app` router for every HTTP endpoint, and the MCP
+//! server's own `tools/list` handler for the tool names and their required arguments. A
+//! route or tool that is renamed, removed, or added without a contract entry fails here —
+//! before an agent calls a surface that no longer exists in production.
 
 use std::sync::Arc;
 
@@ -25,9 +26,59 @@ use server::{app, AppState};
 /// contract is an edit to what this test enforces.
 const MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/agents/mcp-tools.json");
 
-/// The document-level MCP tools the MCP server (`engine/mcp`) exposes. This is the
-/// authoritative list and must match the `tools/list` handler in `engine/mcp/src/lib.rs`.
-const MCP_TOOLS: &[&str] = &["okf.validate", "graph.stats", "gate.run", "okf.diff"];
+/// The document-level MCP tools, taken from the MCP server's OWN `tools/list` handler at
+/// runtime. `engine/mcp` is the authority for what the MCP surface exposes, so the manifest
+/// must name exactly these tools with the same required arguments; a rename or schema change
+/// there fails this test before an agent is written against a stale contract.
+fn mcp_tools_list() -> Vec<(String, Vec<String>)> {
+    let response = mcp::handle_request(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+    let value: Value = serde_json::from_str(&response).expect("tools/list must return JSON");
+    value["result"]["tools"]
+        .as_array()
+        .expect("tools/list must return a tools array")
+        .iter()
+        .map(|tool| {
+            let name = tool["name"]
+                .as_str()
+                .expect("a tool must have a name")
+                .to_string();
+            let required: Vec<String> = tool["inputSchema"]["required"]
+                .as_array()
+                .expect("a tool input schema must have a required array")
+                .iter()
+                .map(|arg| {
+                    arg.as_str()
+                        .expect("required arguments are strings")
+                        .to_string()
+                })
+                .collect();
+            (name, required)
+        })
+        .collect()
+}
+
+/// The document-level MCP tools named in the prose contract's tools table
+/// (`docs/agents/mcp-agent.md`), each with its required arguments. The table rows are
+/// `| \`name\` | \`arg\`, \`arg\` | summary |`; a tool name always contains a dot, which is
+/// what distinguishes these rows from the permission table above them.
+fn markdown_tool_rows() -> Vec<(String, Vec<String>)> {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/agents/mcp-agent.md");
+    let text = std::fs::read_to_string(path).expect("the prose contract must exist");
+    text.lines()
+        .filter(|line| line.trim_start().starts_with("| `"))
+        .filter(|line| line.contains('.'))
+        .map(|line| {
+            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            let name = cells[1].trim_matches('`').to_string();
+            let args: Vec<String> = cells[2]
+                .split(',')
+                .map(|arg| arg.trim().trim_matches('`').to_string())
+                .filter(|arg| !arg.is_empty())
+                .collect();
+            (name, args)
+        })
+        .collect()
+}
 
 /// A marker the router's `fallback` returns for a path that does not exist, so a missing
 /// route is distinguishable from a handler's own 404 (e.g. "project not found").
@@ -233,48 +284,76 @@ async fn every_contract_endpoint_enforces_its_permission() {
 }
 
 #[test]
-fn the_manifest_names_only_real_mcp_tools() {
+fn the_manifest_names_exactly_the_mcp_servers_tools() {
     let manifest = load_manifest();
     let tools = manifest["tools"]
         .as_array()
         .expect("tools must be an array");
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let real = mcp_tools_list();
+
+    let manifest_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let real_names: Vec<&str> = real.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
-        names.as_slice(),
-        MCP_TOOLS,
-        "the manifest must name exactly the tools the MCP server exposes"
+        manifest_names, real_names,
+        "the manifest must name exactly the tools the MCP server's tools/list exposes"
     );
 
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
-        let expected: Vec<&str> = match name {
-            "okf.validate" | "graph.stats" => vec!["okf"],
-            "gate.run" | "okf.diff" => vec!["reference", "candidate"],
-            other => panic!("the manifest names an unknown tool: {}", other),
-        };
-        let actual: Vec<&str> = tool["inputSchema"]["required"]
+        let required: Vec<&str> = tool["inputSchema"]["required"]
             .as_array()
             .expect("inputSchema.required must be an array")
             .iter()
             .map(|s| s.as_str().unwrap())
             .collect();
+        let (_, real_required) = real
+            .iter()
+            .find(|(n, _)| n == name)
+            .expect("the tool must be present in tools/list");
         assert_eq!(
-            actual, expected,
+            required,
+            real_required.iter().map(String::as_str).collect::<Vec<_>>(),
             "{} must keep its required arguments",
             name
         );
     }
 }
 
+#[test]
+fn the_prose_contract_names_exactly_the_manifest_tools() {
+    // The prose contract's MCP tool table must not drift from the manifest: both name the
+    // same tools with the same required arguments. The manifest is itself checked against
+    // the MCP server's tools/list above, so this closes the markdown half of the drift the
+    // two documents could otherwise develop.
+    let manifest = load_manifest();
+    let json_tools: Vec<(String, Vec<String>)> = manifest["tools"]
+        .as_array()
+        .expect("tools must be an array")
+        .iter()
+        .map(|tool| {
+            let name = tool["name"].as_str().unwrap().to_string();
+            let required: Vec<String> = tool["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| arg.as_str().unwrap().to_string())
+                .collect();
+            (name, required)
+        })
+        .collect();
+
+    assert_eq!(
+        markdown_tool_rows(),
+        json_tools,
+        "the prose contract's MCP tool table must match the manifest (name and required arguments)"
+    );
+}
+
 #[tokio::test]
-async fn the_agent_mechanism_authenticates_a_named_agent_and_audits_it() {
-    let (router, _store, _dir) = app_with_auth(AuthConfig::agent_token(
-        "agent-secret",
-        "mw-agent",
-        "alex",
-        &["admin"],
-        &["*"],
-    ));
+async fn the_agent_mechanism_authenticates_a_named_agent_and_lets_it_read() {
+    let (router, store, _dir) = app_with_auth(
+        AuthConfig::agent_token("agent-secret", "mw-agent", "alex", &["reviewer"], &["*"]).unwrap(),
+    );
 
     // Health reports the mechanism ("agent"), never the token.
     let health = router
@@ -291,42 +370,29 @@ async fn the_agent_mechanism_authenticates_a_named_agent_and_audits_it() {
     let health_body = json_body(health).await;
     assert_eq!(health_body["authMode"], "agent");
 
-    // The agent writes as itself, with its token.
-    let created = router
+    // The agent may read a project its roles reach. It may not write: the agent mechanism has
+    // no write path, which `an_agent_is_a_client_not_a_privileged_path` and the per-route
+    // denial test in `agent_audit.rs` prove.
+    store.create_project("coffee", None).unwrap();
+    let read = router
         .clone()
-        .oneshot(bearer_post(
-            "/projects",
-            json!({ "name": "coffee" }),
-            "agent-secret",
-        ))
+        .oneshot(bearer_get("/projects", "agent-secret"))
         .await
         .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
-
-    // The audit log records the agent's subject, the "agent" mechanism, and who authorised
-    // it — so a reader a year later can tell an agent action from a human's and who decided.
-    let audit = router
-        .clone()
-        .oneshot(bearer_get("/projects/coffee/audit", "agent-secret"))
-        .await
-        .unwrap();
-    assert_eq!(audit.status(), StatusCode::OK);
-    let entries = json_body(audit).await;
-    let first = &entries.as_array().expect("audit must be an array")[0];
-    assert_eq!(first["actor"], "mw-agent");
-    assert_eq!(first["mechanism"], "agent");
-    assert_eq!(first["authorizer"], "alex");
+    assert_eq!(read.status(), StatusCode::OK);
+    let projects = json_body(read).await;
+    assert_eq!(
+        projects.as_array().unwrap().len(),
+        1,
+        "an agent may read the project its roles reach"
+    );
 }
 
 #[tokio::test]
 async fn an_agent_is_a_client_not_a_privileged_path() {
-    let (router, store, _dir) = app_with_auth(AuthConfig::agent_token(
-        "agent-secret",
-        "mw-agent",
-        "alex",
-        &["viewer"],
-        &["*"],
-    ));
+    let (router, store, _dir) = app_with_auth(
+        AuthConfig::agent_token("agent-secret", "mw-agent", "alex", &["viewer"], &["*"]).unwrap(),
+    );
     store.create_project("coffee", None).unwrap();
 
     let response = router

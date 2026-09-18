@@ -2211,6 +2211,13 @@ async fn a_lossy_import_shows_its_losses_and_requires_acceptance_before_committi
         "a subject must be named"
     );
 
+    // The acceptance checkbox submits the ENTRY IDENTITY, not the raw subject, so what a
+    // human ticks is exactly what the server records.
+    assert!(
+        html.contains(r#"value="uml:Model model-grinder [lossy]""#),
+        "the acceptance checkbox must carry the entry identity"
+    );
+
     // What was retained is stated on the page, not only in a log.
     assert!(
         html.contains(expected_hash.as_str()),
@@ -2228,12 +2235,15 @@ async fn a_lossy_import_shows_its_losses_and_requires_acceptance_before_committi
                 ("branch", "main"),
                 ("message", "import coffee-grinder"),
                 ("artifact", artifact.as_str()),
-                ("accept_loss_0", "uml:Model model-grinder"),
-                ("accept_loss_1", "uml:Comment doc-grinder"),
-                ("accept_loss_2", "uml:Property prop-motor"),
-                ("accept_loss_3", "uml:Property prop-capacity"),
-                ("accept_loss_4", "uml:Dependency dep-satisfy"),
-                ("accept_loss_5", "uml:Package pkg-structure (Structure)"),
+                ("accept_loss_0", "uml:Model model-grinder [lossy]"),
+                ("accept_loss_1", "uml:Comment doc-grinder [lossy]"),
+                ("accept_loss_2", "uml:Property prop-motor [lossy]"),
+                ("accept_loss_3", "uml:Property prop-capacity [lossy]"),
+                ("accept_loss_4", "uml:Dependency dep-satisfy [lossy]"),
+                (
+                    "accept_loss_5",
+                    "uml:Package pkg-structure (Structure) [lossy]",
+                ),
             ],
         ))
         .await

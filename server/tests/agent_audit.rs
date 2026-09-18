@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The agent identity and its audit trail. An agent is a client: it authenticates with an
-//! agent token, goes through the same handlers, permissions, locks, audit entries and gate
-//! as a human, and every action it takes is recorded with mechanism "agent", the agent's
-//! subject, and the human or service that authorised it. A reader can tell an agent action
-//! from a human one from the log alone, and an agent is refused whatever its permissions do
-//! not allow. The acceptance key also reconciles the agent's entry identity with the
-//! acceptance the server stores, so accepting a proposal by ITS identity lands on exactly the
-//! loss the human chose.
+//! The agent identity and what it may do. An agent is a client: it authenticates with an
+//! agent token, goes through the same handlers and permission checks as a human, and holds
+//! only the read roles (`viewer`, `reviewer`) a deployment grants it. An agent proposes and a
+//! human commits, so an agent token can never hold a write or admin role, and every write
+//! route refuses an agent with 403. The acceptance key also reconciles the agent's entry
+//! identity with the acceptance the server stores, so accepting a proposal by ITS identity
+//! lands on exactly the loss the human chose.
 
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ use tower::ServiceExt;
 
 use binding::{Mapping, MappingVerdict};
 use server::auth::AuthConfig;
-use server::binding_api::acceptance_matches;
+use server::binding_api::{acceptance_matches, resolve_acceptances};
 use server::store::{sqlite::SqliteStore, Store};
 
 fn post(uri: &str, body: Value) -> Request<Body> {
@@ -114,136 +113,119 @@ async fn audit_entries(router: &axum::Router, token: &str) -> Vec<Value> {
 }
 
 #[tokio::test]
-async fn an_agent_action_is_audited_with_the_agent_mechanism_and_authorizer() {
-    // The agent has admin scope only so it can create the project and commit: the point is
-    // not the role, it is that the action is recorded AS an agent action.
-    let (router, _store, _dir) = app_with_auth(AuthConfig::agent_token(
-        "agent-tok",
-        "loss-report-resolver",
-        "alex",
-        &["admin"],
-        &["*"],
-    ));
-
-    let created = router
-        .clone()
-        .oneshot(bearer_post(
-            "/projects",
-            json!({ "name": "coffee" }),
+async fn an_agent_authenticates_as_a_named_agent_and_can_read() {
+    // An agent token authenticates a NAMED agent holding only a read/review role. Health
+    // reports the mechanism ("agent", never the token), and a read through the agent's own
+    // token succeeds.
+    let (router, store, _dir) = app_with_auth(
+        AuthConfig::agent_token(
             "agent-tok",
-        ))
+            "loss-report-resolver",
+            "alex",
+            &["reviewer"],
+            &["*"],
+        )
+        .unwrap(),
+    );
+
+    let health = router
+        .clone()
+        .oneshot(bearer_get("/health", "agent-tok"))
         .await
         .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(json_body(health).await["authMode"], "agent");
 
-    let committed = router
+    store.create_project("coffee", None).unwrap();
+    let read = router
         .clone()
-        .oneshot(bearer_post(
-            "/projects/coffee/commits",
-            json!({ "branch": "main", "message": "base", "okf": model() }),
-            "agent-tok",
-        ))
+        .oneshot(bearer_get("/projects", "agent-tok"))
         .await
         .unwrap();
-    assert_eq!(committed.status(), StatusCode::CREATED);
-
-    let entries = audit_entries(&router, "agent-tok").await;
-    assert!(!entries.is_empty(), "an agent action must be recorded");
-    for entry in &entries {
-        assert_eq!(
-            entry["mechanism"], "agent",
-            "every agent action must be recorded with mechanism agent: {:?}",
-            entry
-        );
-        assert_eq!(
-            entry["actor"], "loss-report-resolver",
-            "the audit must carry the agent's subject, not a claimed name"
-        );
-        assert_eq!(
-            entry["authorizer"], "alex",
-            "the audit must carry the human that authorised the agent"
-        );
-    }
-
-    // Both the create and the commit are present, so the mechanism holds across actions.
-    let actions: Vec<&str> = entries
-        .iter()
-        .map(|e| e["action"].as_str().unwrap())
-        .collect();
-    assert!(actions.contains(&"project.create"));
-    assert!(actions.contains(&"commit.create"));
+    assert_eq!(read.status(), StatusCode::OK);
+    let projects = json_body(read).await;
+    assert_eq!(
+        projects.as_array().unwrap().len(),
+        1,
+        "an agent may read the project its roles reach"
+    );
 }
 
 #[tokio::test]
-async fn a_reader_can_tell_an_agent_action_from_a_human_one_from_the_log_alone() {
-    // A human on a shared (static) token: mechanism "static", no authorizer.
-    let (router, _store, _dir) = app_with_auth(AuthConfig::static_token("human-tok"));
-    let created = router
-        .clone()
-        .oneshot(bearer_post(
-            "/projects",
-            json!({ "name": "coffee" }),
-            "human-tok",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
-    let human = audit_entries(&router, "human-tok").await;
-    let human_create = human
-        .iter()
-        .find(|e| e["action"] == "project.create")
-        .expect("a project.create entry must exist");
-    assert_eq!(human_create["mechanism"], "static");
-    assert_eq!(human_create["actor"], "admin");
-    assert_eq!(
-        human_create["authorizer"], "",
-        "a human action has no authorizer"
-    );
-
-    // An agent under a human: mechanism "agent", authorizer named.
-    let (router, _store, _dir) = app_with_auth(AuthConfig::agent_token(
-        "agent-tok",
-        "loss-report-resolver",
-        "alex",
-        &["admin"],
-        &["*"],
-    ));
-    let created = router
-        .clone()
-        .oneshot(bearer_post(
-            "/projects",
-            json!({ "name": "coffee" }),
+async fn an_agent_is_refused_every_model_change() {
+    // A reviewer agent may read and review but holds no write role, so each of the four
+    // routes that change a model - commit, merge, reset, import - is refused 403 before the
+    // store is touched. The agent mechanism has no write path today: a human performs the
+    // change through these ordinary routes.
+    let (router, store, _dir) = app_with_auth(
+        AuthConfig::agent_token(
             "agent-tok",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
-    let agent = audit_entries(&router, "agent-tok").await;
-    let agent_create = agent
-        .iter()
-        .find(|e| e["action"] == "project.create")
-        .expect("a project.create entry must exist");
-    assert_eq!(agent_create["mechanism"], "agent");
-    assert_eq!(agent_create["actor"], "loss-report-resolver");
-    assert_eq!(agent_create["authorizer"], "alex");
+            "loss-report-resolver",
+            "alex",
+            &["reviewer"],
+            &["*"],
+        )
+        .unwrap(),
+    );
+    store.create_project("coffee", None).unwrap();
 
-    // The two records are distinguishable without any out-of-band knowledge.
-    assert_ne!(human_create["mechanism"], agent_create["mechanism"]);
-    assert_ne!(human_create["actor"], agent_create["actor"]);
-    assert_ne!(human_create["authorizer"], agent_create["authorizer"]);
+    let writes: [(&str, Value); 4] = [
+        (
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "message": "m", "okf": model() }),
+        ),
+        (
+            "/projects/coffee/merge",
+            json!({ "branch": "main", "other": "feature", "message": "m" }),
+        ),
+        (
+            "/projects/coffee/branches/main/reset",
+            json!({ "to": "abc", "message": "m" }),
+        ),
+        (
+            "/projects/coffee/import",
+            json!({ "binding": "b@1", "branch": "main", "message": "m", "artifact": "x" }),
+        ),
+    ];
+
+    for (uri, body) in writes {
+        let response = router
+            .clone()
+            .oneshot(bearer_post(uri, body, "agent-tok"))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{} must be refused for an agent holding no write role",
+            uri
+        );
+    }
+
+    assert!(
+        store.commits_on("coffee", "main").unwrap().is_empty(),
+        "a refused write must write no commit"
+    );
+    assert!(
+        audit_entries(&router, "agent-tok").await.is_empty(),
+        "a refused write must record no audit entry"
+    );
 }
 
 #[tokio::test]
 async fn an_agent_is_refused_an_action_its_permissions_do_not_allow() {
     // A viewer agent may read but not administer; creating a project must be refused before
     // anything is written.
-    let (router, store, _dir) = app_with_auth(AuthConfig::agent_token(
-        "agent-tok",
-        "loss-report-resolver",
-        "alex",
-        &["viewer"],
-        &["*"],
-    ));
+    let (router, store, _dir) = app_with_auth(
+        AuthConfig::agent_token(
+            "agent-tok",
+            "loss-report-resolver",
+            "alex",
+            &["viewer"],
+            &["*"],
+        )
+        .unwrap(),
+    );
 
     let response = router
         .oneshot(bearer_post(
@@ -325,9 +307,10 @@ async fn accepting_by_agent_identity_stores_the_acceptance_the_human_chose() {
 
 #[test]
 fn an_entry_identity_accepts_exactly_the_entry_it_names() {
-    // A single XMI comment can drop its id as a Lossy entry and its body as an Unmappable
-    // entry. Two entries share the subject "uml:Comment c1"; only the (subject, verdict)
-    // identity separates them, and an acceptance must land on exactly one.
+    // Two entries sharing the subject "uml:Comment c1" (a Lossy id-drop and an Unmappable
+    // body-drop) differ only in verdict. Only the entry identity separates them, and the
+    // per-entry predicate `acceptance_matches` accepts only that identity, never a raw
+    // subject.
     let lossy = Mapping {
         subject: "uml:Comment c1".to_string(),
         verdict: MappingVerdict::Lossy,
@@ -356,7 +339,40 @@ fn an_entry_identity_accepts_exactly_the_entry_it_names() {
         "the Unmappable identity must not accept the Lossy entry"
     );
 
-    // The legacy raw subject still reconciles to the entry, for the workbench form that
-    // sends it; the identity is the unambiguous key an agent uses.
-    assert!(acceptance_matches(&lossy, "uml:Comment c1"));
+    // A raw subject is NOT an entry identity: `acceptance_matches` never reconciles it, so
+    // the ambiguity of two entries sharing a subject cannot leak through this predicate.
+    assert!(!acceptance_matches(&lossy, "uml:Comment c1"));
+    assert!(!acceptance_matches(&unmappable, "uml:Comment c1"));
+}
+
+#[test]
+fn two_entries_sharing_a_subject_require_the_entry_identity() {
+    // Two blocking entries share the subject "uml:Comment c1". A raw subject names both, so
+    // the request is refused (400) rather than silently accepting the one the human did not
+    // choose. The entry identity is the key that keeps them two decisions.
+    let lossy = Mapping {
+        subject: "uml:Comment c1".to_string(),
+        verdict: MappingVerdict::Lossy,
+        note: "id dropped".to_string(),
+    };
+    let unmappable = Mapping {
+        subject: "uml:Comment c1".to_string(),
+        verdict: MappingVerdict::Unmappable,
+        note: "body dropped".to_string(),
+    };
+    let blocking = [&lossy, &unmappable];
+
+    let err = resolve_acceptances(&blocking, &["uml:Comment c1".to_string()])
+        .expect_err("a raw subject shared by two entries must be refused");
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        err.message.contains("2 blocking entries"),
+        "the refusal must name the ambiguity: {}",
+        err.message
+    );
+
+    // Accepting ONE entry by its identity leaves the other unaccepted.
+    let accepted = resolve_acceptances(&blocking, &["uml:Comment c1 [lossy]".to_string()])
+        .expect("an entry identity is unambiguous");
+    assert_eq!(accepted, vec!["uml:Comment c1 [lossy]".to_string()]);
 }

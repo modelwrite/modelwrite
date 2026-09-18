@@ -2,9 +2,11 @@
 
 This file is the contract between the modelwrite service and any agent — ours or a
 third party's — that drives it. It is enforced, not asserted: `server/tests/agent_contract.rs`
-reads `docs/agents/mcp-tools.json` at runtime and drives the real router for every endpoint
-named there, so a route that moves or disappears fails the test before an agent calls it in
-production. The machine-readable form of everything below is `docs/agents/mcp-tools.json`.
+reads `docs/agents/mcp-tools.json` at runtime, drives the real router for every HTTP endpoint
+named there, and drives the MCP server's own `tools/list` handler for the tool names and their
+required arguments. A route or tool that moves, disappears or changes fails the test before an
+agent calls it in production. The machine-readable form of everything below is
+`docs/agents/mcp-tools.json`.
 
 An agent meets the modelwrite service through TWO surfaces, and it matters which is which:
 
@@ -21,13 +23,16 @@ An agent meets the modelwrite service through TWO surfaces, and it matters which
 There is no "agent mode" that skips a check. An agent authenticates with an **agent token**,
 which names the agent and the human or service that authorised it, and grants it roles and a
 project scope exactly like any other caller. Those roles bound what the agent may do; they are
-its only authority. Every action an agent takes is recorded in the audit log with the agent's
-identity and the mechanism `agent`, so a reader a year later can tell who decided.
+its only authority.
 
-No model change is committed by an agent alone. An agent produces proposals (commits on a draft
-branch, gate runs, import proposals); a human accepts them; the acceptance is recorded. The
-gate is the only authority on whether a change is correct — no tool parameter, log line or
-model output can mark a run as passed.
+An agent may **read** and **propose**. It may **not write**: an agent token cannot hold a write
+role (`author`) or the `admin` role, and a deployment that configures one is refused at startup
+with a message saying that an agent proposes and a human commits. There is **no automated
+acceptance path yet** — nothing outside `engine/agent` consumes an agent's proposals — so an
+agent cannot cause a model change at all today. A **human** performs the change through the
+ordinary routes above. There is no review-and-accept workflow to call; the gate is the only
+authority on whether a change is correct — no tool parameter, log line or model output can
+mark a run as passed.
 
 ## Authentication
 
@@ -42,9 +47,10 @@ mode only — never a token, key or path):
 | `agent` | `Authorization: Bearer <MW_AUTH_AGENT_TOKEN>` | the agent's subject plus the configured roles and projects |
 
 The agent mechanism is configured with `MW_AUTH_AGENT_TOKEN`, `MW_AUTH_AGENT_SUBJECT`,
-`MW_AUTH_AGENT_AUTHORIZER`, `MW_AUTH_AGENT_ROLES` and `MW_AUTH_AGENT_PROJECTS`. The
-authorizer is recorded on every audit entry the agent produces; a human's entries carry an
-empty authorizer.
+`MW_AUTH_AGENT_AUTHORIZER`, `MW_AUTH_AGENT_ROLES` and `MW_AUTH_AGENT_PROJECTS`.
+`MW_AUTH_AGENT_ROLES` may hold only `viewer` and/or `reviewer`: a write role (`author`) or the
+`admin` role is refused at startup, because an agent proposes and a human commits. The
+authorizer names the human or service that authorised the agent.
 
 Every route except `/health` and `/version` requires a bearer token when authentication is
 configured, and refuses a missing or wrong token with `401`.
@@ -155,13 +161,14 @@ returns the import's loss report and fidelity measurement whether or not it was 
 
 The MCP server (`mw-mcp`) exposes four tools that operate on documents supplied in the
 request and never touch a repository. Their names and input schemas are in
-`docs/agents/mcp-tools.json` and are additive.
+`docs/agents/mcp-tools.json` and are additive. `gate.run` also accepts an optional
+`strictCoverage` boolean, named in the manifest rather than below.
 
-| Tool | Arguments | What it returns |
-|------|-----------|-----------------|
+| Tool | Required arguments | What it returns |
+|------|--------------------|-----------------|
 | `okf.validate` | `okf` | The validation report |
 | `graph.stats` | `okf` | Node, edge, isolated-node and component counts |
-| `gate.run` | `reference`, `candidate`, `strictCoverage` | The round-trip fidelity gate's evidence record |
+| `gate.run` | `reference`, `candidate` | The round-trip fidelity gate's evidence record |
 | `okf.diff` | `reference`, `candidate` | The semantic diff: elements, edges and attributes |
 
 ## Rules that bind the agent
@@ -170,16 +177,21 @@ request and never touch a repository. Their names and input schemas are in
    can mark a run as passed.
 2. Every repository change is an HTTP call on the surface above, authenticated and
    permission-checked like a human's — never a direct edit and never a privileged path.
-3. Every iteration ends in a gate run, and the output is a draft commit for human review.
-4. Attribution is not optional: every action is audited with the agent's identity and the
-   mechanism, and the record says it was an agent and who authorised it.
+3. The agent's output is a proposal for a human to read. The agent loop is NOT wired today:
+   nothing outside `engine/agent` consumes `propose_loss_resolutions`, so a proposal never
+   reaches the server on its own; a human acts on it through the ordinary routes.
+4. Attribution is not optional: the agent token carries the agent's identity and the
+   authorizer, so any action it takes in future is attributable to the agent and who authorised
+   it. An agent cannot write today, so no agent write is recorded yet.
 5. Ambiguity is a question, not an invention: the agent asks rather than guessing.
 
 ## Enforcement
 
 `server/tests/agent_contract.rs` reads `docs/agents/mcp-tools.json` and asserts, against the
-real router, that every endpoint named there resolves on the method named, that every
-permissioned endpoint refuses a caller with no role, and that the MCP tools named are exactly
-the tools the MCP server exposes. It also proves the agent mechanism: an agent token
-authenticates a named agent, and the audit log records that agent's subject, the `agent`
-mechanism and the authorizer.
+real router, that every HTTP endpoint named there resolves on the method named, that every
+permissioned endpoint refuses a caller with no role, and — by driving the MCP server's own
+`tools/list` handler — that the manifest names exactly the tools the MCP server exposes with
+the same required arguments. The MCP tool list is ENFORCED, and the HTTP surface is ENFORCED.
+It also proves the agent mechanism: an agent token authenticates a named agent that may read,
+and `server/tests/agent_audit.rs` proves an agent cannot commit, merge, reset or import, and
+that the import acceptance key names exactly the entry a human chose.

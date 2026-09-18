@@ -196,13 +196,16 @@ impl AuthConfig {
                 let projects_vec = env_csv("MW_AUTH_AGENT_PROJECTS", &["*"]);
                 let roles: Vec<&str> = roles_vec.iter().map(String::as_str).collect();
                 let projects: Vec<&str> = projects_vec.iter().map(String::as_str).collect();
-                return Ok(AuthConfig::agent_token(
+                // An agent proposes and a human commits: an agent token may hold only the
+                // read/review roles, so a write or admin role is refused here at startup
+                // rather than discovered as a surprising write later.
+                return AuthConfig::agent_token(
                     token.trim(),
                     &subject,
                     &authorizer,
                     &roles,
                     &projects,
-                ));
+                );
             }
         }
         if let Ok(path) = std::env::var("MW_AUTH_JWKS") {
@@ -224,21 +227,37 @@ impl AuthConfig {
     /// Build the agent-token configuration, hashing the token ONCE for the same reason as
     /// the static token. `subject` is the agent's name, `authorizer` is the human or
     /// service it acts on behalf of, and `roles` and `projects` bound exactly what the
-    /// agent may do. An agent is a client: these roles are its only authority.
+    /// agent may do. An agent proposes and a human commits, so an agent token may hold only
+    /// the read roles (`viewer`, `reviewer`): a role that grants write (`author`) or admin
+    /// (`admin`) is refused here, at startup, rather than letting an operator configure an
+    /// agent that could commit a model change on its own.
     pub fn agent_token(
         token: &str,
         subject: &str,
         authorizer: &str,
         roles: &[&str],
         projects: &[&str],
-    ) -> AuthConfig {
-        AuthConfig::Agent {
+    ) -> anyhow::Result<AuthConfig> {
+        let forbidden: Vec<&str> = roles
+            .iter()
+            .copied()
+            .filter(|r| *r == "author" || *r == "admin")
+            .collect();
+        if !forbidden.is_empty() {
+            anyhow::bail!(
+                "an agent token may not hold the write or admin role(s) {}: an agent \
+                 proposes and a human commits; grant an agent only viewer and/or reviewer \
+                 roles",
+                forbidden.join(", ")
+            );
+        }
+        Ok(AuthConfig::Agent {
             token_hash: hash_token(token),
             subject: subject.to_string(),
             authorizer: authorizer.to_string(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
             projects: projects.iter().map(|p| p.to_string()).collect(),
-        }
+        })
     }
 
     /// The JWT configuration with the default claim names: roles in `roles`, projects in
@@ -848,18 +867,23 @@ mod tests {
             "agent-secret",
             "loss-report-resolver",
             "alex",
-            &["author"],
+            &["reviewer"],
             &["coffee"],
-        );
+        )
+        .unwrap();
         assert_eq!(config.mechanism(), "agent");
         assert_eq!(config.authorizer(), Some("alex"));
 
         let identity = parse_identity_from_agent("agent-secret", &config)
             .expect("the correct agent token is accepted");
         assert_eq!(identity.subject, "loss-report-resolver");
-        assert!(identity.has_role("author"));
+        assert!(identity.has_role("reviewer"));
         assert!(identity.may_reach("coffee"));
         assert!(!identity.may_reach("tea"));
+        assert!(
+            !identity.may(Permission::Write),
+            "an agent may hold only read/review roles"
+        );
 
         assert!(parse_identity_from_agent("wrong", &config).is_none());
         // A wrong-mechanism configuration has no agent token to match.
@@ -867,6 +891,29 @@ mod tests {
         assert!(
             parse_identity_from_agent("agent-secret", &AuthConfig::static_token("other")).is_none()
         );
+    }
+
+    #[test]
+    fn an_agent_token_refuses_write_or_admin_roles() {
+        for role in ["author", "admin"] {
+            let err = AuthConfig::agent_token("tok", "agent", "alex", &[role], &["*"])
+                .expect_err("an agent token must not hold a write or admin role");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("proposes") && msg.contains("commits"),
+                "the refusal must explain that an agent proposes and a human commits: {}",
+                msg
+            );
+        }
+
+        // The read and review roles are the only ones an agent may hold.
+        for role in ["viewer", "reviewer"] {
+            assert!(
+                AuthConfig::agent_token("tok", "agent", "alex", &[role], &["*"]).is_ok(),
+                "an agent may hold the {} role",
+                role
+            );
+        }
     }
 
     #[test]
@@ -881,7 +928,7 @@ mod tests {
 
     #[test]
     fn agent_debug_redacts_the_token() {
-        let config = AuthConfig::agent_token("secret", "agent", "alex", &[], &[]);
+        let config = AuthConfig::agent_token("secret", "agent", "alex", &[], &[]).unwrap();
         let debug = format!("{:?}", config);
         assert!(debug.contains("AuthConfig::Agent"));
         assert!(debug.contains("agent"));

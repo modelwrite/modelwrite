@@ -53,6 +53,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-native-certs = { version = "0.8", optional = true }
 
 [dev-dependencies]
+mw-mcp = { path = "../engine/mcp" }
 mw-test-support = { path = "../engine/test-support" }
 base64 = "0.22"
 tower.workspace = true

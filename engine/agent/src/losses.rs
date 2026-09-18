@@ -13,12 +13,14 @@
 //!    own OKF->XMI->OKF round trip; the native XMI->OKF read - the actual
 //!    migration - is not independently measured. The report is the binding's
 //!    self-account, so this resolver never presents its contents as verified.
-//! 2. Loss entries are not uniquely identified by subject alone. A single XMI
-//!    comment can produce a Lossy entry for its dropped id and an Unmappable
-//!    entry for its dropped body. Keying on the subject string would collapse
-//!    them into one decision, and an acceptance flowing through the same key
-//!    would accept both when the human meant one. Every key here is the
-//!    (subject, verdict) pair, encoded as the entry identity.
+//! 2. Loss entries are keyed by their (subject, verdict) pair, encoded as the
+//!    entry identity, rather than by the subject string alone. The binding in
+//!    use today already names distinct subjects for the two ways one comment
+//!    can be lost (its dropped id and its dropped body), so this is DEFENSIVE:
+//!    if a binding ever emitted two entries that shared a subject, keying on the
+//!    subject would collapse them into one decision and an acceptance flowing
+//!    through the same key would accept both when the human meant one. The
+//!    entry identity keeps them two decisions by construction.
 
 use std::collections::HashMap;
 
@@ -54,11 +56,13 @@ fn verdict_word(verdict: MappingVerdict) -> &'static str {
 
 /// The identity a proposal uses to name one loss entry unambiguously.
 ///
-/// Two different losses can share a [`Mapping::subject`]: a single XMI comment
-/// drops its id as a Lossy entry and its body as an Unmappable entry. Keying a
-/// resolution on the subject alone would collapse the two, and an acceptance
-/// flowing through the same key would accept both when the human meant one. The
-/// identity is the (subject, verdict) pair, so the two stay two decisions.
+/// The identity is the (subject, verdict) pair, so two entries that happen to
+/// share a [`Mapping::subject`] stay two decisions. The binding in use today
+/// already names the two ways one comment can be lost with distinct subjects,
+/// so this is DEFENSIVE: if a binding ever emitted two entries with the same
+/// subject, keying a resolution on the subject alone would collapse them, and an
+/// acceptance flowing through the same key would accept both when the human
+/// meant one.
 pub fn entry_identity(mapping: &Mapping) -> String {
     format!("{} [{}]", mapping.subject, verdict_word(mapping.verdict))
 }
@@ -108,9 +112,8 @@ pub fn propose_loss_resolutions(
     let raw = reasoner.propose(&task)?;
 
     // Match the reasoner's proposals back to entries by (subject, verdict),
-    // encoded as the entry identity. Keying on the subject alone would collapse
-    // a comment's Lossy id-drop with its Unmappable body-drop; the identity
-    // carries the verdict, so the two stay two decisions. (The key is the
+    // encoded as the entry identity. The identity carries the verdict, so even
+    // if two entries shared a subject they stay two decisions. (The key is the
     // encoded string rather than a (String, MappingVerdict) tuple because
     // MappingVerdict is not Hash.)
     let mut by_identity: HashMap<String, Proposal> = HashMap::new();

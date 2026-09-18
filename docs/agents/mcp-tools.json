@@ -116,8 +116,8 @@
   },
   "agentContract": {
     "gateIsTheOnlyAuthority": true,
-    "agentIsAClient": "Every agent action is an HTTP call from repositoryHttpSurface, authenticated and refused exactly as a human's. There is no privileged agent path.",
+    "agentIsAClient": "An agent may read and propose; it may not write. An agent token cannot hold a write or admin role, and every write route refuses an agent with 403. There is no privileged agent path and no automated acceptance path yet; a human performs changes through the ordinary routes.",
     "documentLevel": "The MCP tools above operate on documents supplied in the request and never touch a repository. Repository operations are the HTTP surface.",
-    "audit": "Every action is recorded in the audit log with the actor (the verified subject), the mechanism (open, static, jwt or agent) and, for agents, the authorizer the agent acted for."
+    "audit": "Every write is recorded in the audit log with the actor (the verified subject), the mechanism (open, static, jwt or agent) and, for agents, the authorizer the agent acted for. An agent cannot write today, so no agent entry is recorded yet."
   }
 }
