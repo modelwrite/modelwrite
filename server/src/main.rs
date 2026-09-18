@@ -26,7 +26,8 @@ async fn main() -> anyhow::Result<()> {
         eprintln!(
             "WARNING: mw-server is running WITHOUT authentication (open mode); \
              every request is accepted as an anonymous admin. Set MW_AUTH_TOKEN to \
-             require a bearer token."
+             require a shared bearer token, or MW_AUTH_JWKS to the path of a JWKS \
+             file to require signed JWTs."
         );
     }
 

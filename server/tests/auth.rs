@@ -612,6 +612,7 @@ async fn jwt_mode_accepts_a_valid_token() {
             "projects": ["coffee"],
             "iss": "https://idp.example.com",
             "aud": "modelwrite",
+            "nbf": now() - 3600,
             "exp": now() + 3600,
         }),
         "test-key",
@@ -630,7 +631,7 @@ async fn jwt_mode_accepts_a_valid_token() {
 async fn jwt_mode_rejects_an_expired_token_without_echoing_it() {
     let router = router(jwt_config(None, None));
     let token = sign(
-        json!({ "sub": "alex", "roles": ["author"], "exp": now() - 120 }),
+        json!({ "sub": "alex", "roles": ["author"], "nbf": now() - 3600, "exp": now() - 120 }),
         "test-key",
         PRIVATE_KEY,
     );
@@ -650,7 +651,7 @@ async fn jwt_mode_rejects_a_token_signed_by_the_wrong_key() {
     // Signed with the OTHER private key but claiming the configured kid, so the right key
     // is selected and the signature check fails.
     let token = sign(
-        json!({ "sub": "alex", "roles": ["author"], "exp": now() + 3600 }),
+        json!({ "sub": "alex", "roles": ["author"], "nbf": now() - 3600, "exp": now() + 3600 }),
         "test-key",
         OTHER_PRIVATE_KEY,
     );
@@ -666,6 +667,7 @@ async fn jwt_mode_rejects_a_wrong_issuer() {
             "sub": "alex",
             "roles": ["author"],
             "iss": "https://evil.example.com",
+            "nbf": now() - 3600,
             "exp": now() + 3600,
         }),
         "test-key",
@@ -679,7 +681,7 @@ async fn jwt_mode_rejects_a_wrong_issuer() {
 async fn jwt_mode_rejects_a_missing_issuer() {
     let router = router(jwt_config(Some("https://idp.example.com"), None));
     let token = sign(
-        json!({ "sub": "alex", "roles": ["author"], "exp": now() + 3600 }),
+        json!({ "sub": "alex", "roles": ["author"], "nbf": now() - 3600, "exp": now() + 3600 }),
         "test-key",
         PRIVATE_KEY,
     );
@@ -695,6 +697,7 @@ async fn jwt_mode_rejects_a_wrong_audience() {
             "sub": "alex",
             "roles": ["author"],
             "aud": "some-other-service",
+            "nbf": now() - 3600,
             "exp": now() + 3600,
         }),
         "test-key",
@@ -724,7 +727,44 @@ async fn jwt_mode_rejects_a_malformed_expiry_type() {
     // treated as absent: otherwise an attacker could shed the expiry entirely.
     let router = router(jwt_config(None, None));
     let token = sign(
-        json!({ "sub": "alex", "roles": ["author"], "exp": "not-a-number" }),
+        json!({ "sub": "alex", "roles": ["author"], "nbf": now() - 3600, "exp": "not-a-number" }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_token_whose_nbf_is_in_the_future() {
+    // A token whose not-before is still ahead must be refused, not accepted early.
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["author"],
+            "exp": now() + 7200,
+            "nbf": now() + 3600,
+        }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_malformed_not_before_type() {
+    // A malformed nbf (a string rather than a number) must be refused, not silently
+    // treated as absent: otherwise a not-before could be shed entirely.
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["author"],
+            "exp": now() + 3600,
+            "nbf": "not-a-number",
+        }),
         "test-key",
         PRIVATE_KEY,
     );
@@ -738,7 +778,7 @@ async fn jwt_mode_tolerates_clock_skew_within_the_window_but_not_beyond() {
     // out by an identity provider whose clock runs slightly ahead.
     let router = router(jwt_config(None, None));
     let within = sign(
-        json!({ "sub": "alex", "roles": ["viewer"], "exp": now() - 30 }),
+        json!({ "sub": "alex", "roles": ["viewer"], "nbf": now() - 3600, "exp": now() - 30 }),
         "test-key",
         PRIVATE_KEY,
     );
@@ -751,7 +791,7 @@ async fn jwt_mode_tolerates_clock_skew_within_the_window_but_not_beyond() {
 
     // 120 seconds of past expiry is beyond the window and must be refused.
     let beyond = sign(
-        json!({ "sub": "alex", "roles": ["viewer"], "exp": now() - 120 }),
+        json!({ "sub": "alex", "roles": ["viewer"], "nbf": now() - 3600, "exp": now() - 120 }),
         "test-key",
         PRIVATE_KEY,
     );
@@ -773,7 +813,7 @@ async fn jwt_mode_without_a_roles_claim_cannot_write() {
     // A valid token with no roles claim: it verifies, but holds no role, so a write is
     // refused with 403 rather than defaulting to a permissive identity.
     let token = sign(
-        json!({ "sub": "alex", "exp": now() + 3600 }),
+        json!({ "sub": "alex", "nbf": now() - 3600, "exp": now() + 3600 }),
         "test-key",
         PRIVATE_KEY,
     );

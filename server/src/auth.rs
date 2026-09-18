@@ -6,8 +6,8 @@
 //! a static bearer token is configured, a request must present it (SHA-256, compared in
 //! constant time) or be refused with 401. When a JWKS is configured, a request must
 //! present a signed JWT whose RS256/RS384/RS512 signature verifies against one of the
-//! configured keys and whose expiry, issuer and audience are valid; roles and projects
-//! arrive from configurable claims.
+//! configured keys and whose expiry, not-before, issuer and audience are valid; roles and
+//! projects arrive from configurable claims.
 
 use std::collections::HashMap;
 
@@ -148,10 +148,9 @@ impl std::fmt::Debug for AuthConfig {
 
 impl AuthConfig {
     /// Read the configuration from the environment. A static token (`MW_AUTH_TOKEN`) is
-    /// the simplest option; signed JWTs arrive from a JWKS at a file path
-    /// (`MW_AUTH_JWKS`, a mounted secret - what an air-gapped install has) or, second, a
-    /// URL fetched once at startup (`MW_AUTH_JWKS_URL`). With neither the service runs
-    /// OPEN. A malformed JWKS is a startup error, not a silent fall back to open mode.
+    /// the simplest option; signed JWTs arrive from a JWKS at the file path `MW_AUTH_JWKS`
+    /// (a mounted secret, which is what an air-gapped install has). With neither the service
+    /// runs OPEN. A malformed JWKS is a startup error, not a silent fall back to open mode.
     pub fn from_env() -> anyhow::Result<AuthConfig> {
         if let Ok(token) = std::env::var("MW_AUTH_TOKEN") {
             if !token.trim().is_empty() {
@@ -161,11 +160,6 @@ impl AuthConfig {
         if let Ok(path) = std::env::var("MW_AUTH_JWKS") {
             if !path.trim().is_empty() {
                 return AuthConfig::from_jwks_file(path.trim());
-            }
-        }
-        if let Ok(url) = std::env::var("MW_AUTH_JWKS_URL") {
-            if !url.trim().is_empty() {
-                return AuthConfig::from_jwks_url(url.trim());
             }
         }
         Ok(AuthConfig::Open)
@@ -212,27 +206,11 @@ impl AuthConfig {
         }
     }
 
-    /// Build a JWT configuration from a JWKS FILE (the primary source: a mounted secret,
-    /// which is what an air-gapped install has). Issuer, audience and claim names come
-    /// from the environment.
+    /// Build a JWT configuration from a JWKS FILE (a mounted secret, which is what an
+    /// air-gapped install has). Issuer, audience and claim names come from the environment.
     pub fn from_jwks_file(path: &str) -> anyhow::Result<AuthConfig> {
         let jwks = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("cannot read the JWKS at {}: {}", path, e))?;
-        let keys = parse_jwks(&jwks)?;
-        Ok(AuthConfig::jwt_with_claims(
-            keys,
-            jwt_env_issuer(),
-            jwt_env_audience(),
-            jwt_env_claim("MW_AUTH_ROLES_CLAIM", "roles"),
-            jwt_env_claim("MW_AUTH_PROJECTS_CLAIM", "projects"),
-        ))
-    }
-
-    /// Build a JWT configuration from a JWKS fetched once at startup from a URL. This is
-    /// the second choice behind the file path: a service that cannot start without
-    /// outbound network access cannot run in an air-gapped install.
-    pub fn from_jwks_url(url: &str) -> anyhow::Result<AuthConfig> {
-        let jwks = fetch_jwks_url(url)?;
         let keys = parse_jwks(&jwks)?;
         Ok(AuthConfig::jwt_with_claims(
             keys,
@@ -319,24 +297,6 @@ pub fn parse_jwks(jwks: &str) -> anyhow::Result<HashMap<String, DecodingKey>> {
     Ok(keys)
 }
 
-/// Fetch a JWKS from a URL once, at startup, by shelling out to `curl`. This is the only
-/// way to reach an HTTPS URL without adding a second dependency (an HTTP/TLS stack), and it
-/// is deliberately a startup-time operation for the URL path, which only exists for
-/// environments that already have outbound network access.
-fn fetch_jwks_url(url: &str) -> anyhow::Result<String> {
-    let output = std::process::Command::new("curl")
-        .args(["--fail", "--silent", "--show-error", "--location", url])
-        .output()
-        .map_err(|e| anyhow::anyhow!("cannot run curl to fetch the JWKS: {}", e))?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "curl failed to fetch the JWKS: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    String::from_utf8(output.stdout).map_err(|_| anyhow::anyhow!("the fetched JWKS is not UTF-8"))
-}
-
 /// The expected issuer from `MW_AUTH_ISSUER`, or `None` when it is unset or empty.
 fn jwt_env_issuer() -> Option<String> {
     std::env::var("MW_AUTH_ISSUER")
@@ -375,8 +335,8 @@ fn string_list_claim(claims: &serde_json::Value, key: &str) -> Vec<String> {
 }
 
 /// Resolve a presented token against the JWT configuration: `Some(identity)` when the
-/// signature, expiry, issuer and audience all verify, `None` otherwise. A non-JWT
-/// configuration has no keys to verify against, so it is `None`.
+/// signature, expiry, not-before, issuer and audience all verify, `None` otherwise. A
+/// non-JWT configuration has no keys to verify against, so it is `None`.
 pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Identity> {
     let AuthConfig::Jwt {
         keys,
@@ -410,6 +370,11 @@ pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Ident
     // rejects a malformed or absent expiry, so a token cannot shed its expiry by giving it
     // the wrong JSON type.
     validation.leeway = 60;
+    // Enforce `nbf` exactly like `exp`: a future not-before is refused, and because `nbf`
+    // is required, a token whose `nbf` has the wrong JSON type is refused rather than
+    // treated as absent (the same type-confusion that motivated requiring `exp`).
+    validation.validate_nbf = true;
+    validation.required_spec_claims.insert("nbf".to_string());
 
     if let Some(iss) = issuer {
         validation.set_issuer(&[iss.as_str()]);
@@ -666,13 +631,27 @@ mod tests {
 
     #[test]
     fn jwt_debug_redacts_the_keys() {
-        let config = AuthConfig::jwt(HashMap::new(), Some("iss".into()), Some("aud".into()));
+        // Build the config from a REAL parsed JWKS: an empty key map would pass this
+        // assertion even if the Debug impl printed every key, because there would be no
+        // key material to print.
+        let jwks = serde_json::json!({
+            "keys": [ { "kty": "RSA", "kid": "k1", "n": "AQID", "e": "AQAB" } ]
+        });
+        let keys = parse_jwks(&jwks.to_string()).expect("the JWKS parses");
+        let config = AuthConfig::jwt(keys, Some("iss".into()), Some("aud".into()));
         let debug = format!("{:?}", config);
         assert!(debug.contains("AuthConfig::Jwt"));
-        assert!(debug.contains("keys"));
+        assert!(
+            debug.contains("keys: 1"),
+            "the key COUNT is reported, not the keys themselves"
+        );
+        assert!(
+            !debug.contains("k1"),
+            "a JWKS kid must not appear in the debug output"
+        );
         assert!(
             !debug.contains("AQID"),
-            "a JWKS key must not appear in the debug output"
+            "a JWKS modulus must not appear in the debug output"
         );
     }
 }
