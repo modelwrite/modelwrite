@@ -192,6 +192,12 @@ fn branch_list_page(
                 }
             }
         }
+        @if identity.may(Permission::Write) || identity.may(Permission::Review) {
+            h2 { "Gate" }
+            p {
+                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/gate" } { "View gate runs" }
+            }
+        }
         @if identity.may(Permission::Write) {
             h2 { "Compare" }
             form method="get" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare" } class="compare-form" {

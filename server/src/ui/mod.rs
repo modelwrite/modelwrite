@@ -14,6 +14,7 @@
 //! in [maud::PreEscaped], which is used solely for the developer-written stylesheet.
 
 pub mod edit;
+pub mod gate;
 pub mod layout;
 pub mod model;
 pub mod pages;

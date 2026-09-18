@@ -14,7 +14,7 @@ use tower::ServiceExt;
 
 use okf::types::OkfRoot;
 use server::auth::{AuthConfig, Identity};
-use server::store::{sqlite::SqliteStore, Store};
+use server::store::{sqlite::SqliteStore, GateRun, Store};
 use server::AppState;
 
 fn state_with_auth(dir: &std::path::Path, auth: AuthConfig) -> AppState {
@@ -188,6 +188,8 @@ async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
         "/ui/projects/coffee",
         "/ui/projects/coffee/model",
         "/ui/projects/coffee/compare?from=a&to=b",
+        "/ui/projects/coffee/gate",
+        "/ui/projects/coffee/gate/aaaa/bbbb",
     ] {
         let response = router.clone().oneshot(get(uri)).await.unwrap();
         assert_eq!(
@@ -1365,5 +1367,302 @@ async fn a_conflict_with_no_base_side_says_absent_rather_than_showing_nothing() 
     assert!(
         html.contains("(absent)"),
         "a missing base side must be named, not left blank"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 5: the gate, rendered where a reviewer looks.
+
+/// The reviewer role: reads gate runs and their evidence, so it may open the detail.
+fn reviewer() -> Identity {
+    Identity {
+        subject: "reviewer".to_string(),
+        roles: vec!["reviewer".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+#[tokio::test]
+async fn the_gate_pages_render_the_self_pass_and_the_corrupted_pair() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let broken: serde_json::Value = serde_json::from_str(&test_support::load_okf_broken()).unwrap();
+
+    let imported = commit_okf(&router, "main", "import the exported model", expected).await;
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "corrupted", "from": imported }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+    let corrupted = commit_okf(&router, "corrupted", "drop a requirement", broken).await;
+
+    // Two recorded runs, in order: the self-pass first, then the corrupted pair.
+    for (reference, candidate) in [
+        (imported.clone(), imported.clone()),
+        (imported.clone(), corrupted.clone()),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(post(
+                "/projects/coffee/gate",
+                serde_json::json!({ "reference": reference, "candidate": candidate }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // The list: both runs, newest first, each with its verdict, hashes and evidence file name.
+    let list = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_html = body_text(list).await;
+    assert_eq!(
+        count(&list_html, "class=\"gate-run\""),
+        2,
+        "two runs must be listed, got:\n{}",
+        list_html
+    );
+    assert!(
+        list_html.contains(">failed<"),
+        "the failed verdict must render in the list"
+    );
+    assert!(
+        list_html.contains(">passed<"),
+        "the passed verdict must render in the list"
+    );
+    let failed_at = list_html.find(">failed<").unwrap();
+    let passed_at = list_html.find(">passed<").unwrap();
+    assert!(
+        failed_at < passed_at,
+        "the most recent run (the corrupted pair) must be listed first"
+    );
+    assert!(
+        list_html.contains(&format!("server-{}-{}.json", imported, corrupted)),
+        "the evidence file name must carry both full hashes"
+    );
+
+    // The self-pass detail renders green with its coverage counts.
+    let self_pass = router
+        .clone()
+        .oneshot(get(&format!(
+            "/ui/projects/coffee/gate/{}/{}",
+            imported, imported
+        )))
+        .await
+        .unwrap();
+    assert_eq!(self_pass.status(), StatusCode::OK);
+    let self_html = body_text(self_pass).await;
+    assert!(
+        self_html.contains(">passed<"),
+        "the self-pass must render passed, got:\n{}",
+        self_html
+    );
+    assert!(
+        self_html.contains("25 requirements: 15 covered, 10 uncovered"),
+        "the coverage counts must come from the evidence, got:\n{}",
+        self_html
+    );
+    assert!(
+        self_html.contains("20 satisfy, 3 refine, 1 verify, 0 allocate"),
+        "the per-kind coverage counts must render"
+    );
+    assert!(
+        self_html.contains("1 connected component"),
+        "the integration section must render"
+    );
+
+    // The corrupted pair renders red, naming the missing element and the isolated node.
+    let corrupted_detail = router
+        .clone()
+        .oneshot(get(&format!(
+            "/ui/projects/coffee/gate/{}/{}",
+            imported, corrupted
+        )))
+        .await
+        .unwrap();
+    assert_eq!(corrupted_detail.status(), StatusCode::OK);
+    let corrupted_html = body_text(corrupted_detail).await;
+    assert!(
+        corrupted_html.contains(">failed<"),
+        "the corrupted pair must render failed, got:\n{}",
+        corrupted_html
+    );
+    assert!(
+        corrupted_html.contains("requirements:_2026x_1_12a70364_1789522470210_613186_5619"),
+        "the missing element must be named exactly as the gate reports it, got:\n{}",
+        corrupted_html
+    );
+    assert!(
+        corrupted_html.contains("_2026x_1_12a70364_1789602694801_483599_6108"),
+        "the isolated node must be named exactly as the gate reports it"
+    );
+    // The evidence record itself renders, not just the summary above it.
+    assert!(
+        corrupted_html.contains("gateVersion"),
+        "the evidence record must render in full"
+    );
+}
+
+#[tokio::test]
+async fn the_gate_pages_enforce_the_api_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store
+        .record_gate_run(
+            &GateRun {
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                reference_hash: "aaaa".to_string(),
+                candidate_hash: "bbbb".to_string(),
+                passed: true,
+                evidence: "{}".to_string(),
+                created_at: "1".to_string(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let app = |identity: Identity| {
+        server::app(AppState {
+            store: store.clone(),
+            evidence_dir: dir.path().to_path_buf(),
+            auth: AuthConfig::fixed(identity),
+        })
+    };
+
+    // A viewer holds neither Write nor Review: the list is a refusal, never an empty page.
+    let viewer_router = app(viewer());
+    let list = viewer_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::FORBIDDEN);
+    let html = body_text(list).await;
+    assert!(
+        html.contains("write or review permission required"),
+        "the refusal must name the permission, got:\n{}",
+        html
+    );
+
+    // An author may RUN a gate (Write) so it may list, but without Review it may not open
+    // the detail - the evidence record is the reviewer's artifact.
+    let author_router = app(author());
+    let list = author_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let detail = author_router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::FORBIDDEN);
+    let html = body_text(detail).await;
+    assert!(
+        html.contains("review permission required"),
+        "the detail refusal must name the permission, got:\n{}",
+        html
+    );
+
+    // A reviewer sees both.
+    let reviewer_router = app(reviewer());
+    let list = reviewer_router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate"))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let detail = reviewer_router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_unknown_gate_run_or_project_renders_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let unknown_run = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/gate/deadbeef/cafebabe"))
+        .await
+        .unwrap();
+    assert_eq!(unknown_run.status(), StatusCode::NOT_FOUND);
+    let html = body_text(unknown_run).await;
+    assert!(html.contains("Not Found"));
+
+    let unknown_project = router.oneshot(get("/ui/projects/nope/gate")).await.unwrap();
+    assert_eq!(unknown_project.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn hostile_content_in_the_evidence_record_is_escaped() {
+    // The evidence record carries strings the gate read out of an untrusted model - a
+    // requirement id, an element key. Seeding a hostile one directly through the store
+    // proves the page escapes it rather than trusting it.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    store
+        .record_gate_run(
+            &GateRun {
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                reference_hash: "aaaa".to_string(),
+                candidate_hash: "bbbb".to_string(),
+                passed: false,
+                evidence: r#"{"roundtrip":{"equal":false,"missingElements":["requirements:<script>alert(1)</script>"]}}"#.to_string(),
+                created_at: "1".to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("&lt;script&gt;"),
+        "the hostile evidence content must appear escaped, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("<script"),
+        "a raw script tag must never reach the gate page"
     );
 }

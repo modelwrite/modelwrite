@@ -59,6 +59,11 @@ pub fn app(state: AppState) -> Router {
             "/ui/projects/:project/edit/:element",
             get(ui::edit::edit_form).post(ui::edit::submit_edit),
         )
+        .route("/ui/projects/:project/gate", get(ui::gate::gate_list))
+        .route(
+            "/ui/projects/:project/gate/:reference/:candidate",
+            get(ui::gate::gate_detail),
+        )
         .route(
             "/ui/projects/:project/compare",
             get(ui::review::compare_page),
