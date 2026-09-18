@@ -149,7 +149,9 @@ fn model_markup(
             " · by " (commit.author)
         }
         p class="meta" {
-            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "View diagram" }
+            // The COMMIT, not the branch: viewing a historical model and then opening the
+            // branch's current diagram would show a different model than the one being read.
+            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram?commit=" (crate::ui::urlencode(commit.hash.as_str())) } { "View diagram" }
         }
         (structure_section(root, project, &commit.branch))
         (requirements_section(root, &ctx))

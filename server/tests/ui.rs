@@ -604,9 +604,21 @@ async fn the_compare_page_shows_the_engine_diff_and_gate_verdict() {
         "the failed verdict must render, got:\n{}",
         html
     );
+    // The page must NOT name an evidence file, because a comparison writes one.
+    //
+    // This assertion previously required the evidence PATH here, on the assumption that the
+    // compare page produced a record. It does not: gate::run computes a verdict and writes
+    // nothing, and only the gate endpoint persists a run and its evidence. A page that named
+    // a file it never wrote would tell a reviewer the record lives somewhere it does not -
+    // and this platform exists to avoid exactly that kind of false assurance.
     assert!(
-        html.contains(&format!("server-{}-{}.json", imported, corrupted)),
-        "the evidence path must name the two full hashes, got:\n{}",
+        !html.contains(&format!("server-{}-{}.json", imported, corrupted)),
+        "a comparison must not name an evidence file it never writes, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("not recorded"),
+        "the page must say plainly that a comparison leaves no record, got:\n{}",
         html
     );
 
@@ -968,6 +980,16 @@ async fn editing_a_block_documentation_commits_with_the_identity_author() {
                 ("attr_type_1", "Water Outlet"),
                 ("attr_aggregation_1", "none"),
                 ("attr_default_1", ""),
+                // A SPARSE, absurdly high index. An earlier attempt to bound the attribute
+                // loop took the highest index present and iterated from zero to there, so
+                // this single field would have made the server do a billion iterations of
+                // formatting and lookups before answering. With the bound taken from the
+                // indexes that ACTUALLY EXIST, this costs exactly one iteration. The test
+                // has teeth by construction: under the old code it does not fail, it hangs.
+                ("attr_name_1000000000", "Legacy"),
+                ("attr_type_1000000000", "String"),
+                ("attr_aggregation_1000000000", "none"),
+                ("attr_default_1000000000", ""),
                 ("author", "evil"),
             ],
         ))
@@ -1011,9 +1033,13 @@ async fn editing_a_block_documentation_commits_with_the_identity_author() {
         "Brews coffee on demand.",
         "the documentation must change"
     );
+    // Three, not two: the two real attributes plus the one submitted at the sparse index
+    // 1000000000. The point of that third field is the WORK it must not cause - see the
+    // comment where it is submitted - and this count is what proves it was parsed rather
+    // than skipped.
     assert_eq!(
         doc["structure"][0]["attributes"].as_array().unwrap().len(),
-        2,
+        3,
         "the attributes must round-trip through the form"
     );
 
@@ -1802,9 +1828,13 @@ async fn the_diagram_renders_the_corpus_deterministically_and_completely() {
         .unwrap();
     assert_eq!(model.status(), StatusCode::OK);
     let model_html = body_text(model).await;
+    // The link names the COMMIT being viewed, not the branch. Linked by branch, opening a
+    // historical model and then following the diagram link would show the branch's current
+    // tip - a different model than the one on screen, which is the kind of quiet mismatch a
+    // reader has no way to notice.
     assert!(
-        model_html.contains("/ui/projects/coffee/diagram?branch=main"),
-        "the model page must link to the diagram, got:\n{}",
+        model_html.contains("/ui/projects/coffee/diagram?commit="),
+        "the model page must link to the diagram of the commit it is showing, got:\n{}",
         model_html
     );
 }
@@ -1915,5 +1945,98 @@ async fn a_hostile_label_in_the_diagram_is_escaped() {
         !svg.contains("<script"),
         "a raw script tag must never reach the SVG, got:\n{}",
         svg
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_element_carries_its_references() {
+    // A rename that does not move the graph is silent corruption: the element stays in the
+    // document, vanishes from coverage and traceability, and the author has no way to put it
+    // right from the workbench. The rename must carry the node and every edge endpoint.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let model = serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "structure": [{ "id": "b1", "name": "Block", "kind": "block", "stereotypes": ["Block"], "attributes": [], "documentation": "" }],
+        "graph": { "nodes": [{ "id": "b1", "kind": "block", "name": "Block" }], "edges": [] }
+    });
+    let base = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "base", "okf": model }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(base.status(), StatusCode::CREATED);
+
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "give the block a real name"),
+                ("id", "brewing_unit"),
+                ("name", "Brewing Unit"),
+                ("documentation", ""),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // The editor answers with a PAGE, not JSON, so the new tip is read back through the
+    // JSON API rather than parsed out of the HTML.
+    let branches = router
+        .clone()
+        .oneshot(get("/projects/coffee/branches"))
+        .await
+        .unwrap();
+    let branches = json_body(branches).await;
+    let hash = branches
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "main")
+        .unwrap()["tip"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let doc = router
+        .oneshot(get(&format!("/projects/coffee/commits/{}", hash)))
+        .await
+        .unwrap();
+    let doc = json_body(doc).await;
+    assert_eq!(doc["structure"][0]["id"], "brewing_unit");
+    assert_eq!(
+        doc["graph"]["nodes"][0]["id"], "brewing_unit",
+        "the graph node must follow the rename"
+    );
+
+    // And the validator must see nothing orphaned: the cross-check that used to be the only
+    // defence is now satisfied by construction.
+    let root: OkfRoot = serde_json::from_value(doc).unwrap();
+    let report = okf::validate::validate(&root);
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.contains("no node in the graph")),
+        "a rename must not orphan the element: {:?}",
+        report.warnings
     );
 }

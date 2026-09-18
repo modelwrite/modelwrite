@@ -288,6 +288,15 @@ fn perform_edit(
     if let Some(element) = find_element(&mut candidate, element_id) {
         apply_edit(element, &input);
     }
+    // A RENAME CARRIES ITS REFERENCES. Changing an element's id without updating the graph
+    // leaves the node and every edge endpoint under the old id, so the element stays in the
+    // document, disappears from coverage and traceability, and the workbench offers no way
+    // to put it right - the author can create the inconsistency but not repair it. The
+    // validator now WARNS about an orphaned element rather than refusing the commit, which
+    // is right for models that predate the check and wrong as the only defence here.
+    if input.id != element_id {
+        rename_references(&mut candidate, element_id, &input.id);
+    }
 
     // The document must still be a valid OKF model. The edit changes the fields the
     // validator watches over (an element id), so this is a real gate, not a formality: an
@@ -534,17 +543,23 @@ fn parse_attributes(form: &HashMap<String, String>) -> Vec<Attribute> {
     // The bound is the number of attribute rows the form ACTUALLY contains, not the number
     // it claims to. Trusting a client-supplied count lets a caller make the server iterate
     // a loop of any size it names - a cheap way to burn a worker for a caller who holds
-    // write permission. Counting the keys the form really has costs one pass and removes
-    // the caller's control over the work.
-    let count = form
+    // write permission.
+    //
+    // The FIRST attempt at this took the HIGHEST index present and iterated from zero to
+    // there, which does not fix anything: one submitted field named attr_name_1000000000
+    // still makes the loop a billion iterations of formatting and hash lookups. The bound
+    // has to be the SET of indexes that actually exist, not a number derived from it - so
+    // the indexes are collected and iterated, and a sparse form does work proportional to
+    // the fields it really sent.
+    let mut indexes: Vec<usize> = form
         .keys()
         .filter_map(|key| key.strip_prefix("attr_name_"))
         .filter_map(|index| index.parse::<usize>().ok())
-        .max()
-        .map(|highest| highest + 1)
-        .unwrap_or(0);
+        .collect();
+    indexes.sort_unstable();
+
     let mut attributes = Vec::new();
-    for index in 0..count {
+    for index in indexes {
         let name = form
             .get(&format!("attr_name_{}", index))
             .cloned()
@@ -582,6 +597,27 @@ fn split_stereotypes(text: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(String::from)
         .collect()
+}
+
+/// Move every reference to an element from its old id to its new one: the graph node that
+/// mirrors it, and the source and target of every edge that named it. Requirements carry
+/// their own ids and are not references to elements, so they are untouched.
+fn rename_references(root: &mut OkfRoot, old_id: &str, new_id: &str) {
+    if let Some(graph) = root.graph.as_mut() {
+        for node in graph.nodes.iter_mut() {
+            if node.id == old_id {
+                node.id = new_id.to_string();
+            }
+        }
+        for edge in graph.edges.iter_mut() {
+            if edge.source == old_id {
+                edge.source = new_id.to_string();
+            }
+            if edge.target == old_id {
+                edge.target = new_id.to_string();
+            }
+        }
+    }
 }
 
 fn apply_edit(element: &mut Element, input: &EditInput) {

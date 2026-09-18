@@ -117,15 +117,10 @@ fn render_compare_page(
     let candidate = load_model(state.store.as_ref(), project, &to_hash).map_err(map_store_error)?;
 
     // THE ENGINE'S DIFF and THE ENGINE'S GATE: rendered, never recomputed, so the page can
-    // never disagree with the gate. The evidence path is the same deterministic name the
-    // gate handler writes, so a reviewer knows exactly where the run's record lives.
+    // never disagree with the gate. Note what is NOT here: this page runs the engine and
+    // records nothing. It writes no evidence file and no gate run, so it must not name one.
     let report = okf::diff::diff(&reference, &candidate);
     let outcome = gate::run(&reference, &candidate, false);
-    let evidence_path = state
-        .evidence_dir
-        .join(format!("server-{}-{}.json", from_hash, to_hash))
-        .display()
-        .to_string();
     let isolated = isolated_nodes(&outcome.evidence);
 
     let body = html! {
@@ -163,7 +158,16 @@ fn render_compare_page(
                     @for node in &isolated { li { code { (node.as_str()) } } }
                 }
             }
-            p class="meta" { "Evidence: " code { (evidence_path.as_str()) } }
+            // A COMPARISON IS NOT A GATE RUN. This page computes a verdict by calling the
+            // engine, but it records nothing and writes no evidence file, and only the gate
+            // endpoint does. Printing the path of a file that does not exist would tell a
+            // reviewer the record lives here when it does not - the false assurance this
+            // whole platform is built to avoid.
+            p class="meta" {
+                "This comparison is not recorded. Run the gate for "
+                code { (short_hash(&from_hash)) } " → " code { (short_hash(&to_hash)) }
+                " to persist an evidence record; the run will then appear in the gate list."
+            }
         }
     };
     let title = format!("modelwrite — {} — compare", project);
