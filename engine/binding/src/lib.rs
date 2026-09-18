@@ -6,10 +6,11 @@ pub mod report;
 
 use std::fmt;
 
-use okf::diff::{self, DiffReport};
+use okf::diff;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub use okf::diff::DiffReport;
 pub use okf::types::OkfRoot;
 pub use report::{LossReport, Mapping, MappingVerdict};
 
@@ -114,7 +115,13 @@ pub fn round_trip(binding: &dyn Binding, source: &[u8]) -> Result<FidelityOutcom
     // Export to the source binding, then import back. A binding whose metadata
     // claims export but whose export fails is rejected, never trusted.
     let exported = binding.export(&reference)?;
-    let (round_tripped, loss_report) = binding.import(&exported)?;
+    let (round_tripped, mut loss_report) = binding.import(&exported)?;
+
+    // The report's own `artifact_hash` is the binding's business - a binding hashes what it
+    // was handed. The harness overwrites it with the hash of the ORIGINAL source, because a
+    // consumer correlating a report with the artifact retained in the repository must find
+    // the same value; two different hashes under one field name is a trap.
+    loss_report.artifact_hash = artifact_hash.clone();
 
     // The engine's own diff between the round-tripped document and the original.
     let diff = diff::diff(&reference, &round_tripped);

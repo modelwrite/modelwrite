@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use binding::{
-    artifact_hash, round_trip, Binding, BindingError, BindingInfo, Direction, LossReport, Mapping,
-    MappingVerdict,
+    artifact_hash, round_trip, Binding, BindingError, BindingInfo, Direction, LossReport,
 };
 use okf::types::{Element, Graph, GraphNode, OkfRoot, Summary};
 
@@ -64,17 +63,15 @@ impl Binding for JsonBinding {
         let mut root: OkfRoot =
             serde_json::from_slice(source).map_err(|e| BindingError::Import(e.to_string()))?;
 
-        let mut mappings = Vec::new();
+        // The drop is SILENT on purpose: nothing is added to the loss report. A fixture that
+        // recorded its own drop could only prove that the harness copies a report it was
+        // given - it could not tell a real engine measurement from a fabricated one. A silent
+        // dropper is the only shape that can distinguish them, and it is also the shape real
+        // bindings have when they are WRONG: an exporter that loses an element does not
+        // usually announce it.
+        let mappings = Vec::new();
         if let Some(drop_id) = &self.drop_id {
-            let before = root.structure.len();
             root.structure.retain(|e| &e.id != drop_id);
-            if root.structure.len() < before {
-                mappings.push(Mapping {
-                    subject: format!("structure:{}", drop_id),
-                    verdict: MappingVerdict::Unmappable,
-                    note: "dropped on import by the test binding".to_string(),
-                });
-            }
         }
 
         Ok((
@@ -160,25 +157,33 @@ fn a_lossless_binding_reports_a_lossless_result() {
 }
 
 #[test]
-fn a_binding_that_drops_an_element_on_import_is_named_by_the_engine_diff() {
+fn a_silently_lossy_binding_is_caught_by_the_engine_and_not_by_its_own_report() {
+    // THE TEST THAT PROVES THE HARNESS MEASURES RATHER THAN BELIEVES.
+    //
+    // This fixture drops an element and says NOTHING about it. The binding therefore reports a
+    // LOSSLESS import, and the only thing that can contradict it is the engine's own diff
+    // against the original. If the harness were ever weakened to build its diff from the
+    // binding's report - which is the easy, tempting implementation - this test fails on the
+    // very first assertion, while a fixture that recorded its own drop would have passed.
     let outcome = round_trip(&dropping(), &source_bytes()).expect("import must succeed");
+
+    assert!(
+        outcome.loss_report.is_lossless(),
+        "the fixture is silent: its report claims nothing was lost"
+    );
+    assert!(
+        !outcome.diff.equal,
+        "the engine must disagree with the binding's own claim"
+    );
     assert!(
         outcome
             .diff
             .missing_elements
             .iter()
             .any(|e| e == "structure:LOST_BLOCK"),
-        "the engine diff must name the dropped element, got {:?}",
+        "the engine diff must NAME the silently dropped element, got {:?}",
         outcome.diff.missing_elements
     );
-    assert!(!outcome.diff.equal);
-    // No mapping is ever silent: the binding's own report names it too.
-    assert!(!outcome.loss_report.is_lossless());
-    assert!(outcome
-        .loss_report
-        .blocking()
-        .iter()
-        .any(|m| m.subject == "structure:LOST_BLOCK"));
 }
 
 #[test]
