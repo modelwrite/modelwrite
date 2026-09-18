@@ -693,6 +693,33 @@ pub async fn get_commit(
     Ok(Json(value))
 }
 
+/// GET /projects/:project/commits/:hash/record - the commit RECORD for one hash, including
+/// its provenance.
+///
+/// get_commit returns the OKF model (the document), which is what editors and clients
+/// consume; it does not carry provenance. This route returns the commit row itself - hash,
+/// parents, author, message and the provenance saying authored, imported or unknown - so a
+/// reader can check a commit's provenance FROM THE HASH ALONE without listing a whole branch
+/// to find it. It is additive: the model response is unchanged.
+pub async fn get_commit_record(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, hash)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let commit = state
+        .store
+        .commit(&project, &hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
+    Ok(Json(commit_json(&commit)))
+}
+
 #[derive(Deserialize)]
 pub struct CreateBranch {
     pub name: String,

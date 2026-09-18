@@ -3,7 +3,9 @@
 
 use postgres::NoTls;
 use server::store::postgres::PostgresStore;
-use server::store::{AuditEntry, CommitGuard, GateRun, Store, StoreError};
+use server::store::{
+    AuditEntry, CommitGuard, CommitProvenance, GateRun, ImportProvenance, Store, StoreError,
+};
 
 /// Every test in this file is marked `#[ignore = "requires MW_TEST_DATABASE_URL"]`, so a
 /// plain `cargo test` reports them as IGNORED (not passed) and they do no work. A developer
@@ -37,6 +39,37 @@ fn unique_project() -> String {
         .as_nanos();
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("pgtest_{}_{}", nanos, n)
+}
+
+/// A loss report naming one blocking (lossy) entry, serialized exactly as the store persists
+/// it. Mirrors the SQLite governance tests so the refusal is proven on PostgreSQL too.
+fn lossy_report(artifact_hash: &str) -> String {
+    let report = binding::LossReport {
+        binding: binding::BindingInfo {
+            id: "sysml-v1-xmi".to_string(),
+            version: "2.4".to_string(),
+            direction: binding::Direction::ImportAndExport,
+            description: "test binding".to_string(),
+        },
+        mappings: vec![binding::Mapping {
+            subject: "uml:Model model-grinder".to_string(),
+            verdict: binding::MappingVerdict::Lossy,
+            note: "dropped body".to_string(),
+        }],
+        artifact_hash: artifact_hash.to_string(),
+    };
+    serde_json::to_string(&report).unwrap()
+}
+
+/// An import provenance naming the recorded binding (sysml-v1-xmi@2.4) and the accepted
+/// losses the caller supplies.
+fn provenance(artifact_hash: &str, accepted_losses: Vec<String>) -> ImportProvenance {
+    ImportProvenance {
+        artifact_hash: artifact_hash.to_string(),
+        binding_id: "sysml-v1-xmi".to_string(),
+        binding_version: "2.4".to_string(),
+        accepted_losses,
+    }
 }
 
 #[test]
@@ -941,6 +974,195 @@ fn an_older_database_gains_the_mechanism_column_instead_of_failing() {
     let rows = store.audit(&project, 10).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].mechanism, "static");
+
+    drop(store);
+
+    {
+        let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+        conn.batch_execute(&format!(
+            "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+            database
+        ))
+        .expect("drop scratch database");
+    }
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_imported_commit_whose_artifact_is_missing_is_refused() {
+    // The import record exists and its report is valid, but the retained artifact was never
+    // stored. The commit path refuses rather than writing an imported commit whose source
+    // artifact cannot be substantiated.
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+    store
+        .record_import(
+            &project,
+            "missing-artifact",
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report("missing-artifact"),
+            "{}",
+        )
+        .unwrap();
+
+    let refused = store.commit_model(
+        &project,
+        "main",
+        "okf-hash",
+        "alex",
+        "import",
+        None,
+        None,
+        Some(&provenance("missing-artifact", vec![])),
+    );
+    match refused {
+        Err(StoreError::NotFound(message)) => {
+            assert!(message.contains("artifact"), "message: {}", message);
+        }
+        Err(other) => panic!("expected NotFound, got {:?}", other),
+        Ok(commit) => panic!("expected refusal, got commit {}", commit.hash),
+    }
+    assert!(
+        store.commits_on(&project, "main").unwrap().is_empty(),
+        "no commit may be written"
+    );
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_imported_commit_with_unaccepted_losses_is_refused() {
+    // The artifact is retained and the report names one blocking loss, but the provenance
+    // accepts nothing. The commit path refuses rather than writing an imported commit whose
+    // losses were never accepted.
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+
+    let artifact_hash = store.put_blob(b"source xmi bytes").unwrap();
+    store
+        .record_import(
+            &project,
+            &artifact_hash,
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report(&artifact_hash),
+            "{}",
+        )
+        .unwrap();
+
+    let refused = store.commit_model(
+        &project,
+        "main",
+        "okf-hash",
+        "alex",
+        "import",
+        None,
+        None,
+        Some(&provenance(&artifact_hash, vec![])),
+    );
+    match refused {
+        Err(StoreError::Conflict(message)) => {
+            assert!(message.contains("not accepted"), "message: {}", message);
+        }
+        Err(other) => panic!("expected Conflict, got {:?}", other),
+        Ok(commit) => panic!("expected refusal, got commit {}", commit.hash),
+    }
+    assert!(
+        store.commits_on(&project, "main").unwrap().is_empty(),
+        "no commit may be written"
+    );
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn a_provenance_binding_that_disagrees_with_the_record_is_refused() {
+    // The record names sysml-v1-xmi@2.4; the caller's provenance names another binding. The
+    // provenance is substantiated against the record, so the mismatch is refused even though
+    // every blocking loss is accepted.
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+
+    let artifact_hash = store.put_blob(b"source xmi bytes").unwrap();
+    store
+        .record_import(
+            &project,
+            &artifact_hash,
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report(&artifact_hash),
+            "{}",
+        )
+        .unwrap();
+
+    let mut claimed = provenance(
+        &artifact_hash,
+        vec!["uml:Model model-grinder [lossy]".to_string()],
+    );
+    claimed.binding_id = "some-other-binding".to_string();
+
+    let refused = store.commit_model(
+        &project,
+        "main",
+        "okf-hash",
+        "alex",
+        "import",
+        None,
+        None,
+        Some(&claimed),
+    );
+    match refused {
+        Err(StoreError::Conflict(message)) => {
+            assert!(message.contains("binding"), "message: {}", message);
+            assert!(message.contains("does not match"), "message: {}", message);
+        }
+        Err(other) => panic!("expected Conflict, got {:?}", other),
+        Ok(commit) => panic!("expected refusal, got commit {}", commit.hash),
+    }
+    assert!(
+        store.commits_on(&project, "main").unwrap().is_empty(),
+        "no commit may be written"
+    );
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_older_database_gains_the_provenance_column_instead_of_failing() {
+    let url = std::env::var("MW_TEST_DATABASE_URL").unwrap();
+    let database = unique_project();
+    let project = unique_project();
+
+    // A scratch database with the OLD commits shape: the table exists without the provenance
+    // column. CREATE TABLE IF NOT EXISTS cannot add it, so only the migration can.
+    {
+        let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+        conn.batch_execute(&format!("CREATE DATABASE \"{}\"", database))
+            .expect("create scratch database");
+    }
+    let scratch = database_url_for(&url, &database);
+    {
+        let mut conn = postgres::Client::connect(&scratch, NoTls).expect("connect scratch");
+        conn.batch_execute(
+            "CREATE TABLE commits (id BIGSERIAL PRIMARY KEY, hash TEXT NOT NULL UNIQUE, project TEXT NOT NULL, branch TEXT NOT NULL, parents TEXT NOT NULL, okf_hash TEXT NOT NULL, author TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL)",
+        )
+        .expect("create old-shape commits table");
+        conn.execute(
+            "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            &[&"old-hash", &project, &"main", &"[]", &"okf-hash", &"alex", &"before provenance", &"1"],
+        )
+        .expect("insert old-shape commit row");
+    }
+
+    // Opening the store must bring the old database up to date, not fail, and the pre-existing
+    // row must read as Unknown - never as authored.
+    let store = PostgresStore::open(&scratch).expect("an older database must open, not fail");
+    let commit = store
+        .commit(&project, "old-hash")
+        .unwrap()
+        .expect("the old commit must be readable");
+    assert_eq!(commit.provenance, CommitProvenance::Unknown);
 
     drop(store);
 

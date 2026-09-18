@@ -374,9 +374,19 @@ async fn every_route_denies_a_caller_without_permission_or_scope() {
             get("/projects/tea/commits/abc"),
         ),
         (
+            "get_commit_record",
+            scoped_coffee(),
+            get("/projects/tea/commits/abc/record"),
+        ),
+        (
             "get_commit_checks",
             viewer(),
             get("/projects/coffee/commits/abc/checks"),
+        ),
+        (
+            "get_artifact",
+            scoped_coffee(),
+            get("/projects/tea/import/abc/artifact"),
         ),
         (
             "create_branch",

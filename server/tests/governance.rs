@@ -2,10 +2,10 @@
 //! The migration rules are a property of the repository, not of one endpoint. A commit that
 //! DECLARES itself imported must name a retained artifact that exists, and every blocking loss
 //! in the recorded report must have been accepted by name. The check lives where the commit is
-//! written (the store's `commit_model`), so it holds for the import endpoint, the offline CLI
-//! (which writes commits by calling `commit_model` directly), and any route that does not
-//! exist yet. These tests prove it by driving the shared commit core and the store directly -
-//! never the import endpoint.
+//! written (the store's `commit_model`), so it holds for the import endpoint, any direct
+//! store caller, and any route that does not exist yet - all of which reach `commit_model`.
+//! These tests prove it by driving the shared commit core and the store directly - never the
+//! import endpoint.
 
 use okf::types::OkfRoot;
 use server::api::{commit_core, CommitCore, CommitFailure};
@@ -189,10 +189,12 @@ fn a_commit_with_unaccepted_losses_cannot_be_marked_imported_by_the_commit_path(
 }
 
 #[test]
-fn the_store_refuses_an_unsubstantiated_import_so_the_cli_inherits_the_rule() {
-    // The offline CLI writes commits by calling commit_model directly - it never goes through
-    // commit_core or the import endpoint. The rule must hold in the store, or a CLI migration
-    // could write an imported commit with losses it never accepted.
+fn the_store_refuses_an_unsubstantiated_import_so_any_commit_path_inherits_the_rule() {
+    // This test drives store.commit_model directly - not the import endpoint, not commit_core,
+    // and NOT the offline CLI (the CLI has no import command; its commit path writes Authored
+    // commits only). The rule must hold in the store itself, so that any route reaching
+    // commit_model - today's import endpoint, a future import command, or a direct caller -
+    // inherits it and cannot write an imported commit with losses it never accepted.
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
 
@@ -224,6 +226,71 @@ fn the_store_refuses_an_unsubstantiated_import_so_the_cli_inherits_the_rule() {
             assert!(message.contains("not accepted"), "message: {}", message);
         }
         Err(other) => panic!("expected Conflict, got {:?}", other),
+        Ok(commit) => panic!("expected refusal, got commit {}", commit.hash),
+    }
+    assert!(
+        store.commits_on("coffee", "main").unwrap().is_empty(),
+        "no commit may be written"
+    );
+}
+
+#[test]
+fn a_provenance_binding_that_disagrees_with_the_record_is_refused_by_the_commit_path() {
+    // The import record names binding sysml-v1-xmi@2.4, but the caller's provenance names a
+    // different binding. The provenance is substantiated, not asserted: the commit path must
+    // read the record and refuse the mismatch rather than copying a claim the caller made up.
+    let (store, _dir) = store();
+    store.create_project("coffee", None).unwrap();
+
+    let artifact_hash = store.put_blob(b"source xmi bytes").unwrap();
+    store
+        .record_import(
+            "coffee",
+            &artifact_hash,
+            "sysml-v1-xmi",
+            "2.4",
+            &lossy_report(&artifact_hash),
+            "{}",
+        )
+        .unwrap();
+
+    // Accept the one blocking loss so the ONLY thing wrong is the binding claim.
+    let mut provenance = provenance(
+        &artifact_hash,
+        vec!["uml:Model model-grinder [lossy]".to_string()],
+    );
+    provenance.binding_id = "some-other-binding".to_string();
+
+    let (root, bytes) = candidate();
+    let result = commit_core(
+        &store,
+        &CommitCore {
+            project: "coffee",
+            branch: "main",
+            author: "alex",
+            message: "import",
+            actor: "alex",
+            mechanism: "open",
+            authorizer: "",
+            candidate: &root,
+            bytes: &bytes,
+            import: Some(&provenance),
+            holder: "",
+            now: 1,
+            tip: None,
+            reference: None,
+        },
+    );
+
+    match result {
+        Err(CommitFailure::Store(StoreError::Conflict(message))) => {
+            assert!(message.contains("binding"), "message: {}", message);
+            assert!(message.contains("does not match"), "message: {}", message);
+        }
+        Err(CommitFailure::Store(other)) => panic!("expected Conflict, got {:?}", other),
+        Err(CommitFailure::Invalid { errors }) => {
+            panic!("expected a store refusal, got invalid: {:?}", errors)
+        }
         Ok(commit) => panic!("expected refusal, got commit {}", commit.hash),
     }
     assert!(

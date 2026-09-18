@@ -444,20 +444,36 @@ impl Store for SqliteStore {
                     import.artifact_hash
                 )));
             }
-            let loss_report: Option<String> = tx
+            // The binding id and version are read from the SAME record as the loss
+            // report, so a caller cannot copy a claim the record does not make: the
+            // provenance is substantiated against the authoritative import record, never
+            // asserted by whoever passes it in.
+            let record: Option<(String, String, String)> = tx
                 .query_row(
-                    "SELECT loss_report FROM imports WHERE project = ?1 AND artifact_hash = ?2",
+                    "SELECT binding_id, binding_version, loss_report FROM imports WHERE project = ?1 AND artifact_hash = ?2",
                     params![project, import.artifact_hash],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
                 .map_err(|e| StoreError::Backend(e.to_string()))?;
-            let loss_report = loss_report.ok_or_else(|| {
-                StoreError::NotFound(format!(
-                    "import {} for project {}",
-                    import.artifact_hash, project
-                ))
-            })?;
+            let (recorded_binding_id, recorded_binding_version, loss_report) =
+                record.ok_or_else(|| {
+                    StoreError::NotFound(format!(
+                        "import {} for project {}",
+                        import.artifact_hash, project
+                    ))
+                })?;
+            if recorded_binding_id != import.binding_id
+                || recorded_binding_version != import.binding_version
+            {
+                return Err(StoreError::Conflict(format!(
+                    "import provenance is unsubstantiated: binding {}@{} does not match the recorded {}@{}",
+                    import.binding_id,
+                    import.binding_version,
+                    recorded_binding_id,
+                    recorded_binding_version
+                )));
+            }
             let unaccepted = super::unaccepted_losses(&loss_report, &import.accepted_losses)?;
             if !unaccepted.is_empty() {
                 return Err(StoreError::Conflict(format!(

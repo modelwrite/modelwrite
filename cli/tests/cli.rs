@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use server::store::Store;
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_mw")
 }
@@ -153,6 +155,38 @@ fn offline_commit_then_log_round_trips() {
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0]["hash"], hash.as_str());
     assert_eq!(commits[0]["message"], "first commit");
+}
+
+#[test]
+fn offline_artifact_fetches_the_retained_source_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("mw.db");
+    let db = db.to_str().unwrap();
+
+    // Seed the store directly: an import record whose retained artifact is the source bytes.
+    // The offline CLI has no import command, so the store is prepared through its own API.
+    let artifact_hash = {
+        let store = server::store::sqlite::SqliteStore::open(&dir.path().join("mw.db")).unwrap();
+        store.create_project("coffee", None).unwrap();
+        let hash = store.put_blob(b"source xmi bytes").unwrap();
+        store
+            .record_import("coffee", &hash, "sysml-v1-xmi", "2.4", "{}", "{}")
+            .unwrap();
+        hash
+    };
+
+    let out = run_mw(
+        &["--db", db, "artifact", "coffee", "--hash", &artifact_hash],
+        &[],
+    );
+    assert!(
+        out.status.success(),
+        "artifact fetch failed: {}",
+        stderr(&out)
+    );
+    let body: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(body["artifactHash"], artifact_hash.as_str());
+    assert_eq!(body["artifact"], "source xmi bytes");
 }
 
 #[test]

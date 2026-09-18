@@ -45,6 +45,10 @@ enum Command {
         project: String,
         branch: String,
     },
+    Artifact {
+        project: String,
+        hash: String,
+    },
     BranchList {
         project: String,
     },
@@ -108,6 +112,7 @@ commands:
   project list
   commit <project> --branch <branch> --message <msg> --file <path> [--holder <name>]
   log <project> --branch <branch>
+  artifact <project> --hash <hash>
   branch list <project>
   branch create <project> --name <name> --from <commit>
   branch delete <project> --name <name>
@@ -219,6 +224,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
         "project" => parse_project(rest),
         "commit" => parse_commit(rest),
         "log" => parse_log(rest),
+        "artifact" => parse_artifact(rest),
         "branch" => parse_branch(rest),
         "merge" => parse_merge(rest),
         "reset" => parse_reset(rest),
@@ -305,6 +311,28 @@ fn parse_log(args: &[String]) -> Result<Command, String> {
     let branch = branch.ok_or("log requires --branch")?;
     validate_name("branch name", &branch)?;
     Ok(Command::Log { project, branch })
+}
+
+fn parse_artifact(args: &[String]) -> Result<Command, String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut hash: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--hash" => hash = Some(value(args, &mut i, "--hash")?),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} for artifact", other))
+            }
+            other => positionals.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let project = one_project(&positionals, "artifact")?;
+    let hash = hash.ok_or("artifact requires --hash")?;
+    if hash.is_empty() {
+        return Err("artifact --hash must not be empty".to_string());
+    }
+    Ok(Command::Artifact { project, hash })
 }
 
 fn parse_branch(args: &[String]) -> Result<Command, String> {
@@ -709,6 +737,18 @@ mod tests {
             Command::Log {
                 project: "coffee".to_string(),
                 branch: "main".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn artifact_parses() {
+        let c = cmd(&db_args(&["artifact", "coffee", "--hash", "abc123"])).unwrap();
+        assert_eq!(
+            c,
+            Command::Artifact {
+                project: "coffee".to_string(),
+                hash: "abc123".to_string(),
             }
         );
     }

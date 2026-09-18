@@ -15,7 +15,8 @@
 //!    written in one transaction, so a committed import can never be unlinked from its source.
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -486,4 +487,45 @@ pub async fn import_report(
         "lossReport": serde_json::from_str::<Value>(&record.loss_report).unwrap_or(Value::Null),
         "fidelity": serde_json::from_str::<Value>(&record.fidelity_diff).unwrap_or(Value::Null)
     })))
+}
+
+/// GET /projects/:project/import/:artifactHash/artifact - the retained source artifact,
+/// byte for byte.
+///
+/// A reader with Read on the project can re-fetch the exact bytes the migration started
+/// from, so the "retained byte-for-byte" promise is CHECKABLE: compare these bytes to the
+/// hash the import provenance names (sha256 of the body equals artifactHash). The route is
+/// scoped to the project, not just to a global content address: the import record for
+/// (project, artifactHash) must exist, so one project cannot use this route to read another
+/// project's artifact by guessing a hash.
+pub async fn get_artifact(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, artifact_hash)): Path<(String, String)>,
+) -> Result<axum::response::Response, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let record = state
+        .store
+        .import_report(&project, &artifact_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("import {}", artifact_hash)))?;
+    let bytes = state
+        .store
+        .blob(&record.artifact_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| {
+            eprintln!("missing blob {}", record.artifact_hash);
+            ApiError::internal("the retained artifact is missing")
+        })?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/octet-stream"),
+    );
+    Ok((StatusCode::OK, headers, bytes).into_response())
 }

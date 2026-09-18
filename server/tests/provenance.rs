@@ -30,6 +30,10 @@ fn post(uri: &str, body: serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
+fn get(uri: &str) -> Request<Body> {
+    Request::builder().uri(uri).body(Body::empty()).unwrap()
+}
+
 async fn json_body(response: axum::response::Response) -> serde_json::Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
@@ -229,4 +233,88 @@ fn authored_imported_and_unknown_are_distinguishable_from_the_commit_alone() {
     assert_eq!(unknown["kind"], "unknown");
     assert!(authored.get("artifactHash").is_none());
     assert_eq!(imported["artifactHash"], "a");
+}
+
+#[tokio::test]
+async fn the_retained_artifact_is_fetchable_by_its_hash() {
+    // "Retained byte-for-byte" is only a real promise if a reader can FETCH the bytes. After
+    // an import, the retained source artifact must be reachable by its content address from a
+    // project-scoped, Read-permission route, and the returned bytes must equal the source.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let bytes = fixture("coffee-grinder.xmi");
+    let expected_hash = server::store::blob_hash(&bytes);
+
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/import",
+            import_body("coffee-grinder.xmi", &COFFEE_LOSSES),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED, "{:?}", response);
+
+    let fetched = router
+        .clone()
+        .oneshot(get(&format!(
+            "/projects/coffee/import/{}/artifact",
+            expected_hash
+        )))
+        .await
+        .unwrap();
+    assert_eq!(fetched.status(), StatusCode::OK, "{:?}", fetched);
+    let body = fetched.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        body.as_ref(),
+        bytes,
+        "the fetched artifact must be byte-for-byte the source"
+    );
+}
+
+#[tokio::test]
+async fn provenance_is_reachable_by_commit_hash_alone() {
+    // Provenance must be reachable from the commit hash, not only by listing a whole branch
+    // and finding the hash. The record route returns the commit row (including provenance) for
+    // one hash, so a reader can check an imported commit's source from the hash alone.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/import",
+            import_body("coffee-grinder.xmi", &COFFEE_LOSSES),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED, "{:?}", response);
+    let body = json_body(response).await;
+    let hash = body["commit"]["hash"].as_str().unwrap();
+
+    let record = router
+        .clone()
+        .oneshot(get(&format!("/projects/coffee/commits/{}/record", hash)))
+        .await
+        .unwrap();
+    assert_eq!(record.status(), StatusCode::OK, "{:?}", record);
+    let record = json_body(record).await;
+    assert_eq!(record["hash"], hash);
+    assert_eq!(record["provenance"]["kind"], "imported");
+    assert_eq!(
+        record["provenance"]["artifactHash"],
+        body["commit"]["provenance"]["artifactHash"]
+    );
+    assert_eq!(record["provenance"]["bindingId"], "sysml-v1-xmi");
 }

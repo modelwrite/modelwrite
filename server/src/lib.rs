@@ -90,6 +90,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/projects/:project/commits/:hash", get(api::get_commit))
         .route(
+            "/projects/:project/commits/:hash/record",
+            get(api::get_commit_record),
+        )
+        .route(
             "/projects/:project/commits/:hash/checks",
             get(gate_api::commit_checks),
         )
@@ -113,6 +117,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/projects/:project/import/:artifactHash/report",
             get(binding_api::import_report),
+        )
+        .route(
+            "/projects/:project/import/:artifactHash/artifact",
+            get(binding_api::get_artifact),
         )
         .route("/projects/:project/merge", post(merge_api::merge_branches))
         .route(

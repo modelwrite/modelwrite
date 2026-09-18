@@ -112,6 +112,28 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                 commits.iter().map(server::api::commit_json).collect(),
             ))
         }
+        Command::Artifact { project, hash } => {
+            // The offline reader fetches the retained source artifact by its content
+            // address, scoped to the project exactly as the server's route is: the import
+            // record for (project, hash) must exist, so a hash alone cannot reach another
+            // project's artifact. The artifact is returned as UTF-8 text - what the current
+            // bindings read - and echoed beside its hash so the reader can re-hash it and
+            // confirm it matches. A non-text artifact must be fetched over the server route,
+            // which returns the raw bytes.
+            require_project(&store, &project)?;
+            let record = store
+                .import_report(&project, &hash)
+                .map_err(map)?
+                .ok_or_else(|| format!("import {} for project {} not found", hash, project))?;
+            let bytes = store
+                .blob(&record.artifact_hash)
+                .map_err(map)?
+                .ok_or_else(|| format!("the retained artifact {} is missing", hash))?;
+            let text = String::from_utf8(bytes).map_err(|_| {
+                "the retained artifact is not UTF-8 text; fetch it over the server route for the raw bytes".to_string()
+            })?;
+            Ok(json!({ "artifactHash": hash, "artifact": text }))
+        }
         Command::BranchList { project } => {
             require_project(&store, &project)?;
             let branches = store.list_branches(&project).map_err(map)?;

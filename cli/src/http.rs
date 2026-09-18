@@ -107,6 +107,10 @@ impl Client {
                 let resp = self.request("GET", &path, None)?;
                 self.handle(resp, 200)
             }
+            Command::Artifact { .. } => Err(
+                "fetching the retained artifact through the CLI is supported offline only; use --db <path>"
+                    .to_string(),
+            ),
             Command::BranchList { project } => {
                 let path = format!("/projects/{}/branches", project);
                 let resp = self.request("GET", &path, None)?;
