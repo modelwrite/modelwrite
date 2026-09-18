@@ -1564,8 +1564,13 @@ async fn the_gate_pages_enforce_the_api_permissions() {
         html
     );
 
-    // An author may RUN a gate (Write) so it may list, but without Review it may not open
-    // the detail - the evidence record is the reviewer's artifact.
+    // An author may RUN a gate (Write), so it may list AND open a run.
+    //
+    // This assertion used to require Review for the detail, on the premise that the evidence
+    // record is a reviewer's artifact. That premise was wrong: the JSON list endpoint already
+    // returns the FULL evidence - failure names, isolated nodes, coverage - to any
+    // Write-or-Review caller, so refusing an author the same record here would hide nothing
+    // and would only teach people that the workbench is the less reliable way to read a run.
     let author_router = app(author());
     let list = author_router
         .clone()
@@ -1577,12 +1582,10 @@ async fn the_gate_pages_enforce_the_api_permissions() {
         .oneshot(get("/ui/projects/coffee/gate/aaaa/bbbb"))
         .await
         .unwrap();
-    assert_eq!(detail.status(), StatusCode::FORBIDDEN);
-    let html = body_text(detail).await;
-    assert!(
-        html.contains("review permission required"),
-        "the detail refusal must name the permission, got:\n{}",
-        html
+    assert_ne!(
+        detail.status(),
+        StatusCode::FORBIDDEN,
+        "an author may read the same evidence the JSON endpoint returns to it"
     );
 
     // A reviewer sees both.

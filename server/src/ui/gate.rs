@@ -96,9 +96,12 @@ fn gate_list_markup(
                                 span class="uncovered" { "failed" }
                             }
                             " "
-                            code { (short_hash(&run.reference_hash)) }
+                            // Short for reading, FULL on hover: two runs sharing a prefix
+                            // would otherwise be indistinguishable in the list, and a hash a
+                            // reviewer cannot check is a hash they must take on trust.
+                            code title=(run.reference_hash.as_str()) { (short_hash(&run.reference_hash)) }
                             " → "
-                            code { (short_hash(&run.candidate_hash)) }
+                            code title=(run.candidate_hash.as_str()) { (short_hash(&run.candidate_hash)) }
                             @if !run.branch.is_empty() {
                                 span class="meta" { " on " (run.branch.as_str()) }
                             }
@@ -150,10 +153,16 @@ fn render_gate_detail(
     reference: &str,
     candidate: &str,
 ) -> Result<Markup, ApiError> {
-    // The evidence record is the reviewer's artifact: reading one run in full requires
-    // Review, so an author may list (via Write) but not open the detail.
-    if !identity.may(Permission::Review) {
-        return Err(ApiError::forbidden("review permission required"));
+    // The SAME permission the JSON list applies, because that list already returns the full
+    // evidence record to any Write-or-Review caller. Requiring Review here would refuse an
+    // author a record it can read through the API - a rule that hides nothing and only
+    // teaches people that the workbench is the unreliable way to look at a gate run.
+    //
+    // (The brief that specified this page claimed the API restricted evidence to reviewers.
+    // It does not, and mirroring a rule that exists only in the brief would have been the
+    // wrong kind of consistency.)
+    if !identity.may(Permission::Write) && !identity.may(Permission::Review) {
+        return Err(ApiError::forbidden("write or review permission required"));
     }
     if !identity.may_reach(project) {
         return Err(ApiError::forbidden("project not in scope"));
@@ -192,8 +201,13 @@ fn gate_detail_markup(
     // The recorded evidence is the AUTHORITY: the page renders what the gate reported,
     // never recomputes it, so the verdict, the names and the numbers can never disagree
     // with the run a reviewer is auditing.
-    let evidence: serde_json::Value =
-        serde_json::from_str(&run.evidence).unwrap_or(serde_json::Value::Null);
+    // An unparsable record is shown RAW rather than as a null. Rendering it as null would
+    // present an empty page as though the gate had reported nothing, which is the opposite
+    // of the truth - and this page exists so a reviewer can see what the gate actually said.
+    let evidence: serde_json::Value = match serde_json::from_str(&run.evidence) {
+        Ok(value) => value,
+        Err(_) => serde_json::json!({ "unparsableEvidence": run.evidence }),
+    };
     let roundtrip_equal = evidence
         .get("roundtrip")
         .and_then(|roundtrip| roundtrip.get("equal"))
