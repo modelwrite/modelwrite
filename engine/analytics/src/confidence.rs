@@ -6,6 +6,12 @@
 //! and the claim would be false. A number without a source is not reportable, and
 //! a fused value with no sources is an error, not a zero: a total of nothing is
 //! unknown, and zero is a number somebody would act on.
+//!
+//! Trust is never self-attested. A value's trust level is resolved from the source
+//! REGISTRY at construction; the caller supplies only the source id, never a trust
+//! level. So a caller cannot stamp Measured onto a number that came from a source
+//! the registry knows as Estimated - the combinator is sound precisely because its
+//! attribution is not a suggestion.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -13,38 +19,72 @@ use std::ops::Add;
 
 use serde::{Deserialize, Serialize};
 
-use crate::source::TrustLevel;
+use crate::source::{Registry, RegistryError, TrustLevel};
 
-/// A single number attributed to a single source. The trust level travels with the
-/// value from the moment it is read - it is never supplied at fusion time, because
-/// a query has no business grading its own inputs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A single number attributed to a single source. Its trust level is resolved
+/// from the registry when the value is built, so it cannot be forged at call
+/// sites: the source id names a registered source, and the registry alone decides
+/// how much to trust it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Value<T> {
-    /// The number itself.
-    pub value: T,
-    /// The id of the source this number came from. A number without a source is
-    /// not reportable; the registry resolves this id to the full `Source`.
-    pub source: String,
-    /// The trust level of the source, carried with the value.
-    pub trust: TrustLevel,
-    /// When the source was read. A cost from three years ago is an estimate about
-    /// the past, regardless of how reliable its source is.
-    pub captured_at: String,
+    value: T,
+    source: String,
+    trust: TrustLevel,
+    captured_at: String,
 }
 
 impl<T> Value<T> {
-    pub fn new(
+    /// Build a value from a REGISTERED source. The trust level is read from the
+    /// registry, never supplied here; an unregistered source is refused rather
+    /// than given an assumed trust.
+    pub fn from_registry(
         value: T,
-        source: impl Into<String>,
-        trust: TrustLevel,
+        source_id: impl Into<String>,
         captured_at: impl Into<String>,
+        registry: &Registry,
+    ) -> Result<Self, RegistryError> {
+        let source = source_id.into();
+        let trust = registry
+            .source(&source)
+            .map(|s| s.trust)
+            .ok_or_else(|| RegistryError::UnregisteredSource(source.clone()))?;
+        Ok(Self::stamped(value, source, trust, captured_at.into()))
+    }
+
+    /// Stamp a value with an already-resolved trust. Crate-private: only the
+    /// analytics pipeline, which has consulted the registry, may set a trust.
+    pub(crate) fn stamped(
+        value: T,
+        source: String,
+        trust: TrustLevel,
+        captured_at: String,
     ) -> Self {
         Self {
             value,
-            source: source.into(),
+            source,
             trust,
-            captured_at: captured_at.into(),
+            captured_at,
         }
+    }
+
+    /// The number itself.
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    /// The id of the registered source this number came from.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// The trust level the registry fixed for this source.
+    pub fn trust(&self) -> TrustLevel {
+        self.trust
+    }
+
+    /// When the source was read.
+    pub fn captured_at(&self) -> &str {
+        &self.captured_at
     }
 
     /// Whether this value is an estimate: the weakest, least trustworthy state.
@@ -66,15 +106,16 @@ fn weakest(a: TrustLevel, b: TrustLevel) -> TrustLevel {
 }
 
 /// The weakest trust among the inputs. Returns `None` when there are no inputs:
-/// a fused value over zero sources is an error ([`FusionError::NoSources`]), not a
+/// a fused value over zero sources is an error ([FusionError::NoSources]), not a
 /// default, because a trust level for nothing would itself be a lie.
 pub fn fused_trust<T>(values: &[Value<T>]) -> Option<TrustLevel> {
     values.iter().map(|v| v.trust).reduce(weakest)
 }
 
 /// The result of fusing values from several sources: the number, its weakest
-/// trust, the complete set of contributing sources, and each source's read time.
-/// Every fused value names all its sources; nothing here is anonymous.
+/// trust, the complete set of contributing sources, each source's read time, and
+/// each source's own trust. Every fused value names all its sources and which of
+/// them was the weak one; nothing here is anonymous.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FusedValue<T> {
     /// The fused number.
@@ -87,6 +128,10 @@ pub struct FusedValue<T> {
     /// Each contributing source's read time, keyed by source id, so a figure built
     /// partly from a three-year-old cost still says which part is the old one.
     pub captured_at: BTreeMap<String, String>,
+    /// Each contributing source's trust, keyed by source id. The weakest-link
+    /// `trust` says SOME source was weak; this map says WHICH, so a serialized
+    /// finding is reproducible without the in-memory registry.
+    pub trusts: BTreeMap<String, TrustLevel>,
 }
 
 impl<T> FusedValue<T> {
@@ -118,8 +163,9 @@ impl fmt::Display for FusionError {
 impl std::error::Error for FusionError {}
 
 /// Combine values with a binary operation, producing a fused value that carries
-/// the weakest trust, the complete set of contributing sources, and every
-/// source's read time. Fusing nothing is a typed error, never a zero.
+/// the weakest trust, the complete set of contributing sources, every source's
+/// read time, and every source's own trust. Fusing nothing is a typed error, never
+/// a zero.
 fn fuse_with<T>(
     values: &[Value<T>],
     mut combine: impl FnMut(T, T) -> T,
@@ -140,12 +186,14 @@ where
         .iter()
         .map(|v| (v.source.clone(), v.captured_at.clone()))
         .collect();
+    let trusts = values.iter().map(|v| (v.source.clone(), v.trust)).collect();
 
     Ok(FusedValue {
         value: acc,
         trust,
         sources,
         captured_at,
+        trusts,
     })
 }
 

@@ -9,6 +9,11 @@
 //! be treated as free. A requirement nobody has estimated must say UNCOSTED, for
 //! the same reason compliance says UNKNOWN: absence must never render as a value.
 //!
+//! The same ruling runs in reverse too: A COST RECORD FOR AN UNKNOWN REQUIREMENT
+//! IS NOT SILENCE. A dataset row whose requirement no queried model contains is
+//! surfaced as an error, never silently dropped, because a dropped record would
+//! leave the real model requirement falsely UNCOSTED while its cost sits unclaimed.
+//!
 //! Every figure carries its source and its date, because a cost from three years
 //! ago is an estimate about the past no matter how reliable the spreadsheet was.
 //! When one requirement is priced by more than one dataset, the costs are fused
@@ -24,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::confidence::{self, FusedValue, FusionError, Value};
 use crate::dataset::Dataset;
 use crate::money::Money;
+use crate::source::Registry;
 
 /// Which column of a dataset holds the requirement id, and which holds the cost.
 /// The mapping is declared per dataset because no two organisations store cost the
@@ -81,12 +87,24 @@ pub struct CostedRequirement {
 pub enum CostError {
     /// The dataset has no column with the declared header name.
     MissingColumn { source: String, column: String },
-    /// A row's cost cell is absent or not a decimal money amount.
+    /// A row's cost cell is absent or not a decimal money amount. `row` is the
+    /// 1-based CSV row number (the header is row 1).
     MalformedCost {
         source: String,
         requirement: String,
         value: String,
+        row: usize,
     },
+    /// The dataset's source was never registered, so it has no authoritative trust
+    /// level and cannot be queried.
+    UnregisteredSource { source: String },
+    /// The dataset was handed in with no read time. A figure without provenance is
+    /// not reportable.
+    UnstampedSource { source: String },
+    /// Dataset rows named requirements that no queried model contains. Every such
+    /// key is surfaced rather than silently discarded: an uncosted requirement must
+    /// never be rendered while its cost sits unclaimed in a dataset.
+    UnmatchedRequirements { requirements: Vec<String> },
     /// Fusion refused. This is FusionError::NoSources, which cannot arise when a
     /// record exists, but is propagated rather than assumed away.
     Fusion(FusionError),
@@ -102,26 +120,47 @@ impl fmt::Display for CostError {
                 source,
                 requirement,
                 value,
+                row,
             } => {
-                if requirement.is_empty() {
+                if requirement.is_empty() && value.is_empty() {
                     write!(
                         f,
-                        "dataset {} has a row too short for its declared columns",
-                        source
+                        "dataset {} has a row too short for its declared columns at row {}",
+                        source, row
+                    )
+                } else if requirement.is_empty() {
+                    write!(
+                        f,
+                        "dataset {} has a cost {:?} at row {} with no requirement id",
+                        source, value, row
                     )
                 } else if value.is_empty() {
                     write!(
                         f,
-                        "dataset {} has no cost value for requirement {}",
-                        source, requirement
+                        "dataset {} has no cost value for requirement {} at row {}",
+                        source, requirement, row
                     )
                 } else {
                     write!(
                         f,
-                        "dataset {} has a cost {:?} for requirement {} that is not a valid money amount",
-                        source, value, requirement
+                        "dataset {} has a cost {:?} for requirement {} at row {} that is not a valid money amount",
+                        source, value, requirement, row
                     )
                 }
+            }
+            CostError::UnregisteredSource { source } => {
+                write!(f, "source {} is not registered", source)
+            }
+            CostError::UnstampedSource { source } => {
+                write!(f, "dataset {} has no read time (captured_at)", source)
+            }
+            CostError::UnmatchedRequirements { requirements } => {
+                write!(
+                    f,
+                    "cost records reference {} requirement(s) not present in any model: {}",
+                    requirements.len(),
+                    requirements.join(", ")
+                )
             }
             CostError::Fusion(e) => write!(f, "{}", e),
         }
@@ -138,10 +177,14 @@ impl std::error::Error for CostError {}
 /// priced by several has its costs summed with the weakest-link trust rule.
 ///
 /// Each datasets entry pairs a dataset with the column mapping declaring which of
-/// its columns is the requirement id and which is the cost. A dataset missing a
-/// declared column is a clear error, never a silent zero or a partial result.
+/// its columns is the requirement id and which is the cost. Trust is resolved from
+/// the REGISTRY, never from the dataset: a dataset handed in for a source the
+/// registry knows as Estimated is priced as Estimated, whatever the dataset claims.
+/// A dataset missing a declared column is a clear error, never a silent zero or a
+/// partial result; so is a dataset record for a requirement no model contains.
 pub fn cost_by_requirement(
     models: &[&OkfRoot],
+    registry: &Registry,
     datasets: &[(&Dataset, &ColumnMapping)],
 ) -> Result<Vec<CostedRequirement>, CostError> {
     // The union of every model's requirement ids, in first-seen order, so a
@@ -156,20 +199,41 @@ pub fn cost_by_requirement(
         }
     }
 
-    // Every cost record, keyed by requirement id. A record carries the value and,
-    // through the dataset's own source, the source id, trust and read time.
+    // Every cost record, keyed by requirement id (trimmed). A record carries the
+    // value and, resolved from the registry, the source id, trust and read time.
     let mut records: HashMap<String, Vec<Value<Money>>> = HashMap::new();
     for (dataset, mapping) in datasets {
+        // Resolve trust from the REGISTRY, never from the dataset: a caller cannot
+        // hand in a dataset claiming Measured for a source the registry knows as
+        // Estimated.
+        let registered =
+            registry
+                .source(&dataset.source.id)
+                .ok_or_else(|| CostError::UnregisteredSource {
+                    source: dataset.source.id.clone(),
+                })?;
+        let trust = registered.trust;
+        if dataset.captured_at.is_empty() {
+            return Err(CostError::UnstampedSource {
+                source: dataset.source.id.clone(),
+            });
+        }
         let (req_col, cost_col) = resolve_columns(dataset, mapping)?;
         let source_id = dataset.source.id.clone();
-        for row in dataset.rows.iter().skip(1) {
+        for (index, row) in dataset.rows.iter().enumerate().skip(1) {
+            // A blank line - including a trailing blank line, which parses to a row
+            // of empty cells - is not a record.
+            if row.iter().all(|cell| cell.trim().is_empty()) {
+                continue;
+            }
             let requirement = match row.get(req_col) {
-                Some(cell) => cell.clone(),
+                Some(cell) => cell.trim().to_string(),
                 None => {
                     return Err(CostError::MalformedCost {
                         source: source_id.clone(),
                         requirement: String::new(),
                         value: String::new(),
+                        row: index + 1,
                     })
                 }
             };
@@ -180,9 +244,18 @@ pub fn cost_by_requirement(
                         source: source_id.clone(),
                         requirement: requirement.clone(),
                         value: String::new(),
+                        row: index + 1,
                     })
                 }
             };
+            if requirement.is_empty() {
+                return Err(CostError::MalformedCost {
+                    source: source_id.clone(),
+                    requirement: String::new(),
+                    value: raw,
+                    row: index + 1,
+                });
+            }
             let value: Money = match raw.trim().parse() {
                 Ok(value) => value,
                 Err(_) => {
@@ -190,13 +263,14 @@ pub fn cost_by_requirement(
                         source: source_id.clone(),
                         requirement: requirement.clone(),
                         value: raw,
+                        row: index + 1,
                     })
                 }
             };
-            records.entry(requirement).or_default().push(Value::new(
+            records.entry(requirement).or_default().push(Value::stamped(
                 value,
                 source_id.clone(),
-                dataset.source.trust,
+                trust,
                 dataset.captured_at.clone(),
             ));
         }
@@ -218,6 +292,17 @@ pub fn cost_by_requirement(
             }),
         }
     }
+
+    // Any key still here names a requirement no queried model contains. Surface
+    // every one rather than silently dropping the record.
+    if !records.is_empty() {
+        let mut unmatched: Vec<String> = records.into_keys().collect();
+        unmatched.sort();
+        return Err(CostError::UnmatchedRequirements {
+            requirements: unmatched,
+        });
+    }
+
     Ok(result)
 }
 

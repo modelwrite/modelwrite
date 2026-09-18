@@ -40,15 +40,11 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    /// Build a snapshot from CSV bytes. The content hash is the address of the
-    /// bytes; the trust level is whatever the source already carries. The read time
-    /// is left empty - use `Dataset::from_csv_at` (or the registry's
-    /// `Registry::snapshot`) to stamp it.
-    pub fn from_csv(source: Source, bytes: &[u8]) -> Result<Self, CsvError> {
-        Self::from_csv_at(source, String::new(), bytes)
-    }
-
-    /// Build a snapshot from CSV bytes and stamp its read time.
+    /// Build a snapshot from CSV bytes and stamp its read time. This is the only
+    /// direct constructor: there is no unstamped form, because a snapshot without a
+    /// read time would render an absence where its provenance belongs. The registry
+    /// builds snapshots through this constructor (`Registry::snapshot`), and a
+    /// query refuses a snapshot whose read time is empty.
     pub fn from_csv_at(
         source: Source,
         captured_at: String,

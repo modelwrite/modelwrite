@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Portfolio compliance: which products meet which specifications. The answer has
 //! THREE states, not two, and blurring them is the single most harmful thing this
-//! slice could ship. A requirement present and covered is SATISFIED; present and
-//! uncovered is NOT SATISFIED; ABSENT from the model entirely is UNKNOWN. A missing
+//! slice could ship. A requirement present and covered is COVERED; present and
+//! uncovered is UNCOVERED; ABSENT from the model entirely is UNKNOWN. A missing
 //! requirement and a met requirement must never look alike, so absence is always an
-//! explicit UNKNOWN - never a blank, never omitted, never a pass. Coverage is the
-//! graph engine's, never a reimplementation: a second coverage rule would be a
-//! second source of truth.
+//! explicit UNKNOWN - never a blank, never omitted, never a pass.
+//!
+//! The vocabulary here is deliberately NOT the gate's. Covered / Uncovered /
+//! Unknown name GRAPH COVERAGE only. The gate has its own pass/fail meaning -
+//! round-trip fidelity, validation, integration, strict coverage - and a product
+//! that is Covered here may still fail the gate on another axis, or fail strict
+//! coverage for reasons outside this graph reading. "Covered" must never be read as
+//! "passes the gate"; the two vocabularies are kept apart on purpose.
+//!
+//! Coverage is the graph engine's, never a reimplementation: a second coverage rule
+//! would be a second source of truth.
 
 use graph::requirement_coverage;
+use okf::hash::canonical_hash;
 use okf::types::OkfRoot;
 use serde::{Deserialize, Serialize};
 
@@ -18,18 +27,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Compliance {
     /// Present in the model and covered by the engine's graph coverage.
-    Satisfied,
+    Covered,
     /// Present in the model, but the engine's graph coverage shows no
     /// Satisfy/Refine/Verify/Allocate edge covering it.
-    NotSatisfied,
+    Uncovered,
     /// Absent from the model entirely. The most common answer, and the most
     /// dangerous to render as a blank.
     Unknown,
 }
 
 /// Classify one requirement against one model. The requirement is identified by
-/// its `id`, exactly as the engine's coverage keys it. `Satisfied` and
-/// `NotSatisfied` come from the engine's own `requirement_coverage`; `Unknown`
+/// its `id`, exactly as the engine's coverage keys it. `Covered` and
+/// `Uncovered` come from the engine's own `requirement_coverage`; `Unknown`
 /// is a requirement the model does not contain at all.
 pub fn classify(requirement: &str, model: &OkfRoot) -> Compliance {
     let present = model.requirements.iter().any(|r| r.id == requirement);
@@ -41,13 +50,13 @@ pub fn classify(requirement: &str, model: &OkfRoot) -> Compliance {
     // loses its graph. Guarding here keeps classify panic-free, because the engine's
     // coverage helper expects a graph to exist.
     if model.graph.is_none() {
-        return Compliance::NotSatisfied;
+        return Compliance::Uncovered;
     }
     let coverage = requirement_coverage(model);
     if coverage.uncovered.iter().any(|id| id == requirement) {
-        Compliance::NotSatisfied
+        Compliance::Uncovered
     } else {
-        Compliance::Satisfied
+        Compliance::Covered
     }
 }
 
@@ -60,21 +69,26 @@ pub fn classify(requirement: &str, model: &OkfRoot) -> Compliance {
 pub struct ModelCompliance {
     /// The model's project identifier, so the report says WHICH product.
     pub model: String,
-    /// Requirements of the specification this model satisfies (present and covered).
-    pub satisfied: Vec<String>,
+    /// The model's canonical content hash, so two versions of one project are
+    /// distinguishable rather than collapsing onto the same project name.
+    pub model_hash: String,
+    /// When the model was exported, so a report can say WHICH version.
+    pub exported_at: String,
+    /// Requirements of the specification this model covers (present and covered).
+    pub covered: Vec<String>,
     /// Requirements the model has but does not cover (present and uncovered).
-    pub not_satisfied: Vec<String>,
+    pub uncovered: Vec<String>,
     /// Requirements absent from this model. Never omitted, never blank.
     pub unknown: Vec<String>,
 }
 
 impl ModelCompliance {
-    pub fn satisfied_count(&self) -> usize {
-        self.satisfied.len()
+    pub fn covered_count(&self) -> usize {
+        self.covered.len()
     }
 
-    pub fn not_satisfied_count(&self) -> usize {
-        self.not_satisfied.len()
+    pub fn uncovered_count(&self) -> usize {
+        self.uncovered.len()
     }
 
     pub fn unknown_count(&self) -> usize {
@@ -85,7 +99,7 @@ impl ModelCompliance {
     /// specification's size, so a report whose rows do not sum to the
     /// specification is provably hiding a row.
     pub fn total(&self) -> usize {
-        self.satisfied.len() + self.not_satisfied.len() + self.unknown.len()
+        self.covered.len() + self.uncovered.len() + self.unknown.len()
     }
 }
 
@@ -109,20 +123,22 @@ pub fn portfolio_report(requirement_set: &[&str], models: &[&OkfRoot]) -> Report
     let models = models
         .iter()
         .map(|model| {
-            let mut satisfied = Vec::new();
-            let mut not_satisfied = Vec::new();
+            let mut covered = Vec::new();
+            let mut uncovered = Vec::new();
             let mut unknown = Vec::new();
             for requirement in requirement_set {
                 match classify(requirement, model) {
-                    Compliance::Satisfied => satisfied.push((*requirement).to_string()),
-                    Compliance::NotSatisfied => not_satisfied.push((*requirement).to_string()),
+                    Compliance::Covered => covered.push((*requirement).to_string()),
+                    Compliance::Uncovered => uncovered.push((*requirement).to_string()),
                     Compliance::Unknown => unknown.push((*requirement).to_string()),
                 }
             }
             ModelCompliance {
                 model: model.project.clone(),
-                satisfied,
-                not_satisfied,
+                model_hash: canonical_hash(model),
+                exported_at: model.exported_at.clone(),
+                covered,
+                uncovered,
                 unknown,
             }
         })

@@ -80,10 +80,15 @@ impl std::error::Error for RegistryError {}
 /// level. A dataset whose source is not declared here is refused, because an
 /// undeclared source has no trust level and an untrusted number is worse than
 /// no number.
+///
+/// Snapshots are keyed by (source id, content hash), not by content hash alone:
+/// two different sources that happen to hold byte-identical input are two
+/// different pieces of provenance - one may be Measured, the other Estimated -
+/// and neither may overwrite the other.
 #[derive(Debug, Default)]
 pub struct Registry {
     sources: HashMap<String, Source>,
-    datasets: HashMap<String, Dataset>,
+    datasets: HashMap<(String, String), Dataset>,
 }
 
 impl Registry {
@@ -128,36 +133,46 @@ impl Registry {
         let dataset =
             Dataset::from_csv_at(source, captured_at, bytes).map_err(RegistryError::Csv)?;
         let hash = dataset.content_hash.clone();
-        self.datasets.insert(hash, dataset.clone());
+        let key = (dataset.source.id.clone(), hash);
+        self.datasets.insert(key, dataset.clone());
         Ok(dataset)
     }
 
     /// Accept an already-built dataset, refusing one whose source was not declared.
-    pub fn register_dataset(&mut self, dataset: Dataset) -> Result<(), RegistryError> {
-        if !self.sources.contains_key(&dataset.source.id) {
-            return Err(RegistryError::UnregisteredSource(dataset.source.id.clone()));
-        }
-        let hash = dataset.content_hash.clone();
-        self.datasets.insert(hash, dataset);
+    /// The source carried on the dataset is re-stamped from the registry, so a
+    /// caller cannot hand in a dataset that upgrades its own trust.
+    pub fn register_dataset(&mut self, mut dataset: Dataset) -> Result<(), RegistryError> {
+        let registered = self
+            .sources
+            .get(&dataset.source.id)
+            .cloned()
+            .ok_or_else(|| RegistryError::UnregisteredSource(dataset.source.id.clone()))?;
+        dataset.source = registered;
+        let key = (dataset.source.id.clone(), dataset.content_hash.clone());
+        self.datasets.insert(key, dataset);
         Ok(())
     }
 
-    /// The snapshots recorded so far, keyed by content hash so re-reading the same
-    /// bytes is idempotent rather than a duplicate.
+    /// The snapshots recorded so far, keyed by (source id, content hash) so
+    /// byte-identical input from two different sources never overwrites the other.
     pub fn datasets(&self) -> impl Iterator<Item = &Dataset> + '_ {
         self.datasets.values()
     }
 
-    /// Fetch a snapshot by its content hash.
-    pub fn dataset(&self, content_hash: &str) -> Option<&Dataset> {
-        self.datasets.get(content_hash)
+    /// Fetch a snapshot by its source id and content hash.
+    pub fn dataset(&self, source_id: &str, content_hash: &str) -> Option<&Dataset> {
+        self.datasets
+            .get(&(source_id.to_string(), content_hash.to_string()))
     }
 
-    /// Fetch a snapshot's exact bytes by its content hash. This is what makes a
-    /// snapshot reproducible rather than merely hashed: the bytes are retained, so
-    /// an answer can be rebuilt a year later from the same bytes it was computed
-    /// from. A hash that was never recorded returns `None`, never a panic.
-    pub fn bytes(&self, content_hash: &str) -> Option<&[u8]> {
-        self.datasets.get(content_hash).map(|d| d.bytes.as_slice())
+    /// Fetch a snapshot's exact bytes by its source id and content hash. This is
+    /// what makes a snapshot reproducible rather than merely hashed: the bytes are
+    /// retained, so an answer can be rebuilt a year later from the same bytes it
+    /// was computed from. A (source, hash) that was never recorded returns `None`,
+    /// never a panic.
+    pub fn bytes(&self, source_id: &str, content_hash: &str) -> Option<&[u8]> {
+        self.datasets
+            .get(&(source_id.to_string(), content_hash.to_string()))
+            .map(|d| d.bytes.as_slice())
     }
 }

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Portfolio compliance, exercised through the public surface. The whole point is
-//! three states, not two: a requirement present and covered is SATISFIED; present
-//! and uncovered is NOT SATISFIED; absent from the model is UNKNOWN and must appear
-//! as UNKNOWN, never as a blank and never omitted. The counts in a report sum to the
-//! specification's size, and coverage agrees with the graph engine's own function on
-//! the real corpus.
+//! three states, not two: a requirement present and covered is COVERED; present
+//! and uncovered is UNCOVERED; absent from the model is UNKNOWN and must appear
+//! as UNKNOWN, never as a blank and never omitted. The counts in a report sum to
+//! the specification's size, coverage agrees with the graph engine's own function
+//! on the real corpus, and each row distinguishes the model's version.
 
 use analytics::{classify, portfolio_report, Compliance, Report};
 use graph::requirement_coverage;
+use okf::hash::canonical_hash;
 use okf::types::OkfRoot;
 
 fn okf(text: &str) -> OkfRoot {
@@ -19,7 +20,7 @@ fn expected() -> OkfRoot {
 }
 
 /// Two requirements: r1 is covered by a Satisfy edge, r2 is present but has no
-/// covering edge, so it is NotSatisfied rather than Unknown.
+/// covering edge, so it is Uncovered rather than Unknown.
 const TINY: &str = r#"{
   "project": "tiny",
   "exportedAt": "2026-09-17T00:00:00Z",
@@ -42,7 +43,7 @@ const TINY: &str = r#"{
 }"#;
 
 /// A second product: r2 is covered here, r3 is present but uncovered, and r1 is
-/// absent entirely - so a portfolio spanning both models shows r1 Satisfied in one
+/// absent entirely - so a portfolio spanning both models shows r1 Covered in one
 /// product and Unknown in the other.
 const SECOND: &str = r#"{
   "project": "second",
@@ -66,7 +67,7 @@ const SECOND: &str = r#"{
 }"#;
 
 /// A model whose graph section is gone. Classifying must not panic: a present
-/// requirement with no graph is NotSatisfied, the same reading the gate records.
+/// requirement with no graph is Uncovered, the same reading the gate records.
 const NO_GRAPH: &str = r#"{
   "project": "no graph",
   "exportedAt": "2026-09-17T00:00:00Z",
@@ -79,42 +80,42 @@ const NO_GRAPH: &str = r#"{
 }"#;
 
 #[test]
-fn a_requirement_present_and_covered_is_satisfied() {
+fn a_requirement_present_and_covered_is_covered() {
     let model = okf(TINY);
-    assert_eq!(classify("r1", &model), Compliance::Satisfied);
+    assert_eq!(classify("r1", &model), Compliance::Covered);
 }
 
 #[test]
-fn a_requirement_present_but_uncovered_is_not_satisfied() {
+fn a_requirement_present_but_uncovered_is_uncovered() {
     let model = okf(TINY);
-    // r2 has no covering edge, so it is NotSatisfied - and that is distinct from
-    // both Satisfied and Unknown.
-    assert_eq!(classify("r2", &model), Compliance::NotSatisfied);
-    assert_ne!(Compliance::NotSatisfied, Compliance::Satisfied);
-    assert_ne!(Compliance::NotSatisfied, Compliance::Unknown);
+    // r2 has no covering edge, so it is Uncovered - and that is distinct from
+    // both Covered and Unknown.
+    assert_eq!(classify("r2", &model), Compliance::Uncovered);
+    assert_ne!(Compliance::Uncovered, Compliance::Covered);
+    assert_ne!(Compliance::Uncovered, Compliance::Unknown);
 }
 
 #[test]
-fn a_requirement_absent_from_a_model_is_unknown_never_satisfied_and_never_omitted() {
+fn a_requirement_absent_from_a_model_is_unknown_never_covered_and_never_omitted() {
     let model = okf(TINY);
     assert_eq!(classify("r3", &model), Compliance::Unknown);
-    assert_ne!(Compliance::Unknown, Compliance::Satisfied);
-    assert_ne!(Compliance::Unknown, Compliance::NotSatisfied);
+    assert_ne!(Compliance::Unknown, Compliance::Covered);
+    assert_ne!(Compliance::Unknown, Compliance::Uncovered);
 }
 
 #[test]
 fn the_three_states_are_distinct() {
-    assert_ne!(Compliance::Satisfied, Compliance::NotSatisfied);
-    assert_ne!(Compliance::Satisfied, Compliance::Unknown);
-    assert_ne!(Compliance::NotSatisfied, Compliance::Unknown);
+    assert_ne!(Compliance::Covered, Compliance::Uncovered);
+    assert_ne!(Compliance::Covered, Compliance::Unknown);
+    assert_ne!(Compliance::Uncovered, Compliance::Unknown);
 }
 
 #[test]
 fn a_model_without_a_graph_does_not_panic() {
     let model = okf(NO_GRAPH);
-    // Present but no graph to prove coverage: NotSatisfied, not Unknown (the model
-    // does contain the requirement) and not Satisfied (nothing covers it).
-    assert_eq!(classify("r1", &model), Compliance::NotSatisfied);
+    // Present but no graph to prove coverage: Uncovered, not Unknown (the model
+    // does contain the requirement) and not Covered (nothing covers it).
+    assert_eq!(classify("r1", &model), Compliance::Uncovered);
     assert_eq!(classify("r2", &model), Compliance::Unknown);
 }
 
@@ -130,12 +131,12 @@ fn counts_sum_to_the_specification_size() {
     let m = &report.models[0];
     assert_eq!(m.total(), 5);
     assert_eq!(
-        m.satisfied_count() + m.not_satisfied_count() + m.unknown_count(),
+        m.covered_count() + m.uncovered_count() + m.unknown_count(),
         5
     );
     // Every requirement appears in exactly one bucket, in specification order.
-    assert_eq!(m.satisfied, vec!["r1"]);
-    assert_eq!(m.not_satisfied, vec!["r2"]);
+    assert_eq!(m.covered, vec!["r1"]);
+    assert_eq!(m.uncovered, vec!["r2"]);
     assert_eq!(m.unknown, vec!["r3", "r4", "r5"]);
 }
 
@@ -157,7 +158,7 @@ fn a_requirement_absent_from_every_model_still_appears_as_unknown() {
         assert_eq!(model.total(), 2);
     }
 
-    // tiny satisfies r1, so only r9 is Unknown there; second knows neither r1 nor
+    // tiny covers r1, so only r9 is Unknown there; second knows neither r1 nor
     // r9, so both are Unknown there.
     assert_eq!(report.models[0].unknown, vec!["r9"]);
     assert_eq!(report.models[1].unknown, vec!["r1", "r9"]);
@@ -175,16 +176,16 @@ fn a_portfolio_spans_products_and_keeps_each_state() {
     // tiny covers r1, holds r2 uncovered, and does not know r3.
     let tiny = &report.models[0];
     assert_eq!(tiny.model, "tiny");
-    assert_eq!(tiny.satisfied, vec!["r1"]);
-    assert_eq!(tiny.not_satisfied, vec!["r2"]);
+    assert_eq!(tiny.covered, vec!["r1"]);
+    assert_eq!(tiny.uncovered, vec!["r2"]);
     assert_eq!(tiny.unknown, vec!["r3"]);
     assert_eq!(tiny.total(), 3);
 
     // second covers r2, holds r3 uncovered, and does not know r1.
     let second = &report.models[1];
     assert_eq!(second.model, "second");
-    assert_eq!(second.satisfied, vec!["r2"]);
-    assert_eq!(second.not_satisfied, vec!["r3"]);
+    assert_eq!(second.covered, vec!["r2"]);
+    assert_eq!(second.uncovered, vec!["r3"]);
     assert_eq!(second.unknown, vec!["r1"]);
     assert_eq!(second.total(), 3);
 }
@@ -196,8 +197,8 @@ fn an_empty_requirement_set_is_an_explicit_empty_report_not_a_panic() {
     assert_eq!(report.specification_size, 0);
     let m = &report.models[0];
     assert_eq!(m.total(), 0);
-    assert!(m.satisfied.is_empty());
-    assert!(m.not_satisfied.is_empty());
+    assert!(m.covered.is_empty());
+    assert!(m.uncovered.is_empty());
     assert!(m.unknown.is_empty());
 }
 
@@ -206,6 +207,30 @@ fn an_empty_model_list_is_an_empty_report_not_a_panic() {
     let report = portfolio_report(&["r1"], &[]);
     assert_eq!(report.specification_size, 1);
     assert!(report.models.is_empty());
+}
+
+#[test]
+fn a_model_compliance_row_carries_the_models_hash_and_export_time() {
+    let model = okf(TINY);
+    let report = portfolio_report(&["r1"], &[&model]);
+    let m = &report.models[0];
+    assert_eq!(m.model, "tiny");
+    assert_eq!(m.exported_at, "2026-09-17T00:00:00Z");
+    assert_eq!(m.model_hash, canonical_hash(&model));
+    assert!(!m.model_hash.is_empty());
+}
+
+#[test]
+fn two_versions_of_a_project_are_distinguishable_by_hash() {
+    let v1 = okf(TINY);
+    // Same project, same requirements, but a later export time: a different version.
+    let v2 = okf(&TINY.replace("2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z"));
+    let report = portfolio_report(&["r1"], &[&v1, &v2]);
+    assert_eq!(report.models[0].model, "tiny");
+    assert_eq!(report.models[1].model, "tiny");
+    assert_eq!(report.models[0].exported_at, "2026-09-17T00:00:00Z");
+    assert_eq!(report.models[1].exported_at, "2026-09-18T00:00:00Z");
+    assert_ne!(report.models[0].model_hash, report.models[1].model_hash);
 }
 
 /// The reference corpus carries 25 requirements, 15 covered and 10 uncovered. The
@@ -221,9 +246,9 @@ fn coverage_agrees_with_the_engine_on_the_real_corpus() {
 
     for requirement in &model.requirements {
         let expected_state = if coverage.uncovered.contains(&requirement.id) {
-            Compliance::NotSatisfied
+            Compliance::Uncovered
         } else {
-            Compliance::Satisfied
+            Compliance::Covered
         };
         assert_eq!(
             classify(&requirement.id, &model),
@@ -238,8 +263,8 @@ fn coverage_agrees_with_the_engine_on_the_real_corpus() {
     let report = portfolio_report(&spec, &[&model]);
     assert_eq!(report.specification_size, 25);
     let m = &report.models[0];
-    assert_eq!(m.satisfied.len(), 15);
-    assert_eq!(m.not_satisfied.len(), 10);
+    assert_eq!(m.covered.len(), 15);
+    assert_eq!(m.uncovered.len(), 10);
     assert_eq!(m.unknown.len(), 0);
     assert_eq!(m.total(), 25);
 }
@@ -252,4 +277,13 @@ fn report_serializes_with_camel_case_keys() {
     let obj = value.as_object().unwrap();
     assert!(obj.contains_key("specificationSize"));
     assert!(!obj.contains_key("specification_size"));
+
+    let row = report.models[0].clone();
+    let row_value = serde_json::to_value(&row).expect("row serializes");
+    let row_obj = row_value.as_object().unwrap();
+    assert!(row_obj.contains_key("modelHash"));
+    assert!(row_obj.contains_key("exportedAt"));
+    assert!(row_obj.contains_key("covered"));
+    assert!(row_obj.contains_key("uncovered"));
+    assert!(row_obj.contains_key("unknown"));
 }
