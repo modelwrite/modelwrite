@@ -7,6 +7,12 @@ into portable, provable data — the Open Knowledge Format (OKF) — and
 automates the skilled work of building and reviewing models with grounded
 AI.
 
+## Website
+
+The project website is hand-written HTML and CSS in `website/` — no build
+step, no external requests. It is deployed to GitHub Pages by
+`.github/workflows/pages.yml` on push to `main`.
+
 ## What is in this repository
 
 - engine/ — the Rust engine (AGPL-3.0-or-later): okf types, validation,

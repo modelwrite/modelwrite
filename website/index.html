@@ -1,0 +1,198 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modelwrite — the model you can prove</title>
+<meta name="description" content="Modelwrite: an open-source model-based systems engineering platform. Systems models in a provable format, a recorded fidelity gate, and agents that propose while humans commit.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <p class="kicker">Open-source MBSE platform</p>
+  <h1>Modelwrite</h1>
+  <p class="tagline">The model you can prove.</p>
+  <nav aria-label="Sections">
+    <a href="#what">What it is</a>
+    <a href="#why">Why it exists</a>
+    <a href="#run">Run it</a>
+    <a href="#works">What works</a>
+    <a href="#does-not">What it does not do</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#numbers">Numbers</a>
+    <a href="#licence">Licence</a>
+  </nav>
+</header>
+
+<main>
+
+<section id="what">
+<h2>What it is</h2>
+<p>Modelwrite is an open-source platform for model-based systems engineering (MBSE)
+that an organisation runs on its own infrastructure. It stores systems models in
+OKF — the Open Knowledge Format, a single self-describing JSON document — and it
+proves, with a recorded gate run, that a change or a migration lost nothing.</p>
+<p>The identity of the project is <em>the model you can prove</em>. A claim is either
+checkable, or it is labelled as unchecked. Every statement about fidelity, model
+health, or change traces to a recorded, deterministic gate run.</p>
+</section>
+
+<section id="why">
+<h2>Why it exists</h2>
+<p>Legacy MBSE tools such as CATIA Magic are costly to licence and hard to use, and
+there are not enough engineers who can drive them. Modelwrite exists so an
+organisation can move off those tools — migrating its models with measured fidelity —
+and so that AI agents can help with the skilled repetition of building and reviewing
+models, while a human makes every commit. Agents draft; the gate and the human check.</p>
+</section>
+
+<section id="run">
+<h2>Run it locally</h2>
+<p>One command, from the repository root:</p>
+<pre><code>docker compose -f deploy/docker-compose.yml up --build</code></pre>
+<p>That starts <code>mw-server</code> and a PostgreSQL 16 database. To run the server
+directly instead, on a single-user SQLite store:</p>
+<pre><code>cargo run -p mw-server</code></pre>
+<p>The server runs in open mode (anonymous admin) unless a token or JWKS is configured.
+The container refuses to start open on a reachable interface unless
+<code>MW_ALLOW_OPEN=yes</code> is set. See <code>deploy/README.md</code>.</p>
+</section>
+
+<section id="works">
+<h2>What works</h2>
+<table>
+<thead>
+<tr><th scope="col">Capability</th><th scope="col">Status</th><th scope="col">What it means</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>Commit model</td>
+  <td>Works</td>
+  <td>Content-addressed blobs, a deterministic commit hash, section-scoped diffs,
+  three-way merge with a real least-common-ancestor, element locks as leases, an
+  append-only audit log written inside the mutation transaction, identity and roles.</td>
+</tr>
+<tr>
+  <td>Round-trip gate</td>
+  <td>Works</td>
+  <td>Zero element, edge, attribute or document-field loss; graph integration; optional
+  strict coverage; deterministic evidence records.</td>
+</tr>
+<tr>
+  <td>Workbench</td>
+  <td>Works</td>
+  <td>Server-rendered HTML and inline SVG. No build step. Nothing fetched from the
+  network at page load.</td>
+</tr>
+<tr>
+  <td>Interoperability</td>
+  <td>Partial</td>
+  <td>A binding contract, a SysML v1 XMI reader, and migration as a gated operation:
+  the source artifact is retained content-addressed before anything else, fidelity is
+  measured, and a lossy migration is refused until the specific loss is accepted by name.</td>
+</tr>
+<tr>
+  <td>Agent loop</td>
+  <td>Partial</td>
+  <td>A Reasoner trait, proposals a human reads, agent actions distinguishable in the
+  audit log, and an enforced rule that an agent cannot write. A human with the write
+  role accepts a proposal through an import-scoped route.</td>
+</tr>
+<tr>
+  <td>Governance</td>
+  <td>Works</td>
+  <td>Commit provenance (authored / imported / unknown), migration rules enforced at the
+  commit path, and per-commit check records.</td>
+</tr>
+<tr>
+  <td>Analytics</td>
+  <td>Works</td>
+  <td>Portfolio compliance, cost joins with weakest-link confidence, and exact decimal
+  money (scaled integers, no floating point).</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section id="does-not">
+<h2>What it does not do</h2>
+<ul>
+<li><strong>An agent cannot write.</strong> It proposes; only a human with the write
+role accepts a proposal into a commit, and the resulting commit records both parties.
+An agent token cannot hold a write or admin role.</li>
+<li><strong>The agent loop is not wired end to end.</strong> Nothing outside
+<code>engine/agent</code> consumes the reasoner&rsquo;s proposals, so a proposal does
+not reach the server on its own; a human drives the accept route. Acceptance is
+import-scoped: migration loss-report proposals only.</li>
+<li><strong>No content-rich real vendor XMI has been tested.</strong> Every XMI fixture
+except one is hand-written and says so. The one real document,
+<code>real-world/LandingGear.uml</code>, is a Papyrus project skeleton with zero model
+elements. A content-rich real export and its fidelity report remain unproven.</li>
+<li><strong>The native XMI-to-OKF direction is not independently measured.</strong>
+The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip; the read rests
+on the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</li>
+</ul>
+</section>
+
+<section id="architecture">
+<h2>Architecture</h2>
+<pre class="diagram"><code>Clients
+  workbench (server-rendered HTML + inline SVG) · mw CLI · MCP clients
+        |
+        v
+mw-server  (AGPL-3.0-or-later)
+  HTTP API and the workbench UI
+  commits and branches · three-way merge · locks (leases) · audit log
+  identity and roles · gate · migration · agent proposals and acceptance
+  governance · analytics
+  storage: SQLite (single user) or PostgreSQL (team)
+        |
+engine crates  (AGPL-3.0-or-later)
+  okf · graph · gate · binding · binding-xmi (SysML v1 XMI reader)
+  agent (Reasoner, proposals) · capi (C ABI) · mcp (MCP server) · analytics
+        |
+interchange
+  OKF 1.0 format and schema  (Apache-2.0)
+        |
+deployment
+  Docker image · Docker Compose · Helm chart</code></pre>
+<p>The engine crates are the contract. The server, the CLI and every connector build on
+them; nothing bypasses the OKF crate and the gate.</p>
+</section>
+
+<section id="numbers">
+<h2>Numbers you can check</h2>
+<ul>
+<li><strong>412 tests pass.</strong> Run <code>cargo test --workspace --no-fail-fast</code>
+from the repository root. 24 further tests — the PostgreSQL backend suite — are marked
+ignored in that run; the <code>postgres</code> CI job executes them against a real
+PostgreSQL 16 service container.</li>
+<li><strong>4 CI jobs:</strong> <code>engine</code>, <code>msrv</code>,
+<code>postgres</code>, <code>deploy</code> — defined in <code>.github/workflows/ci.yml</code>.</li>
+<li><strong>Corpus</strong> (<code>sample/corpus/coffee-machine</code>), pinned by tests
+and the evidence annex: 99 graph nodes, 165 graph edges, 25 requirements, 49 blocks,
+9 signals, 8 activities, 1 connected component, 0 isolated nodes.</li>
+</ul>
+</section>
+
+<section id="licence">
+<h2>Licence</h2>
+<p>The engine and server are AGPL-3.0-or-later. The OKF interchange format, and the
+importers and exporters, are Apache-2.0 — the split is project policy:
+&ldquo;Importers and exporters ship under Apache-2.0; the engine stays
+AGPL-3.0-or-later&rdquo; (<code>CONTRIBUTING.md</code>). The reference implementation of
+OKF lives in the AGPL engine.</p>
+<p>Commercial use follows the documented open-core pattern: a private business
+repository alongside the public engine, an evidence annex, and rule packs.</p>
+</section>
+
+</main>
+
+<footer>
+<p>Modelwrite. Hand-written HTML and CSS; no build step and no external requests.</p>
+<p>Licence: AGPL-3.0-or-later (engine and server), Apache-2.0 (interchange format and
+importers/exporters).</p>
+</footer>
+</body>
+</html>
