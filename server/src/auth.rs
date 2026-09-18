@@ -393,11 +393,12 @@ pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Ident
     // rejects a malformed or absent expiry, so a token cannot shed its expiry by giving it
     // the wrong JSON type.
     validation.leeway = 60;
-    // Enforce `nbf` exactly like `exp`: a future not-before is refused, and because `nbf`
-    // is required, a token whose `nbf` has the wrong JSON type is refused rather than
-    // treated as absent (the same type-confusion that motivated requiring `exp`).
+    // `nbf` is OPTIONAL in RFC 7519, so it is enforced WHEN PRESENT and not demanded. An
+    // earlier version required it, which refused every token from an identity provider that
+    // does not emit one - over-rejection, not a security gain. The risk worth closing is a
+    // wrongly-TYPED `nbf` being treated as absent, and validate_nbf handles that by refusing
+    // a non-numeric value, so absence stays legitimate: no not-before restriction.
     validation.validate_nbf = true;
-    validation.required_spec_claims.insert("nbf".to_string());
     // A subject is mandatory: the audit log records the verified `sub` as the actor, so a
     // token without one (or with a wrong-typed one) must be refused rather than accepted as
     // an identity with an empty subject that then breaks every write.

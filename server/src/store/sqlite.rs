@@ -88,6 +88,27 @@ BEGIN
 END;
 ";
 
+/// Bring a database created by an earlier version up to the current schema.
+///
+/// `CREATE TABLE IF NOT EXISTS` is not a migration: a table that already exists is left
+/// exactly as it was, so a column added to the CREATE statement never reaches an existing
+/// database. Without this, an installation that upgraded would keep an audit table with no
+/// `mechanism` column and EVERY write would fail - the kind of failure that is discovered
+/// during a customer upgrade rather than in a test. Migrations run in order and are
+/// idempotent, so starting the service twice is harmless.
+fn migrate(connection: &Connection) -> anyhow::Result<()> {
+    let has_mechanism: bool = connection
+        .prepare("SELECT 1 FROM pragma_table_info('audit') WHERE name = 'mechanism'")?
+        .exists([])?;
+    if !has_mechanism {
+        // The default is the honest one for rows written before the field existed: those
+        // rows came from a build that had no authentication, so nobody was verified.
+        connection
+            .execute_batch("ALTER TABLE audit ADD COLUMN mechanism TEXT NOT NULL DEFAULT 'open'")?;
+    }
+    Ok(())
+}
+
 pub struct SqliteStore {
     connection: std::sync::Mutex<Connection>,
 }
@@ -96,6 +117,7 @@ impl SqliteStore {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let connection = Connection::open(path)?;
         connection.execute_batch(SCHEMA)?;
+        migrate(&connection)?;
         Ok(Self {
             connection: std::sync::Mutex::new(connection),
         })

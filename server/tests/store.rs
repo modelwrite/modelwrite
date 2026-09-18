@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
 use server::store::{commit_hash, sqlite::SqliteStore, AuditEntry, GateRun, Store, StoreError};
 
 fn store() -> (SqliteStore, tempfile::TempDir) {
@@ -535,4 +535,41 @@ fn a_mutation_rolls_back_when_its_audit_entry_cannot_be_written() {
         store.project("coffee").unwrap().is_none(),
         "the project must NOT survive: the mutation rolled back with its record"
     );
+}
+
+#[test]
+fn an_older_database_gains_the_mechanism_column_instead_of_failing() {
+    // CREATE TABLE IF NOT EXISTS is not a migration: a table that already exists keeps its
+    // old shape, so a column added to the schema never reaches an installation that
+    // upgrades. Without a migration path every audit write on such a database fails and
+    // every mutation becomes a 500 - a failure discovered during a customer upgrade rather
+    // than in a test. This builds the OLD audit table by hand, then opens it.
+    use server::store::{AuditEntry, Store};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("old.db");
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let old_audit = "CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, at INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL)";
+        connection.execute_batch(old_audit).unwrap();
+    }
+
+    let store = SqliteStore::open(&path).expect("an older database must open, not fail");
+    store.create_project("coffee", None).unwrap();
+    let entry = AuditEntry {
+        id: 0,
+        project: "coffee".to_string(),
+        at: 1,
+        actor: "alex".to_string(),
+        mechanism: "static".to_string(),
+        action: "commit.create".to_string(),
+        subject: "main".to_string(),
+        detail: "after the migration".to_string(),
+    };
+    store
+        .append_audit(&entry)
+        .expect("the migrated table must accept a write");
+    let rows = store.audit("coffee", 10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].mechanism, "static");
 }
