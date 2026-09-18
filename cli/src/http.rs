@@ -3,8 +3,9 @@
 //! TLS belongs at the reverse proxy, and the client says so rather than pretending.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -21,7 +22,13 @@ struct Client {
     host: String,
     port: u16,
     token: Option<String>,
+    connect_timeout: Duration,
+    io_timeout: Duration,
 }
+
+/// A server that accepts the connection but never answers must not hang the CLI forever.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Run a command against the service at url. token, when present, is the bearer token
 /// already read from the environment variable named by --token.
@@ -61,6 +68,8 @@ impl Client {
             host,
             port,
             token: token.map(str::to_string),
+            connect_timeout: CONNECT_TIMEOUT,
+            io_timeout: IO_TIMEOUT,
         })
     }
 
@@ -207,8 +216,19 @@ impl Client {
 
     fn request(&self, method: &str, path: &str, body: Option<Vec<u8>>) -> Result<Response, String> {
         let addr = format!("{}:{}", self.host, self.port);
-        let mut stream =
-            TcpStream::connect(&addr).map_err(|e| format!("cannot connect to {}: {}", addr, e))?;
+        let socket = addr
+            .to_socket_addrs()
+            .map_err(|e| format!("cannot resolve {}: {}", addr, e))?
+            .next()
+            .ok_or_else(|| format!("{} resolved to no address", addr))?;
+        let mut stream = TcpStream::connect_timeout(&socket, self.connect_timeout)
+            .map_err(|e| format!("cannot connect to {}: {}", addr, e))?;
+        stream
+            .set_read_timeout(Some(self.io_timeout))
+            .map_err(|e| format!("cannot configure the read timeout: {}", e))?;
+        stream
+            .set_write_timeout(Some(self.io_timeout))
+            .map_err(|e| format!("cannot configure the write timeout: {}", e))?;
 
         let mut head = format!(
             "{} {} HTTP/1.1\r\nHost: {}\r\nAccept: application/json\r\n",
@@ -239,9 +259,20 @@ impl Client {
         stream.flush().map_err(|e| format!("flush failed: {}", e))?;
 
         let mut raw = Vec::new();
-        stream
-            .read_to_end(&mut raw)
-            .map_err(|e| format!("read failed: {}", e))?;
+        stream.read_to_end(&mut raw).map_err(|e| {
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) {
+                format!(
+                    "the server at {} did not answer within {} seconds",
+                    addr,
+                    self.io_timeout.as_secs()
+                )
+            } else {
+                format!("read failed: {}", e)
+            }
+        })?;
         parse_response(&raw)
     }
 
@@ -350,4 +381,37 @@ fn dechunk(mut data: &[u8]) -> Result<Vec<u8>, String> {
         data = &data[2..];
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_that_accepts_but_never_answers_fails_with_a_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let _stream = listener.accept().unwrap();
+            // Hold the accepted connection open without answering; the client must time out.
+            std::thread::sleep(Duration::from_secs(3));
+        });
+
+        let client = Client {
+            host: "127.0.0.1".to_string(),
+            port: addr.port(),
+            token: None,
+            connect_timeout: Duration::from_secs(1),
+            io_timeout: Duration::from_millis(500),
+        };
+        let err = match client.request("GET", "/projects", None) {
+            Err(e) => e,
+            Ok(_) => panic!("a silent server must not produce a response"),
+        };
+        assert!(
+            err.contains("did not answer"),
+            "expected a clear timeout message, got: {}",
+            err
+        );
+    }
 }
