@@ -901,6 +901,30 @@ impl Store for PostgresStore {
         })
     }
 
+    fn gate_runs_for_commit(&self, project: &str, hash: &str) -> Result<Vec<GateRun>, StoreError> {
+        self.with_client(|client| {
+            let rows = client
+                .query(
+                    "SELECT project, branch, reference_hash, candidate_hash, passed, evidence, created_at FROM gate_runs WHERE project = $1 AND candidate_hash = $2 ORDER BY id",
+                    &[&project, &hash],
+                )
+                .map_err(backend)?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(GateRun {
+                        project: row.get(0),
+                        branch: row.get(1),
+                        reference_hash: row.get(2),
+                        candidate_hash: row.get(3),
+                        passed: row.get(4),
+                        evidence: row.get(5),
+                        created_at: row.get(6),
+                    })
+                })
+                .collect()
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn record_import(
         &self,

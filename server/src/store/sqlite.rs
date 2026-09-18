@@ -842,6 +842,26 @@ impl Store for SqliteStore {
         })
     }
 
+    fn gate_runs_for_commit(&self, project: &str, hash: &str) -> Result<Vec<GateRun>, StoreError> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT project, branch, reference_hash, candidate_hash, passed, evidence, created_at FROM gate_runs WHERE project = ?1 AND candidate_hash = ?2 ORDER BY id",
+            )?;
+            let rows = stmt.query_map(params![project, hash], |row| {
+                Ok(GateRun {
+                    project: row.get(0)?,
+                    branch: row.get(1)?,
+                    reference_hash: row.get(2)?,
+                    candidate_hash: row.get(3)?,
+                    passed: row.get::<_, i64>(4)? != 0,
+                    evidence: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn record_import(
         &self,

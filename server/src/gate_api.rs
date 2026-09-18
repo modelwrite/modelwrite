@@ -117,19 +117,64 @@ pub async fn list_gate_runs(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let runs = state.store.gate_runs(&project).map_err(map_store_error)?;
-    let out: Vec<Value> = runs
-        .iter()
-        .map(|r| {
-            json!({
-                "project": r.project,
-                "branch": r.branch,
-                "referenceHash": r.reference_hash,
-                "candidateHash": r.candidate_hash,
-                "passed": r.passed,
-                "evidence": serde_json::from_str::<Value>(&r.evidence).unwrap_or(Value::Null),
-                "createdAt": r.created_at
-            })
-        })
-        .collect();
+    let out: Vec<Value> = runs.iter().map(gate_run_json).collect();
     Ok(Json(Value::Array(out)))
+}
+
+/// The JSON a recorded gate run reads as. Shared by the project-wide listing and the
+/// per-commit checks endpoint, so the two surfaces can never disagree on the shape of one
+/// run - and both render the recorded evidence, which is the authority, never a re-run.
+fn gate_run_json(run: &GateRun) -> Value {
+    json!({
+        "project": run.project,
+        "branch": run.branch,
+        "referenceHash": run.reference_hash,
+        "candidateHash": run.candidate_hash,
+        "passed": run.passed,
+        "evidence": serde_json::from_str::<Value>(&run.evidence).unwrap_or(Value::Null),
+        "createdAt": run.created_at
+    })
+}
+
+/// `GET /projects/:project/commits/:hash/checks` - what has been checked about THIS model.
+///
+/// A check is attached to the exact commit it was run against, never to a branch or a
+/// project: the store filters on the candidate hash, so a later commit does not inherit an
+/// earlier verdict. A commit that exists but has no runs is the one answer that must be
+/// explicit rather than implied - an empty list reads like a pass, which is the most
+/// dangerous ambiguity in a tool whose proposition is that a model can be proved - so the
+/// response carries a `checked` flag: `false` says UNCHECKED, never a bare empty list.
+pub async fn commit_checks(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, hash)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    // The answer exposes a gate run's verdict and evidence, so it is held to the same
+    // permission as the project-wide listing: an author may run a gate and see its result,
+    // a reviewer reads runs it did not start.
+    if !identity.may(Permission::Write) && !identity.may(Permission::Review) {
+        return Err(ApiError::forbidden("write or review permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    // A missing commit is a 404, never a silent "unchecked": a caller must be able to tell
+    // "this model does not exist" from "this model exists and nobody checked it", and the
+    // 404 names only the missing commit, never internal detail.
+    let commit = state
+        .store
+        .commit(&project, &hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
+    let runs = state
+        .store
+        .gate_runs_for_commit(&project, &hash)
+        .map_err(map_store_error)?;
+    let checked = !runs.is_empty();
+    let checks: Vec<Value> = runs.iter().map(gate_run_json).collect();
+    Ok(Json(json!({
+        "commit": commit.hash,
+        "checked": checked,
+        "checks": checks,
+    })))
 }

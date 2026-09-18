@@ -528,6 +528,52 @@ fn audit_rows_ride_each_mutation_transaction() {
 
 #[test]
 #[ignore = "requires MW_TEST_DATABASE_URL"]
+fn a_gate_run_is_queryable_by_its_candidate_commit() {
+    // A check is attached to the exact commit it was run against: the store answers by
+    // candidate hash, so a different commit in the same project does not inherit the run.
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+    let candidate = store
+        .commit_model(&project, "main", "okf", "alex", "first", None, None, None)
+        .unwrap();
+    let other = store
+        .commit_model(&project, "main", "okf2", "alex", "second", None, None, None)
+        .unwrap();
+
+    store
+        .record_gate_run(
+            &GateRun {
+                project: project.clone(),
+                branch: "main".to_string(),
+                reference_hash: "r".to_string(),
+                candidate_hash: candidate.hash.clone(),
+                passed: true,
+                evidence: "{}".to_string(),
+                created_at: "1".to_string(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let runs = store
+        .gate_runs_for_commit(&project, &candidate.hash)
+        .unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].candidate_hash, candidate.hash);
+    assert!(runs[0].passed);
+
+    assert!(
+        store
+            .gate_runs_for_commit(&project, &other.hash)
+            .unwrap()
+            .is_empty(),
+        "a later commit must not inherit the candidate's run"
+    );
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
 fn the_audit_table_refuses_update_and_delete() {
     let store = require_store();
     let project = unique_project();

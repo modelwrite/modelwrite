@@ -415,6 +415,12 @@ pub trait Store: Send + Sync {
     fn record_gate_run(&self, run: &GateRun, audit: Option<&AuditEntry>) -> Result<(), StoreError>;
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError>;
 
+    /// The gate runs that checked THIS commit (the candidate), oldest first. The answer is
+    /// scoped to a commit, never a branch or a project, so a later commit does not inherit
+    /// an earlier verdict: a verdict that followed a branch would be a claim about a model
+    /// that was never checked.
+    fn gate_runs_for_commit(&self, project: &str, hash: &str) -> Result<Vec<GateRun>, StoreError>;
+
     /// Record an import's loss report and round-trip diff, keyed by (project, artifact_hash).
     /// This runs BEFORE the commit is attempted, so a refused import still has its report
     /// retrievable - the caller must be able to read exactly which losses to accept. The key

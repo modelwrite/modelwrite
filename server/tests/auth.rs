@@ -374,6 +374,11 @@ async fn every_route_denies_a_caller_without_permission_or_scope() {
             get("/projects/tea/commits/abc"),
         ),
         (
+            "get_commit_checks",
+            viewer(),
+            get("/projects/coffee/commits/abc/checks"),
+        ),
+        (
             "create_branch",
             viewer(),
             post("/projects/coffee/branches", branch()),

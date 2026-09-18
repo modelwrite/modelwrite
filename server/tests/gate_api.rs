@@ -209,3 +209,97 @@ async fn a_gate_run_creates_the_evidence_directory_it_needs() {
         files
     );
 }
+
+#[tokio::test]
+async fn a_gate_run_appears_on_the_candidate_commit_and_not_on_another() {
+    // A check is attached to the exact commit it was run against: gating candidate against
+    // reference records the run under the CANDIDATE, and the reference must not inherit it.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    let (reference, candidate) = seed_project(&router).await;
+
+    let run = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/gate",
+            serde_json::json!({ "reference": reference, "candidate": candidate }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(run.status(), StatusCode::OK);
+
+    let checks = router
+        .clone()
+        .oneshot(get(&format!(
+            "/projects/coffee/commits/{}/checks",
+            candidate
+        )))
+        .await
+        .unwrap();
+    assert_eq!(checks.status(), StatusCode::OK);
+    let body = json_body(checks).await;
+    assert_eq!(body["commit"], candidate.as_str());
+    assert_eq!(body["checked"], true);
+    let runs = body["checks"].as_array().unwrap();
+    assert_eq!(runs.len(), 1, "the candidate commit must list its run");
+    assert_eq!(runs[0]["candidateHash"], candidate.as_str());
+    assert_eq!(runs[0]["passed"], false);
+    // The recorded evidence is part of the answer, not just the verdict.
+    assert_eq!(runs[0]["evidence"]["passed"], false);
+
+    // The reference was the comparison point, never the candidate: it must not inherit the
+    // verdict the candidate earned.
+    let reference_checks = router
+        .oneshot(get(&format!(
+            "/projects/coffee/commits/{}/checks",
+            reference
+        )))
+        .await
+        .unwrap();
+    let reference_body = json_body(reference_checks).await;
+    assert_eq!(reference_body["checked"], false);
+    assert!(
+        reference_body["checks"].as_array().unwrap().is_empty(),
+        "a verdict must not follow a branch or a project to a commit it never checked"
+    );
+}
+
+#[tokio::test]
+async fn a_commit_nobody_has_checked_says_unchecked_not_an_empty_list() {
+    // An empty list reads like a pass; the one dangerous ambiguity this endpoint exists to
+    // remove. A commit with no runs must say UNCHECKED explicitly.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    let (reference, _candidate) = seed_project(&router).await;
+
+    let response = router
+        .oneshot(get(&format!(
+            "/projects/coffee/commits/{}/checks",
+            reference
+        )))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["checked"], false, "an unchecked commit must say so");
+    assert!(
+        body.get("checks")
+            .is_some_and(|c| c.as_array().unwrap().is_empty()),
+        "the answer carries an explicit unchecked flag, never only a bare list"
+    );
+}
+
+#[tokio::test]
+async fn checks_for_a_missing_commit_is_not_found() {
+    // "This model does not exist" is a different answer from "nobody checked this model".
+    // The missing commit is a 404, never a silent unchecked.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    let (_reference, _candidate) = seed_project(&router).await;
+
+    let response = router
+        .oneshot(get("/projects/coffee/commits/missing/checks"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

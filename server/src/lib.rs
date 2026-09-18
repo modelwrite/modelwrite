@@ -90,6 +90,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/projects/:project/commits/:hash", get(api::get_commit))
         .route(
+            "/projects/:project/commits/:hash/checks",
+            get(gate_api::commit_checks),
+        )
+        .route(
             "/projects/:project/branches",
             post(api::create_branch).get(api::list_branches),
         )
