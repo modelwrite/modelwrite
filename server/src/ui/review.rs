@@ -557,7 +557,7 @@ fn merge_result_page(
             p { "Commit " code { (short_hash(&commit.hash)) } }
             p { "Merge base " code { (short_hash(&result.base)) } }
             p {
-                a href={ "/ui/projects/" (project) "/model?commit=" (commit.hash.as_str()) } {
+                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model?commit=" (crate::ui::urlencode(commit.hash.as_str())) } {
                     "View the merged model"
                 }
             }
@@ -614,7 +614,7 @@ fn conflict_value(value: &Option<String>) -> Markup {
 /// The merge form, shared by the project page and the conflict page's resolution form.
 pub fn merge_form_markup(project: &str, branch: &str, other: &str) -> Markup {
     html! {
-        form method="post" action={ "/ui/projects/" (project) "/merge" } class="merge-form" {
+        form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/merge" } class="merge-form" {
             p {
                 label for="branch" { "Merge into branch" }
                 input type="text" id="branch" name="branch" value=(branch) required;

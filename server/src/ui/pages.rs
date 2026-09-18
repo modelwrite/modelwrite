@@ -192,8 +192,9 @@ fn branch_list_page(
                 }
             }
         }
-        h2 { "Compare" }
-        form method="get" action={ "/ui/projects/" (project) "/compare" } class="compare-form" {
+        @if identity.may(Permission::Write) {
+            h2 { "Compare" }
+            form method="get" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare" } class="compare-form" {
             p {
                 label for="from" { "from" }
                 input type="text" id="from" name="from" placeholder="branch or commit";
@@ -202,10 +203,16 @@ fn branch_list_page(
                 label for="to" { "to" }
                 input type="text" id="to" name="to" placeholder="branch or commit";
             }
-            button type="submit" { "Compare" }
+                button type="submit" { "Compare" }
+            }
+            h2 { "Merge" }
+            (merge_form_markup(project, "", ""))
+        } @else {
+            // A form the caller cannot submit is a trap: it invites an action, then refuses it
+            // after the work is typed. Showing nothing is the honest answer, and the refusal
+            // is still enforced server-side for anything that reaches the route directly.
+            p class="meta" { "Merging and comparing require write permission on this project." }
         }
-        h2 { "Merge" }
-        (merge_form_markup(project, "", ""))
     };
     layout::shell(
         &title,

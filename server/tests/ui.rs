@@ -1269,3 +1269,101 @@ async fn the_edit_form_renders_the_corpus_block_with_its_attributes() {
         "attribute rows must be indexed"
     );
 }
+
+/// A tiny document with one block, optionally including a second block whose name the
+/// caller chooses, so two branches can add the SAME element differently.
+fn small_model(second: Option<&str>) -> serde_json::Value {
+    let mut structure = vec![serde_json::json!({
+        "id": "b1", "name": "Block", "kind": "block",
+        "stereotypes": ["Block"], "attributes": [], "documentation": ""
+    })];
+    let mut nodes = vec![serde_json::json!({ "id": "b1", "kind": "block", "name": "Block" })];
+    if let Some(name) = second {
+        structure.push(serde_json::json!({
+            "id": "b9", "name": name, "kind": "block",
+            "stereotypes": ["Block"], "attributes": [], "documentation": ""
+        }));
+        nodes.push(serde_json::json!({ "id": "b9", "kind": "block", "name": name }));
+    }
+    serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "structure": structure,
+        "requirements": [],
+        "graph": { "nodes": nodes, "edges": [] }
+    })
+}
+
+#[tokio::test]
+async fn a_conflict_with_no_base_side_says_absent_rather_than_showing_nothing() {
+    // An element added on BOTH branches has no base version at all. Rendering an empty
+    // cell there would read as "no change" when the truth is that two people invented the
+    // same element differently - which is exactly the reading a reviewer must not make.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let created = router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let base = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "base", "okf": small_model(None) }),
+        ))
+        .await
+        .unwrap();
+    let base_hash = json_body(base).await["hash"].as_str().unwrap().to_string();
+
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": base_hash }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+
+    // The same NEW element, added on both branches with different content.
+    for (branch, name) in [("main", "Ours"), ("feature", "Theirs")] {
+        let committed = router
+            .clone()
+            .oneshot(post(
+                "/projects/coffee/commits",
+                serde_json::json!({ "branch": branch, "author": "alex", "message": "add", "okf": small_model(Some(name)) }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(committed.status(), StatusCode::CREATED, "{}", branch);
+    }
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/merge",
+            &[
+                ("branch", "main"),
+                ("other", "feature"),
+                ("message", "merge"),
+                ("author", "alex"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Merge conflict"),
+        "a conflict must be a page, not an error"
+    );
+    assert!(
+        html.contains("(absent)"),
+        "a missing base side must be named, not left blank"
+    );
+}
