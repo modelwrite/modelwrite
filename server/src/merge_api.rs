@@ -6,13 +6,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{
-    commit_json, commit_refusal_guard, load_model, map_store_error, resolve_author,
-    touched_elements, validate_name, verify_actor, ApiState,
+    commit_json, commit_refusal_guard, load_model, lock_refusal_message, map_store_error,
+    resolve_author, touched_elements, validate_name, verify_actor, ApiState,
 };
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::merge::merge;
-use crate::store::{now_seconds, AuditEntry, CommitGuard};
+use crate::store::{now_seconds, AuditEntry, CommitGuard, Store, StoreError};
 
 #[derive(Deserialize)]
 pub struct MergeRequest {
@@ -29,22 +29,18 @@ pub struct MergeRequest {
 
 /// Every commit reachable from a tip, as a set. The walk stops at a commit already seen, so
 /// a malformed cycle in stored data cannot loop forever, and membership is constant time.
-fn ancestry_set(
-    state: &ApiState,
+pub fn ancestry_set(
+    store: &dyn Store,
     project: &str,
     tip: &str,
-) -> Result<std::collections::HashSet<String>, ApiError> {
+) -> Result<std::collections::HashSet<String>, StoreError> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut stack: Vec<String> = vec![tip.to_string()];
     while let Some(hash) = stack.pop() {
         if !seen.insert(hash.clone()) {
             continue;
         }
-        if let Some(commit) = state
-            .store
-            .commit(project, &hash)
-            .map_err(map_store_error)?
-        {
+        if let Some(commit) = store.commit(project, &hash)? {
             for parent in &commit.parents {
                 stack.push(parent.clone());
             }
@@ -63,17 +59,19 @@ fn ancestry_set(
 /// wins and the revert disappears with no conflict reported. When the search finds more
 /// than one lowest candidate - a criss-cross history - it refuses with a conflict rather
 /// than guessing, because either guess can lose work.
-fn common_ancestor(
-    state: &ApiState,
+pub fn common_ancestor(
+    store: &dyn Store,
     project: &str,
     ours: &str,
     theirs: &str,
-) -> Result<String, ApiError> {
-    let our_side = ancestry_set(state, project, ours)?;
-    let their_side = ancestry_set(state, project, theirs)?;
+) -> Result<String, StoreError> {
+    let our_side = ancestry_set(store, project, ours)?;
+    let their_side = ancestry_set(store, project, theirs)?;
     let mut shared: Vec<String> = our_side.intersection(&their_side).cloned().collect();
     if shared.is_empty() {
-        return Err(ApiError::conflict("the branches share no common ancestor"));
+        return Err(StoreError::Conflict(
+            "the branches share no common ancestor".to_string(),
+        ));
     }
     shared.sort();
 
@@ -83,7 +81,7 @@ fn common_ancestor(
     let mut ancestries: std::collections::HashMap<String, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
     for candidate in &shared {
-        ancestries.insert(candidate.clone(), ancestry_set(state, project, candidate)?);
+        ancestries.insert(candidate.clone(), ancestry_set(store, project, candidate)?);
     }
 
     let mut lowest: Vec<String> = Vec::new();
@@ -105,11 +103,11 @@ fn common_ancestor(
         // Unreachable in a finite history: the reachability relation is a partial order, so
         // a non-empty set of shared commits always has a maximal element. Kept as a refusal
         // rather than a panic, in case the data ever stops being a finite history.
-        0 => Err(ApiError::internal(
-            "no shared commit survived the merge base search",
+        0 => Err(StoreError::Backend(
+            "no shared commit survived the merge base search".to_string(),
         )),
-        _ => Err(ApiError::conflict(
-            "the branches have more than one possible merge base, so the merge cannot be computed automatically",
+        _ => Err(StoreError::Conflict(
+            "the branches have more than one possible merge base, so the merge cannot be computed automatically".to_string(),
         )),
     }
 }
@@ -150,10 +148,12 @@ pub async fn merge_branches(
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {}", body.other)))?;
 
-    let base_hash = common_ancestor(&state, &project, &ours_tip, &theirs_tip)?;
-    let base = load_model(&state, &project, &base_hash)?;
-    let ours = load_model(&state, &project, &ours_tip)?;
-    let theirs = load_model(&state, &project, &theirs_tip)?;
+    let base_hash = common_ancestor(state.store.as_ref(), &project, &ours_tip, &theirs_tip)
+        .map_err(map_store_error)?;
+    let base = load_model(state.store.as_ref(), &project, &base_hash).map_err(map_store_error)?;
+    let ours = load_model(state.store.as_ref(), &project, &ours_tip).map_err(map_store_error)?;
+    let theirs =
+        load_model(state.store.as_ref(), &project, &theirs_tip).map_err(map_store_error)?;
 
     let outcome = merge(&base, &ours, &theirs);
     if !outcome.conflicts.is_empty() {
@@ -211,9 +211,10 @@ pub async fn merge_branches(
             .map_err(map_store_error)?;
         let holder = body.holder.as_deref().unwrap_or("");
         if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
-            return Err(ApiError::conflict(format!(
-                "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
-                blocked.element, blocked.holder, blocked.expires_at
+            return Err(ApiError::conflict(lock_refusal_message(
+                &blocked.element,
+                &blocked.holder,
+                blocked.expires_at,
             )));
         }
     }
@@ -245,10 +246,11 @@ pub async fn merge_branches(
         detail: format!("merged {} into {}", body.other, body.branch),
     };
     let commit = commit_refusal_guard(
-        &state,
+        state.store.as_ref(),
         &project,
         &body.branch,
         &identity.subject,
+        state.auth.mechanism(),
         state.store.commit_merge(
             &project,
             &body.branch,
@@ -259,7 +261,8 @@ pub async fn merge_branches(
             Some(guard),
             Some(&audit),
         ),
-    )?;
+    )
+    .map_err(map_store_error)?;
 
     Ok((
         StatusCode::CREATED,

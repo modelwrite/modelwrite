@@ -827,3 +827,75 @@ async fn offline_gate_matches_the_server_verdict_on_the_corpus_pair() {
         "offline and server must return the same verdict and evidence"
     );
 }
+
+#[test]
+fn offline_lock_acquire_deduplicates_elements_and_requires_the_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("mw.db");
+    let db = db.to_str().unwrap();
+
+    // Acquiring against a project that does not exist must fail, not write an orphaned row.
+    let out = run_mw(
+        &[
+            "--db",
+            db,
+            "lock",
+            "acquire",
+            "ghost",
+            "--branch",
+            "main",
+            "--elements",
+            "a",
+            "--holder",
+            "alex",
+            "--ttl",
+            "300",
+        ],
+        &[],
+    );
+    assert!(
+        !out.status.success(),
+        "a lock on a missing project must fail"
+    );
+    assert!(
+        stderr(&out).contains("not found"),
+        "must say the project is not found, got: {}",
+        stderr(&out)
+    );
+
+    // Releasing against a missing project must also fail.
+    let out = run_mw(
+        &[
+            "--db", db, "lock", "release", "ghost", "--holder", "alex", "--ids", "x",
+        ],
+        &[],
+    );
+    assert!(
+        !out.status.success(),
+        "a release on a missing project must fail"
+    );
+
+    run_ok(&["--db", db, "project", "create", "coffee"]);
+
+    // --elements a,a must yield ONE lease, not two.
+    let acquired = run_ok(&[
+        "--db",
+        db,
+        "lock",
+        "acquire",
+        "coffee",
+        "--branch",
+        "main",
+        "--elements",
+        "a,a",
+        "--holder",
+        "alex",
+        "--ttl",
+        "300",
+    ]);
+    assert_eq!(
+        acquired.as_array().unwrap().len(),
+        1,
+        "a repeated element must yield one lease"
+    );
+}

@@ -5,13 +5,16 @@
 //! element locks exactly as the server does, because an air-gapped site is where a model
 //! is edited and committed, and a commit already in the history cannot be un-made.
 
-use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde_json::{json, Value};
 
+use server::api::{
+    all_touched, commit_refusal_guard, load_model, lock_refusal_message, prepare_lock_elements,
+};
+use server::merge_api::common_ancestor;
 use server::store::{
-    now_epoch, now_seconds, sqlite::SqliteStore, AuditEntry, Commit, CommitGuard, GateRun, Store,
+    now_epoch, now_seconds, sqlite::SqliteStore, AuditEntry, CommitGuard, GateRun, Store,
 };
 
 use crate::Command;
@@ -59,7 +62,7 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
             let tip_hash = store.branch_tip(&project, &branch).map_err(map)?;
             let touched = match tip_hash.as_deref() {
                 Some(tip) => {
-                    let tip_model = load_model(&store, &project, tip)?;
+                    let tip_model = load_model(&store, &project, tip).map_err(map)?;
                     server::api::touched_elements(&tip_model, &root)
                 }
                 None => all_touched(&root),
@@ -87,6 +90,8 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                 &store,
                 &project,
                 &branch,
+                "anonymous",
+                "offline",
                 store.commit_model(
                     &project,
                     &branch,
@@ -96,7 +101,8 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                     Some(guard),
                     Some(&audit),
                 ),
-            )?;
+            )
+            .map_err(map)?;
             Ok(server::api::commit_json(&commit))
         }
         Command::Log { project, branch } => {
@@ -163,8 +169,8 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                 .commit(&project, &to)
                 .map_err(map)?
                 .ok_or_else(|| format!("commit {} not found", to))?;
-            let tip_model = load_model(&store, &project, &tip_hash)?;
-            let target_model = load_model(&store, &project, &to)?;
+            let tip_model = load_model(&store, &project, &tip_hash).map_err(map)?;
+            let target_model = load_model(&store, &project, &to).map_err(map)?;
             let report = okf::validate::validate(&target_model);
             if !report.valid {
                 return Err(format!(
@@ -190,6 +196,8 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                 &store,
                 &project,
                 &branch,
+                "anonymous",
+                "offline",
                 store.commit_model(
                     &project,
                     &branch,
@@ -199,7 +207,8 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                     Some(guard),
                     Some(&audit),
                 ),
-            )?;
+            )
+            .map_err(map)?;
             Ok(server::api::commit_json(&commit))
         }
         Command::Gate {
@@ -214,6 +223,10 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
             holder,
             ttl_seconds,
         } => {
+            require_project(&store, &project)?;
+            // The same validation and deduplication the server applies, so --elements a,a
+            // yields ONE lease, and an invalid element name is refused rather than stored.
+            let elements = prepare_lock_elements(elements).map_err(|e| e.message)?;
             let now = now_seconds();
             let detail = format!(
                 "{} element(s) by {} until {}",
@@ -240,6 +253,7 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
             holder,
             ids,
         } => {
+            require_project(&store, &project)?;
             let audit = audit_entry(&project, "lock.release", &ids.join(","), "released lock(s)");
             let released = store
                 .release_locks(&project, &holder, &ids, Some(&audit))
@@ -278,10 +292,10 @@ fn merge(
         .map_err(map)?
         .ok_or_else(|| format!("branch {} not found", other))?;
 
-    let base_hash = common_ancestor(store, project, &ours_tip, &theirs_tip)?;
-    let base = load_model(store, project, &base_hash)?;
-    let ours = load_model(store, project, &ours_tip)?;
-    let theirs = load_model(store, project, &theirs_tip)?;
+    let base_hash = common_ancestor(store, project, &ours_tip, &theirs_tip).map_err(map)?;
+    let base = load_model(store, project, &base_hash).map_err(map)?;
+    let ours = load_model(store, project, &ours_tip).map_err(map)?;
+    let theirs = load_model(store, project, &theirs_tip).map_err(map)?;
 
     let outcome = server::merge::merge(&base, &ours, &theirs);
     if !outcome.conflicts.is_empty() {
@@ -354,6 +368,8 @@ fn merge(
         store,
         project,
         branch,
+        "anonymous",
+        "offline",
         store.commit_merge(
             project,
             branch,
@@ -364,7 +380,8 @@ fn merge(
             Some(guard),
             Some(&audit),
         ),
-    )?;
+    )
+    .map_err(map)?;
     Ok(json!({
         "commit": server::api::commit_json(&commit),
         "base": base_hash,
@@ -380,8 +397,8 @@ fn gate(
     candidate: &str,
 ) -> Result<Value, String> {
     require_project(store, project)?;
-    let reference_model = load_model(store, project, reference)?;
-    let candidate_model = load_model(store, project, candidate)?;
+    let reference_model = load_model(store, project, reference).map_err(map)?;
+    let candidate_model = load_model(store, project, candidate).map_err(map)?;
 
     let outcome = gate::run(&reference_model, &candidate_model, false);
     let branch = store
@@ -424,132 +441,6 @@ fn require_project(store: &SqliteStore, project: &str) -> Result<(), String> {
         return Err(format!("project {} not found", project));
     }
     Ok(())
-}
-
-/// Load the OKF document behind a commit hash.
-fn load_model(
-    store: &SqliteStore,
-    project: &str,
-    hash: &str,
-) -> Result<okf::types::OkfRoot, String> {
-    let commit = store
-        .commit(project, hash)
-        .map_err(map)?
-        .ok_or_else(|| format!("commit {} not found", hash))?;
-    let bytes = store
-        .blob(&commit.okf_hash)
-        .map_err(map)?
-        .ok_or_else(|| "the stored model is missing".to_string())?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("the stored model could not be read: {}", e))
-}
-
-/// Every element an incoming document names, used when a branch has no tip yet.
-fn all_touched(root: &okf::types::OkfRoot) -> Vec<String> {
-    let mut ids = okf::diff::element_ids(root);
-    if let Some(graph) = &root.graph {
-        for edge in &graph.edges {
-            ids.insert(edge.source.clone());
-            ids.insert(edge.target.clone());
-        }
-    }
-    ids.into_iter().collect()
-}
-
-/// Every commit reachable from a tip, as a set.
-fn ancestry_set(store: &SqliteStore, project: &str, tip: &str) -> Result<HashSet<String>, String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut stack: Vec<String> = vec![tip.to_string()];
-    while let Some(hash) = stack.pop() {
-        if !seen.insert(hash.clone()) {
-            continue;
-        }
-        if let Some(commit) = store.commit(project, &hash).map_err(map)? {
-            for parent in &commit.parents {
-                stack.push(parent.clone());
-            }
-        }
-    }
-    Ok(seen)
-}
-
-/// The LOWEST commit both branches share.
-fn common_ancestor(
-    store: &SqliteStore,
-    project: &str,
-    ours: &str,
-    theirs: &str,
-) -> Result<String, String> {
-    let our_side = ancestry_set(store, project, ours)?;
-    let their_side = ancestry_set(store, project, theirs)?;
-    let mut shared: Vec<String> = our_side.intersection(&their_side).cloned().collect();
-    if shared.is_empty() {
-        return Err("the branches share no common ancestor".to_string());
-    }
-    shared.sort();
-
-    let mut ancestries: HashMap<String, HashSet<String>> = HashMap::new();
-    for candidate in &shared {
-        ancestries.insert(candidate.clone(), ancestry_set(store, project, candidate)?);
-    }
-
-    let mut lowest: Vec<String> = Vec::new();
-    for candidate in &shared {
-        let is_ancestor_of_another = shared.iter().any(|other| {
-            other != candidate
-                && ancestries
-                    .get(other)
-                    .map(|side| side.contains(candidate))
-                    .unwrap_or(false)
-        });
-        if !is_ancestor_of_another {
-            lowest.push(candidate.clone());
-        }
-    }
-
-    match lowest.len() {
-        1 => Ok(lowest.remove(0)),
-        0 => Err("no shared commit survived the merge base search".to_string()),
-        _ => Err("the branches have more than one possible merge base, so the merge cannot be computed automatically".to_string()),
-    }
-}
-
-/// The exact message the server uses when it refuses a write for a live lease held by
-/// another holder.
-fn lock_refusal_message(element: &str, holder: &str, expires_at: i64) -> String {
-    format!(
-        "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
-        element, holder, expires_at
-    )
-}
-
-/// Call a commit-producing store method and, if it is refused because an element is locked,
-/// record commit.refused before surfacing the refusal, exactly as the server does.
-fn commit_refusal_guard(
-    store: &SqliteStore,
-    project: &str,
-    branch: &str,
-    result: Result<Commit, server::store::StoreError>,
-) -> Result<Commit, String> {
-    match result {
-        Ok(commit) => Ok(commit),
-        Err(error) if server::store::is_lock_refusal(&error) => {
-            let detail = error.to_string();
-            if let Err(recording) = store.append_audit(&AuditEntry {
-                id: 0,
-                project: project.to_string(),
-                at: now_seconds(),
-                actor: "anonymous".to_string(),
-                mechanism: "offline".to_string(),
-                action: "commit.refused".to_string(),
-                subject: branch.to_string(),
-                detail: detail.clone(),
-            }) {
-                eprintln!("could not record the refusal: {}", recording);
-            }
-            Err(map(error))
-        }
-        Err(error) => Err(map(error)),
-    }
 }
 
 /// An audit entry for an offline mutation. Nobody was authenticated (there is no server),

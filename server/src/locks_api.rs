@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{
-    map_store_error, record_refusal, validate_element_name, validate_name, verify_actor, ApiState,
+    map_store_error, prepare_lock_elements, record_refusal, validate_name, verify_actor, ApiState,
 };
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
@@ -57,22 +57,9 @@ pub async fn acquire_locks(
     verify_actor(&state.auth, &identity, Some(&body.holder))?;
     validate_name("branch name", &body.branch)?;
     validate_holder(&body.holder)?;
-    if body.elements.is_empty() {
-        return Err(ApiError::bad_request("at least one element is required"));
-    }
-    for element in &body.elements {
-        validate_element_name(element)?;
-    }
-    // A repeated element would acquire one lease but be reported twice, which reads as two
-    // leases for one element. Deduplicate before anything is written.
-    let elements: Vec<String> = {
-        let mut seen = std::collections::BTreeSet::new();
-        body.elements
-            .iter()
-            .filter(|e| seen.insert((*e).clone()))
-            .cloned()
-            .collect()
-    };
+    // Validate and deduplicate the element list through the SAME shared helper the offline
+    // CLI uses, so a repeated element cannot acquire one lease and be reported twice.
+    let elements = prepare_lock_elements(body.elements)?;
     if !(30..=86400).contains(&body.ttl_seconds) {
         return Err(ApiError::bad_request(
             "ttlSeconds must be between 30 and 86400",

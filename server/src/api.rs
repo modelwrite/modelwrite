@@ -77,6 +77,23 @@ pub fn validate_element_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validate and deduplicate the element list for a lock acquisition, so the HTTP handler and
+/// the offline CLI enforce the SAME rules from one place. A repeated element would otherwise
+/// acquire one lease but report two. Returns the deduplicated list in its original order.
+pub fn prepare_lock_elements(elements: Vec<String>) -> Result<Vec<String>, ApiError> {
+    if elements.is_empty() {
+        return Err(ApiError::bad_request("at least one element is required"));
+    }
+    for element in &elements {
+        validate_element_name(element)?;
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(elements
+        .into_iter()
+        .filter(|e| seen.insert(e.clone()))
+        .collect())
+}
+
 /// Storage failures are logged with their detail and reported to the caller as a generic
 /// internal error: the detail names schema objects and hashes, which is not the client's
 /// business once this stops binding to localhost.
@@ -88,10 +105,7 @@ pub fn map_store_error(e: StoreError) -> ApiError {
             element,
             holder,
             expires_at,
-        } => ApiError::conflict(format!(
-            "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
-            element, holder, expires_at
-        )),
+        } => ApiError::conflict(lock_refusal_message(&element, &holder, expires_at)),
         StoreError::Backend(m) => {
             eprintln!("storage error: {}", m);
             ApiError::internal("internal storage error")
@@ -99,28 +113,33 @@ pub fn map_store_error(e: StoreError) -> ApiError {
     }
 }
 
-/// Load the OKF document behind a commit hash.
+/// The single, human-facing wording for a write refused by a live lease held by another
+/// holder. Used by the HTTP layer's error mapping AND by the offline CLI, so the message the
+/// CLI prints is, by construction, the exact message the server returns.
+pub fn lock_refusal_message(element: &str, holder: &str, expires_at: i64) -> String {
+    format!(
+        "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
+        element, holder, expires_at
+    )
+}
+
+/// Load the OKF document behind a commit hash. Shared by the HTTP handlers and the offline
+/// CLI: it takes the store, not the full request state, so the two paths cannot drift.
 pub fn load_model(
-    state: &ApiState,
+    store: &dyn Store,
     project: &str,
     hash: &str,
-) -> Result<okf::types::OkfRoot, ApiError> {
-    let commit = state
-        .store
-        .commit(project, hash)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
-    let bytes = state
-        .store
-        .blob(&commit.okf_hash)
-        .map_err(map_store_error)?
-        .ok_or_else(|| {
-            eprintln!("missing blob {}", commit.okf_hash);
-            ApiError::internal("the stored model is missing")
-        })?;
+) -> Result<okf::types::OkfRoot, StoreError> {
+    let commit = store
+        .commit(project, hash)?
+        .ok_or_else(|| StoreError::NotFound(format!("commit {}", hash)))?;
+    let bytes = store.blob(&commit.okf_hash)?.ok_or_else(|| {
+        eprintln!("missing blob {}", commit.okf_hash);
+        StoreError::Backend("the stored model is missing".to_string())
+    })?;
     serde_json::from_slice(&bytes).map_err(|e| {
         eprintln!("stored model is not readable: {}", e);
-        ApiError::internal("the stored model could not be read")
+        StoreError::Backend("the stored model could not be read".to_string())
     })
 }
 
@@ -182,7 +201,7 @@ pub fn record_refusal(
     action: &str,
     subject: &str,
     detail: &str,
-) -> Result<(), ApiError> {
+) -> Result<(), StoreError> {
     store
         .append_audit(&AuditEntry {
             id: 0,
@@ -195,7 +214,6 @@ pub fn record_refusal(
             detail: detail.to_string(),
         })
         .map(|_| ())
-        .map_err(map_store_error)
 }
 
 /// Call a commit-producing store method and, if it is refused because an element is
@@ -204,12 +222,13 @@ pub fn record_refusal(
 /// `actor` is the verified identity's subject - a refusal is an audit entry and must carry
 /// the same verified actor as every other entry.
 pub fn commit_refusal_guard(
-    state: &ApiState,
+    store: &dyn Store,
     project: &str,
     branch: &str,
     actor: &str,
+    mechanism: &str,
     result: Result<Commit, StoreError>,
-) -> Result<Commit, ApiError> {
+) -> Result<Commit, StoreError> {
     match result {
         Ok(commit) => Ok(commit),
         Err(error) if is_lock_refusal(&error) => {
@@ -219,19 +238,19 @@ pub fn commit_refusal_guard(
             // still correctly refused, and reporting 500 would tell the caller their commit
             // failed for an unrelated reason and invite a retry that cannot succeed.
             if let Err(recording) = record_refusal(
-                state.store.as_ref(),
+                store,
                 project,
                 actor,
-                state.auth.mechanism(),
+                mechanism,
                 "commit.refused",
                 branch,
                 &detail,
             ) {
                 eprintln!("could not record the refusal: {:?}", recording);
             }
-            Err(map_store_error(error))
+            Err(error)
         }
-        Err(error) => Err(map_store_error(error)),
+        Err(error) => Err(error),
     }
 }
 
@@ -241,7 +260,7 @@ pub fn commit_refusal_guard(
 /// yields an EMPTY touched set - so a lease taken before the branch existed would not be
 /// enforced. Treating "no tip" as "an empty document" gives the honest answer: every
 /// element this commit introduces is an element it changes.
-fn all_touched(root: &okf::types::OkfRoot) -> Vec<String> {
+pub fn all_touched(root: &okf::types::OkfRoot) -> Vec<String> {
     let mut ids = okf::diff::element_ids(root);
     if let Some(graph) = &root.graph {
         for edge in &graph.edges {
@@ -424,7 +443,8 @@ pub async fn create_commit(
         .map_err(map_store_error)?;
     let touched = match tip_hash.as_deref() {
         Some(tip) => {
-            let tip_model = load_model(&state, &project, tip)?;
+            let tip_model =
+                load_model(state.store.as_ref(), &project, tip).map_err(map_store_error)?;
             touched_elements(&tip_model, &root)
         }
         None => all_touched(&root),
@@ -445,9 +465,10 @@ pub async fn create_commit(
             .holders_of(&project, &touched, now_seconds())
             .map_err(map_store_error)?;
         if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
-            return Err(ApiError::conflict(format!(
-                "{} is locked by {} until {}; a caller who holds this lease must supply the holder field to proceed",
-                blocked.element, blocked.holder, blocked.expires_at
+            return Err(ApiError::conflict(lock_refusal_message(
+                &blocked.element,
+                &blocked.holder,
+                blocked.expires_at,
             )));
         }
     }
@@ -468,10 +489,11 @@ pub async fn create_commit(
         detail: body.message.clone(),
     };
     let commit = commit_refusal_guard(
-        &state,
+        state.store.as_ref(),
         &project,
         &body.branch,
         &identity.subject,
+        state.auth.mechanism(),
         state.store.commit_model(
             &project,
             &body.branch,
@@ -481,7 +503,8 @@ pub async fn create_commit(
             Some(guard),
             Some(&audit),
         ),
-    )?;
+    )
+    .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }
 
@@ -692,8 +715,10 @@ pub async fn reset_branch(
     // holder has locked. The touched set is the difference between the CURRENT tip model
     // and the TARGET model. A caller that holds the leases passes its holder and proceeds;
     // a caller that does not is refused, because an absent holder cannot be the holder.
-    let tip_model = load_model(&state, &project, &tip_hash)?;
-    let target_model = load_model(&state, &project, &body.to)?;
+    let tip_model =
+        load_model(state.store.as_ref(), &project, &tip_hash).map_err(map_store_error)?;
+    let target_model =
+        load_model(state.store.as_ref(), &project, &body.to).map_err(map_store_error)?;
     let touched = touched_elements(&tip_model, &target_model);
     let guard = CommitGuard {
         holder: body.holder.as_deref().unwrap_or(""),
@@ -714,10 +739,11 @@ pub async fn reset_branch(
         detail: format!("reset to {}", body.to),
     };
     let commit = commit_refusal_guard(
-        &state,
+        state.store.as_ref(),
         &project,
         &name,
         &identity.subject,
+        state.auth.mechanism(),
         state.store.commit_model(
             &project,
             &name,
@@ -727,6 +753,7 @@ pub async fn reset_branch(
             Some(guard),
             Some(&audit),
         ),
-    )?;
+    )
+    .map_err(map_store_error)?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }
