@@ -27,8 +27,10 @@ pub async fn run_gate(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    let reference = load_model(&state, &project, &body.reference)?;
-    let candidate = load_model(&state, &project, &body.candidate)?;
+    let reference =
+        load_model(state.store.as_ref(), &project, &body.reference).map_err(map_store_error)?;
+    let candidate =
+        load_model(state.store.as_ref(), &project, &body.candidate).map_err(map_store_error)?;
 
     let outcome = gate::run(&reference, &candidate, false);
     let branch = state
@@ -80,6 +82,17 @@ pub async fn run_gate(
     // unique, and keeping an unvalidated string out of a filesystem path removes any
     // chance of a separator escaping the evidence directory.
     let file_name = format!("server-{}-{}.json", body.reference, body.candidate);
+    // The evidence directory may not exist yet on a fresh install (every test passes a
+    // pre-existing tempdir, which is why this went unnoticed). Create it so the first gate
+    // run does not return 500 after the run itself was already recorded.
+    std::fs::create_dir_all(&state.evidence_dir).map_err(|e| {
+        eprintln!(
+            "could not create evidence directory {}: {}",
+            state.evidence_dir.display(),
+            e
+        );
+        ApiError::internal("the evidence directory could not be created")
+    })?;
     let path = state.evidence_dir.join(file_name);
     gate::write_evidence(&path, &outcome.evidence).map_err(|e| {
         eprintln!("could not write evidence to {}: {}", path.display(), e);

@@ -18,6 +18,16 @@ async fn main() -> anyhow::Result<()> {
     let evidence_dir = std::env::var("MW_EVIDENCE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("docs/evidence"));
+    // A fresh install mounts /data but not /data/evidence, and the first gate run would 500
+    // if the directory were missing. Create it up front so the failure (if any) surfaces at
+    // startup, on a path a deploy can see, rather than as a 500 after a run was recorded.
+    std::fs::create_dir_all(&evidence_dir).map_err(|e| {
+        anyhow::anyhow!(
+            "could not create the evidence directory {}: {}",
+            evidence_dir.display(),
+            e
+        )
+    })?;
 
     // Authentication is opt-in. With no token configured the service runs in OPEN mode:
     // every request is accepted as an anonymous admin. That keeps pilots and air-gapped

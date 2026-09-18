@@ -167,3 +167,45 @@ async fn gating_an_unknown_commit_is_not_found() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn a_gate_run_creates_the_evidence_directory_it_needs() {
+    // A fresh install mounts /data but not /data/evidence; every other test passes a
+    // pre-existing tempdir, which is why a missing directory went unnoticed. The gate must
+    // create the directory itself rather than 500 after the run was already recorded.
+    let dir = tempfile::tempdir().unwrap();
+    let evidence = dir.path().join("evidence");
+    let store = server::store::sqlite::SqliteStore::open(&dir.path().join("mw.db")).unwrap();
+    let router = server::app(server::AppState {
+        store: std::sync::Arc::new(store),
+        evidence_dir: evidence.clone(),
+        auth: server::auth::AuthConfig::Open,
+    });
+    let (reference, _candidate) = seed_project(&router).await;
+
+    let response = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/gate",
+            serde_json::json!({ "reference": reference, "candidate": reference }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        evidence.is_dir(),
+        "the gate must create its evidence directory"
+    );
+    let files: Vec<_> = std::fs::read_dir(&evidence)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("server-"))
+        .collect();
+    assert_eq!(
+        files.len(),
+        1,
+        "expected one evidence file, got {:?}",
+        files
+    );
+}
