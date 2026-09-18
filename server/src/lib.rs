@@ -8,6 +8,7 @@ pub mod locks_api;
 pub mod merge;
 pub mod merge_api;
 pub mod store;
+pub mod ui;
 
 pub use error::ApiError;
 
@@ -45,6 +46,8 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/version", get(version))
+        .route("/ui", get(ui::pages::project_list))
+        .route("/ui/projects/:project", get(ui::pages::project_page))
         .route(
             "/projects",
             post(api::create_project).get(api::list_projects),

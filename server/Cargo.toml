@@ -39,6 +39,7 @@ sha2.workspace = true
 hex.workspace = true
 anyhow.workspace = true
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
+maud = "0.27.0"
 postgres = { version = "0.19", optional = true }
 r2d2 = { version = "0.8", optional = true }
 r2d2_postgres = { version = "0.18", optional = true }
