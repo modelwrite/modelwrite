@@ -10,16 +10,31 @@ unless the operator sets `MW_ALLOW_OPEN=yes` explicitly. Never run anything
 reachable by more than one person without `MW_AUTH_TOKEN` (a shared bearer
 token) or `MW_AUTH_JWKS` (a JWKS file for signed JWTs).**
 
-## What was and was not verified
+## What CI proves
 
-- **Verified here:** every YAML file in this directory parses cleanly, the Helm
-  templates are well-formed, and the Kubernetes API fields used are real for
-  `apps/v1`/`v1` (see `deploy/README.md` "Validation" below).
-- **NOT verified here:** the image was **never built** and the chart was **never
-  installed**. This machine has no Docker and no Kubernetes cluster, so none of
-  these files has been run. The Dockerfile's stages, paths and commands are
-  consistent by inspection only; a build failure would surface the first time the
-  image is actually built in CI or on an operator's machine.
+The `ci` workflow (`.github/workflows/ci.yml`) runs the parts of this directory
+that a machine without Docker or PostgreSQL cannot, on every push:
+
+- **The container image builds.** The `deploy` job runs
+  `docker build -f deploy/Dockerfile -t modelwrite/modelwrite:ci .`, so the
+  Dockerfile's stages, paths, commands and non-root runtime are exercised rather
+  than inspected.
+- **The Helm chart lints.** The same job runs `helm lint deploy/helm/modelwrite`,
+  which renders every template and fails on a malformed template or an invalid
+  `Chart.yaml`/`values.yaml`.
+- **Every plain YAML file parses.** A PyYAML pass over `docker-compose.yml`,
+  `Chart.yaml`, `values.yaml` and `templates/secret.yaml.example` fails the job on
+  a syntax error. (The Go-template `templates/*.yaml` files are not YAML until
+  Helm renders them; `helm lint` is their check.)
+- **The PostgreSQL backend executes.** The `postgres` job starts a real
+  `postgres:16` service container, sets `MW_TEST_DATABASE_URL`, and runs
+  `cargo test --workspace --include-ignored`, so the 13 PostgreSQL tests that
+  skip locally actually run.
+
+What CI still does **not** prove: the chart is not **installed** into a live
+Kubernetes cluster, and `docker compose up` is not run end to end (the compose
+file is YAML-validated and the image is built, but the trial stack is not booted).
+Those remain an operator's first-run responsibility.
 
 ## What the chart does NOT do
 
@@ -53,11 +68,11 @@ Build from the repository root (the build context is the root, not `deploy/`):
   next.
 
 Environment variables (the exact names the server reads): `MW_DATABASE_URL`
-(PostgreSQL URL) or `MW_DB` (SQLite path), `MW_EVIDENCE_DIR`,
-`MW_AUTH_TOKEN`, `MW_AUTH_JWKS` (a file path), `MW_AUTH_ISSUER`,
-`MW_AUTH_AUDIENCE`, `MW_AUTH_ROLES_CLAIM`, `MW_AUTH_PROJECTS_CLAIM`, and
-`MW_PORT`. The entrypoint additionally honours `MW_ALLOW_OPEN=yes` as the
-explicit opt-in to run open.
+(PostgreSQL URL) or `MW_DB` (SQLite path), `MW_EVIDENCE_DIR`, `MW_BIND`
+(default `127.0.0.1`; set `0.0.0.0` in a container), `MW_AUTH_TOKEN`,
+`MW_AUTH_JWKS` (a file path), `MW_AUTH_ISSUER`, `MW_AUTH_AUDIENCE`,
+`MW_AUTH_ROLES_CLAIM`, `MW_AUTH_PROJECTS_CLAIM`, and `MW_PORT`. The entrypoint
+additionally honours `MW_ALLOW_OPEN=yes` as the explicit opt-in to run open.
 
 ### Binding, and why exposure is deliberate
 
@@ -132,9 +147,9 @@ be on a volume you back up.
 
 ## Validation
 
-Performed with Python's PyYAML (6.0.3): `docker-compose.yml`, `Chart.yaml`,
-`values.yaml` and `templates/secret.yaml.example` all parse as YAML. The
-Go-template files (`deployment.yaml`, `service.yaml`, `configmap.yaml`,
-`pvc.yaml`, `_helpers.tpl`) were reviewed for well-formed output; they cannot
-be parsed as YAML before Helm renders them, and Helm is not installed here. The
-Kubernetes API versions used (`apps/v1`, `v1`) are stable and long-supported.
+Local (PyYAML 6.0.3): `docker-compose.yml`, `Chart.yaml`, `values.yaml` and
+`templates/secret.yaml.example` all parse as YAML. CI goes further: the `deploy`
+job parses those same files, runs `helm lint` on the chart (which renders the
+Go-template files and checks them for real), and builds the image with
+`docker build`. The Kubernetes API versions used (`apps/v1`, `v1`) are stable
+and long-supported.
