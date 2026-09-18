@@ -170,7 +170,21 @@ impl PostgresStore {
         };
         {
             let mut conn = pool.get_conn()?;
-            conn.client().batch_execute(SCHEMA).map_err(backend)?;
+            // Creating the schema is guarded by an advisory lock, because `CREATE TABLE IF
+            // NOT EXISTS` is NOT safe against a concurrent creator: two connections can both
+            // find the table missing, both attempt the create, and the loser fails with a
+            // duplicate-key error on the system catalogue rather than doing nothing. That is
+            // not a test artefact - two service replicas starting at the same moment against
+            // one database hit it exactly the same way, and CI found it the first time these
+            // tests ever ran concurrently (six of thirteen failed opening the store).
+            //
+            // The lock is transaction-scoped, so it is released when the DDL commits or
+            // fails, and it is keyed by a constant chosen for this schema alone.
+            let mut tx = conn.client().transaction().map_err(backend)?;
+            tx.batch_execute("SELECT pg_advisory_xact_lock(7071175)")
+                .map_err(backend)?;
+            tx.batch_execute(SCHEMA).map_err(backend)?;
+            tx.commit().map_err(backend)?;
         }
         Ok(Self { pool })
     }
