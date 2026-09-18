@@ -144,7 +144,7 @@ fn model_markup(
             }
             " · by " (commit.author)
         }
-        (structure_section(root))
+        (structure_section(root, project))
         (requirements_section(root, &ctx))
         (traceability_section(root, &ctx))
         (state_activity_section(root, &ctx))
@@ -167,7 +167,7 @@ struct TreeNode<'a> {
     children: Vec<TreeNode<'a>>,
 }
 
-fn structure_section(root: &OkfRoot) -> Markup {
+fn structure_section(root: &OkfRoot, project: &str) -> Markup {
     let tree = structure_tree(root);
     html! {
         section class="model-section" id="structure" {
@@ -175,7 +175,7 @@ fn structure_section(root: &OkfRoot) -> Markup {
             @if tree.is_empty() {
                 p { "This model has no structure elements." }
             } @else {
-                ul class="structure-tree" { (render_tree(&tree)) }
+                ul class="structure-tree" { (render_tree(&tree, project)) }
             }
             @if !root.signals.is_empty() {
                 h3 { "Signals" }
@@ -302,7 +302,7 @@ fn build_node<'a>(
     }
 }
 
-fn render_tree(nodes: &[TreeNode<'_>]) -> Markup {
+fn render_tree(nodes: &[TreeNode<'_>], project: &str) -> Markup {
     html! {
         @for node in nodes {
             li class="element" {
@@ -316,8 +316,9 @@ fn render_tree(nodes: &[TreeNode<'_>]) -> Markup {
                 @if !node.element.documentation.is_empty() {
                     p class="element-documentation" { (node.element.documentation) }
                 }
+                a class="element-edit" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/edit/" (crate::ui::urlencode(node.element.id.as_str())) } { "edit" }
                 @if !node.children.is_empty() {
-                    ul { (render_tree(&node.children)) }
+                    ul { (render_tree(&node.children, project)) }
                 }
             }
         }

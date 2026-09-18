@@ -67,6 +67,16 @@ table.requirements th, table.traceability th { background: #f4f4f4; }
 .conflict-value { font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f4f4; padding: 0.5rem; border-radius: 4px; }
 .merge-form label, .compare-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
 .merge-form input, .compare-form input { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; }
+.element-edit { margin-left: 0.5rem; font-size: 0.8rem; color: #145ea8; text-decoration: none; }
+.edit-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.edit-form input, .edit-form textarea { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; width: 100%; max-width: 40rem; }
+.edit-form textarea { min-height: 4rem; }
+.edit-form fieldset { border: 1px solid #ccc; border-radius: 4px; margin: 0.75rem 0; padding: 0.5rem 0.75rem; }
+.attribute-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+.attribute-row input { flex: 1 1 0; min-width: 0; }
+.form-errors, .lock-banner { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.form-errors { background: #f8d7da; color: #842029; }
+.lock-banner { background: #fff3cd; color: #664d03; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {

@@ -12,6 +12,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+use okf::types::OkfRoot;
 use server::auth::{AuthConfig, Identity};
 use server::store::{sqlite::SqliteStore, Store};
 use server::AppState;
@@ -882,5 +883,389 @@ async fn hostile_content_in_a_model_is_escaped_on_the_model_page() {
     assert!(
         !html.contains("<script"),
         "no raw script tag may reach the model page"
+    );
+}
+/// The author role: can read and write, so it can both view and submit the edit form.
+fn author() -> Identity {
+    Identity {
+        subject: "alice".to_string(),
+        roles: vec!["author".to_string()],
+        projects: vec!["*".to_string()],
+    }
+}
+
+/// Seed a project and a model directly through the store, bypassing the JSON commit
+/// handler's author resolution so a test can fix a specific identity afterwards.
+fn seed_model_directly(store: &dyn Store, okf: serde_json::Value) {
+    store.create_project("coffee", None).unwrap();
+    let root: OkfRoot = serde_json::from_value(okf).unwrap();
+    let bytes = serde_json::to_vec(&root).unwrap();
+    let okf_hash = store.put_blob(&bytes).unwrap();
+    store
+        .commit_model("coffee", "main", &okf_hash, "seeder", "seed", None, None)
+        .unwrap();
+}
+
+/// The merge model with two attributes on the block, so an edit proves the form round-trips
+/// attributes rather than dropping them.
+fn block_with_attributes() -> serde_json::Value {
+    let mut model = merge_model("Block");
+    model["structure"][0]["attributes"] = serde_json::json!([
+        { "name": "inlet", "type": "Water Inlet", "aggregation": "none", "default": "" },
+        { "name": "outlet", "type": "Water Outlet", "aggregation": "none", "default": "" },
+    ]);
+    model
+}
+
+#[tokio::test]
+async fn editing_a_block_documentation_commits_with_the_identity_author() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), block_with_attributes());
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(author()),
+    });
+
+    let form = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/edit/b1"))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let form_html = body_text(form).await;
+    assert!(
+        form_html.contains("name=\"documentation\""),
+        "the form must render the documentation field"
+    );
+    assert!(
+        form_html.contains("name=\"attr_name_0\""),
+        "the form must render the block's attributes"
+    );
+
+    // The author field the form never asks for is ignored; the commit records the identity.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "document the block"),
+                ("id", "b1"),
+                ("name", "Block"),
+                ("documentation", "Brews coffee on demand."),
+                ("stereotypes", "Block"),
+                ("attr_count", "2"),
+                ("attr_name_0", "inlet"),
+                ("attr_type_0", "Water Inlet"),
+                ("attr_aggregation_0", "none"),
+                ("attr_default_0", ""),
+                ("attr_name_1", "outlet"),
+                ("attr_type_1", "Water Outlet"),
+                ("attr_aggregation_1", "none"),
+                ("attr_default_1", ""),
+                ("author", "evil"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("Edit committed"),
+        "the success page must render, got:\n{}",
+        html
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    let edited = commits
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["message"] == "document the block")
+        .expect("the edit commit must exist");
+    assert_eq!(
+        edited["author"].as_str().unwrap(),
+        "alice",
+        "the author must be the identity, never a browser field"
+    );
+
+    let hash = edited["hash"].as_str().unwrap();
+    let doc = router
+        .clone()
+        .oneshot(get(&format!("/projects/coffee/commits/{}", hash)))
+        .await
+        .unwrap();
+    let doc = json_body(doc).await;
+    assert_eq!(
+        doc["structure"][0]["documentation"].as_str().unwrap(),
+        "Brews coffee on demand.",
+        "the documentation must change"
+    );
+    assert_eq!(
+        doc["structure"][0]["attributes"].as_array().unwrap().len(),
+        2,
+        "the attributes must round-trip through the form"
+    );
+
+    // The request-duration lease is released when the edit finishes.
+    assert!(
+        store
+            .locks("coffee", server::store::now_seconds())
+            .unwrap()
+            .is_empty(),
+        "the element must not be left locked"
+    );
+}
+
+#[tokio::test]
+async fn an_element_held_by_another_holder_is_refused_and_names_the_holder() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    // Another holder takes a lease on the element through the JSON locks endpoint.
+    let acquired = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/locks",
+            serde_json::json!({
+                "branch": "main",
+                "elements": ["b1"],
+                "holder": "bob",
+                "ttlSeconds": 300
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(acquired.status(), StatusCode::CREATED);
+
+    // The form shows the holder and refuses to submit.
+    let form = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/edit/b1"))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let form_html = body_text(form).await;
+    assert!(
+        form_html.contains("Held by another holder"),
+        "the form must say who holds the element, got:\n{}",
+        form_html
+    );
+    assert!(
+        form_html.contains("bob"),
+        "the holder must be named, got:\n{}",
+        form_html
+    );
+    assert!(
+        form_html.contains("<button type=\"submit\" disabled"),
+        "the submit button must be disabled while another holder has it, got:\n{}",
+        form_html
+    );
+
+    // Submitting is refused, the holder is named, and nothing is stored.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal the block"),
+                ("id", "b1"),
+                ("name", "Block"),
+                ("documentation", "overwritten"),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("bob"),
+        "the refusal must name the holder, got:\n{}",
+        html
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the refused edit must not have committed"
+    );
+}
+
+#[tokio::test]
+async fn an_invalid_edit_renders_the_validator_errors_and_stores_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    // Emptying the id is an explicit edit the validator refuses, so the errors render next
+    // to the form rather than crashing with a 500.
+    let response = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "break it"),
+                ("id", ""),
+                ("name", "Block"),
+                ("documentation", ""),
+                ("stereotypes", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("empty element id"),
+        "the validator's error must render, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("Edit committed"),
+        "an invalid edit must not render success"
+    );
+
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the invalid edit must not have committed"
+    );
+}
+
+#[tokio::test]
+async fn an_unauthenticated_edit_is_a_sign_in_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state_with_auth(
+        dir.path(),
+        AuthConfig::static_token("the-token"),
+    ));
+
+    for uri in ["/ui/projects/coffee/edit/b1"] {
+        let response = router.clone().oneshot(get(uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let html = body_text(response).await;
+        assert!(html.contains("Sign in required"));
+        assert!(
+            !html.contains("the-token"),
+            "the token must never be echoed"
+        );
+    }
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal"),
+                ("id", "b1"),
+                ("name", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let html = body_text(response).await;
+    assert!(html.contains("Sign in required"));
+}
+
+#[tokio::test]
+async fn a_viewer_cannot_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), merge_model("Block"));
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/edit/b1",
+            &[
+                ("branch", "main"),
+                ("message", "steal"),
+                ("id", "b1"),
+                ("name", "Block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("write permission required"),
+        "the page must name the permission refusal, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_edit_form_renders_the_corpus_block_with_its_attributes() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let block_id = expected["structure"][0]["id"].as_str().unwrap().to_string();
+    commit_okf(&router, "main", "import the exported model", expected).await;
+
+    let form = router
+        .oneshot(get(&format!("/ui/projects/coffee/edit/{}", block_id)))
+        .await
+        .unwrap();
+    assert_eq!(form.status(), StatusCode::OK);
+    let html = body_text(form).await;
+    assert!(
+        html.contains("Coffee Machine"),
+        "the root block's name must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("water System"),
+        "the block's first attribute must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("name=\"attr_name_0\""),
+        "attribute rows must be indexed"
     );
 }
