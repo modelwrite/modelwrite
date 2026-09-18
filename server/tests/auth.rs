@@ -452,3 +452,71 @@ async fn a_scoped_identity_only_sees_the_projects_it_may_reach() {
         .collect();
     assert_eq!(names, vec!["coffee"], "tea must not be disclosed");
 }
+#[tokio::test]
+async fn liveness_and_version_are_public_and_reach_nothing() {
+    // These two routes are deliberately outside the permission model, so they must be
+    // reachable with no token even when authentication is configured - a probe that needs
+    // a credential fails exactly when it is needed. They take no state at all, so they
+    // cannot reach the store and cannot disclose anything from it.
+    let (router, _store, _dir) = app_with_identity(Identity::open());
+    for uri in ["/health", "/version"] {
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{} must be public", uri);
+    }
+}
+
+#[tokio::test]
+async fn a_identity_with_no_roles_is_denied_a_read() {
+    // Scope and permission are separate decisions: an identity that reaches the project
+    // must STILL be refused if it holds no role that grants reading.
+    let (router, store, _dir) = app_with_identity(Identity {
+        subject: "nobody".to_string(),
+        roles: Vec::new(),
+        projects: vec!["*".to_string()],
+    });
+    store.create_project("coffee", None).unwrap();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/projects/coffee/commits?branch=main")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "holding no role must be refused even with full scope"
+    );
+}
+
+#[tokio::test]
+async fn a_identity_that_reaches_nothing_sees_an_empty_listing() {
+    let (router, store, _dir) = app_with_identity(Identity {
+        subject: "scopeless".to_string(),
+        roles: vec!["viewer".to_string()],
+        projects: Vec::new(),
+    });
+    store.create_project("coffee", None).unwrap();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        json_body(response).await.as_array().unwrap().is_empty(),
+        "an identity scoped to nothing sees nothing"
+    );
+}

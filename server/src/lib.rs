@@ -85,10 +85,14 @@ pub fn app(state: AppState) -> Router {
         .with_state(api_state)
 }
 
+/// Liveness. Public on purpose, and note it takes NO state: it has no store to reach, so
+/// it cannot disclose or touch anything. A health check that needs a token is a health
+/// check that fails during the incident it exists to detect.
 async fn health() -> Json<serde_json::Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// Build information. Public and stateless for the same reason as health.
 async fn version() -> Json<serde_json::Value> {
     Json(json!({
         "server": env!("CARGO_PKG_VERSION"),

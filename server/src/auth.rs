@@ -117,6 +117,8 @@ impl std::fmt::Debug for AuthConfig {
             AuthConfig::Fixed(identity) => f
                 .debug_struct("AuthConfig::Fixed")
                 .field("subject", &identity.subject)
+                .field("roles", &identity.roles)
+                .field("projects", &identity.projects)
                 .finish(),
         }
     }
