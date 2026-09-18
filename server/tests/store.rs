@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 use server::store::{commit_hash, sqlite::SqliteStore, AuditEntry, GateRun, Store, StoreError};
 
 fn store() -> (SqliteStore, tempfile::TempDir) {
