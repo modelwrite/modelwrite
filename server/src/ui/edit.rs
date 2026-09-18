@@ -108,17 +108,29 @@ enum EditOutcome {
 /// `GET /ui/projects/:project/edit/:element` - the form, prefilled from the stored element
 /// and showing which other holders currently hold it. A held element renders with its submit
 /// disabled, naming the holder and how to proceed.
+#[derive(serde::Deserialize)]
+pub struct EditQuery {
+    pub branch: Option<String>,
+}
+
 pub async fn edit_form(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Path((project, element)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<EditQuery>,
 ) -> Response {
     let mechanism = state.auth.mechanism();
     let identity = match resolve_identity(&state, &headers).await {
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
-    match render_edit_form(&state, &identity, &project, &element) {
+    // The branch the reader was looking at travels in the link, so the form edits THAT
+    // branch's copy rather than quietly opening main's.
+    let branch = query
+        .branch
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or_else(|| DEFAULT_BRANCH.to_string());
+    match render_edit_form(&state, &identity, &project, &element, &branch) {
         Ok(page) => layout::html_response(StatusCode::OK, page),
         Err(error) => layout::error_page(
             error.status,
@@ -134,6 +146,7 @@ fn render_edit_form(
     identity: &Identity,
     project: &str,
     element_id: &str,
+    branch: &str,
 ) -> Result<Markup, ApiError> {
     // The SAME identity, permission and project-scope decisions as the read handlers, in the
     // SAME order: the workbench can never be a weaker path to the data.
@@ -154,13 +167,13 @@ fn render_edit_form(
     }
     let tip = state
         .store
-        .branch_tip(project, DEFAULT_BRANCH)
+        .branch_tip(project, branch)
         .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", DEFAULT_BRANCH)))?;
+        .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", branch)))?;
     let root = load_model(state.store.as_ref(), project, &tip).map_err(map_store_error)?;
     let element = element_in(&root, element_id)
         .ok_or_else(|| ApiError::not_found(format!("element {}", element_id)))?;
-    let input = EditInput::from_element(DEFAULT_BRANCH, element);
+    let input = EditInput::from_element(branch, element);
     let holders = state
         .store
         .holders_of(project, &[element_id.to_string()], now_seconds())
@@ -441,7 +454,11 @@ fn edit_page(
             }
         }
         form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/edit/" (crate::ui::urlencode(element_id)) } class="edit-form" {
-            p { label for="branch" { "branch" } input type="text" id="branch" name="branch" value=(input.branch.as_str()) required; }
+            // The branch is CARRIED, not chosen. An editable branch field let a submitted form
+        // retarget the commit to a branch the page never showed, which would write a change
+        // somewhere the author was not looking. The branch comes from the URL the form was
+        // loaded from and travels as a hidden field.
+        input type="hidden" name="branch" value=(input.branch.as_str());
             p { label for="message" { "commit message" } input type="text" id="message" name="message" value=(input.message.as_str()) required; }
             p { label for="id" { "id" } input type="text" id="id" name="id" value=(input.id.as_str()); }
             p { label for="name" { "name" } input type="text" id="name" name="name" value=(input.name.as_str()); }
@@ -514,9 +531,17 @@ fn edit_success_page(
 /// The parsed attributes from the submitted form: every indexed row whose name is non-empty.
 /// An emptied name drops the attribute rather than storing a nameless row.
 fn parse_attributes(form: &HashMap<String, String>) -> Vec<Attribute> {
+    // The bound is the number of attribute rows the form ACTUALLY contains, not the number
+    // it claims to. Trusting a client-supplied count lets a caller make the server iterate
+    // a loop of any size it names - a cheap way to burn a worker for a caller who holds
+    // write permission. Counting the keys the form really has costs one pass and removes
+    // the caller's control over the work.
     let count = form
-        .get("attr_count")
-        .and_then(|value| value.parse::<usize>().ok())
+        .keys()
+        .filter_map(|key| key.strip_prefix("attr_name_"))
+        .filter_map(|index| index.parse::<usize>().ok())
+        .max()
+        .map(|highest| highest + 1)
         .unwrap_or(0);
     let mut attributes = Vec::new();
     for index in 0..count {

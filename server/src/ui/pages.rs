@@ -198,26 +198,29 @@ fn branch_list_page(
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/gate" } { "View gate runs" }
             }
         }
-        @if identity.may(Permission::Write) {
+        // Comparing READS two commits, so it needs only read permission - the same permission
+        // the compare route itself checks. Gating it behind write would hide a read-only
+        // reviewer's most useful tool, and saying so would have been untrue.
+        @if identity.may(Permission::Read) {
             h2 { "Compare" }
             form method="get" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare" } class="compare-form" {
-            p {
-                label for="from" { "from" }
-                input type="text" id="from" name="from" placeholder="branch or commit";
-            }
-            p {
-                label for="to" { "to" }
-                input type="text" id="to" name="to" placeholder="branch or commit";
-            }
+                p {
+                    label for="from" { "from" }
+                    input type="text" id="from" name="from" placeholder="branch or commit";
+                }
+                p {
+                    label for="to" { "to" }
+                    input type="text" id="to" name="to" placeholder="branch or commit";
+                }
                 button type="submit" { "Compare" }
             }
+        }
+        // Merging WRITES, so the form is offered only to a caller who may perform it. A form
+        // the caller cannot submit is a trap: it invites an action, then refuses it after the
+        // work is typed. The refusal is still enforced server-side for a direct request.
+        @if identity.may(Permission::Write) {
             h2 { "Merge" }
             (merge_form_markup(project, "", ""))
-        } @else {
-            // A form the caller cannot submit is a trap: it invites an action, then refuses it
-            // after the work is typed. Showing nothing is the honest answer, and the refusal
-            // is still enforced server-side for anything that reaches the route directly.
-            p class="meta" { "Merging and comparing require write permission on this project." }
         }
     };
     layout::shell(
