@@ -63,7 +63,7 @@ pub async fn run_gate(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
-        action: "gate.run".to_string(),
+        action: crate::audit::GATE_RUN.to_string(),
         subject: body.candidate.clone(),
         detail: format!(
             "{}: candidate {} against reference {}",
