@@ -894,6 +894,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-cli"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "mw-server",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "mw-gate"
 version = "0.1.0"
 dependencies = [
