@@ -718,3 +718,33 @@ async fn every_path_records_the_identity_rather_than_the_claimed_name() {
         );
     }
 }
+#[tokio::test]
+async fn an_empty_or_absent_author_defaults_to_the_verified_subject() {
+    let (router, store, _dir) = app_with_identity(identity("alex"));
+    store.create_project("coffee", None).unwrap();
+
+    // An empty author must become the verified subject, not a blank string that would
+    // contradict the audit's actor.
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "author": "", "message": "base", "okf": model("Block") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    assert_eq!(json_body(committed).await["author"], "alex");
+
+    // An absent author field is the same as an empty one in configured mode.
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            json!({ "branch": "main", "message": "second", "okf": model("Block") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    assert_eq!(json_body(committed).await["author"], "alex");
+}

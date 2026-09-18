@@ -60,6 +60,7 @@ pub async fn run_gate(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "gate.run".to_string(),
         subject: body.candidate.clone(),
         detail: format!(
@@ -93,8 +94,10 @@ pub async fn list_gate_runs(
     State(state): State<ApiState>,
     Path(project): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    if !identity.may(Permission::Review) {
-        return Err(ApiError::forbidden("review permission required"));
+    // An author may RUN a gate (Write), so it must be able to SEE the result too; a
+    // reviewer reads runs it did not start. Either role may list.
+    if !identity.may(Permission::Write) && !identity.may(Permission::Review) {
+        return Err(ApiError::forbidden("write or review permission required"));
     }
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));

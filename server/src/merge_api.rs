@@ -6,8 +6,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{
-    commit_json, commit_refusal_guard, load_model, map_store_error, touched_elements,
-    validate_name, verify_actor, ApiState,
+    commit_json, commit_refusal_guard, load_model, map_store_error, resolve_author,
+    touched_elements, validate_name, verify_actor, ApiState,
 };
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
@@ -18,6 +18,7 @@ use crate::store::{now_seconds, AuditEntry, CommitGuard};
 pub struct MergeRequest {
     pub branch: String,
     pub other: String,
+    #[serde(default)]
     pub author: String,
     pub message: String,
     /// Who is merging. Supplying it lets a caller proceed on elements it holds a lease on;
@@ -125,7 +126,7 @@ pub async fn merge_branches(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &body.branch)?;
     validate_name("branch name", &body.other)?;
@@ -167,6 +168,7 @@ pub async fn merge_branches(
                 project: project.clone(),
                 at: now_seconds(),
                 actor: identity.subject.clone(),
+                mechanism: state.auth.mechanism().to_string(),
                 action: "merge.conflict".to_string(),
                 subject: body.branch.clone(),
                 detail: format!("merge conflict between {} and {}", body.branch, body.other),
@@ -237,6 +239,7 @@ pub async fn merge_branches(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "merge.clean".to_string(),
         subject: body.branch.clone(),
         detail: format!("merged {} into {}", body.other, body.branch),
@@ -251,7 +254,7 @@ pub async fn merge_branches(
             &body.branch,
             &parents,
             &okf_hash,
-            &body.author,
+            &author,
             &body.message,
             Some(guard),
             Some(&audit),

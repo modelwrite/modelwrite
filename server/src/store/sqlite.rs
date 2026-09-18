@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS audit (
     project TEXT NOT NULL,
     at INTEGER NOT NULL,
     actor TEXT NOT NULL,
+    mechanism TEXT NOT NULL,
     action TEXT NOT NULL,
     subject TEXT NOT NULL,
     detail TEXT NOT NULL,
@@ -66,6 +67,10 @@ CREATE TABLE IF NOT EXISTS audit (
     -- written, the mutation it describes must not survive either, which is the atomicity
     -- the audit trail promises.
     CHECK (length(actor) > 0),
+    -- The mechanism must always be recorded: without it, a shared token and a named
+    -- individual become byte-identical once the subject matches, which is exactly the
+    -- per-person attribution the log must not imply.
+    CHECK (length(mechanism) > 0),
     CHECK (length(action) > 0)
 );
 -- Append-only is a property of the DATABASE, not a convention of the trait: these
@@ -132,8 +137,8 @@ fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
 /// atomically with the mutation it describes.
 fn insert_audit(c: &Connection, entry: &AuditEntry) -> rusqlite::Result<i64> {
     c.execute(
-        "INSERT INTO audit (project, at, actor, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![entry.project, entry.at, entry.actor, entry.action, entry.subject, entry.detail],
+        "INSERT INTO audit (project, at, actor, mechanism, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![entry.project, entry.at, entry.actor, entry.mechanism, entry.action, entry.subject, entry.detail],
     )?;
     Ok(c.last_insert_rowid())
 }
@@ -670,7 +675,7 @@ impl Store for SqliteStore {
         let limit = limit.clamp(1, 1000);
         self.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, project, at, actor, action, subject, detail FROM audit WHERE project = ?1 ORDER BY id DESC LIMIT ?2",
+                "SELECT id, project, at, actor, mechanism, action, subject, detail FROM audit WHERE project = ?1 ORDER BY id DESC LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![project, limit], |row| {
                 Ok(AuditEntry {
@@ -678,9 +683,10 @@ impl Store for SqliteStore {
                     project: row.get(1)?,
                     at: row.get(2)?,
                     actor: row.get(3)?,
-                    action: row.get(4)?,
-                    subject: row.get(5)?,
-                    detail: row.get(6)?,
+                    mechanism: row.get(4)?,
+                    action: row.get(5)?,
+                    subject: row.get(6)?,
+                    detail: row.get(7)?,
                 })
             })?;
             rows.collect()

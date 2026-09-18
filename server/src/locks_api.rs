@@ -93,6 +93,7 @@ pub async fn acquire_locks(
         project: project.clone(),
         at: now,
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "lock.acquire".to_string(),
         subject: elements.join(","),
         detail: format!(
@@ -122,6 +123,7 @@ pub async fn acquire_locks(
                     state.store.as_ref(),
                     &project,
                     &identity.subject,
+                    state.auth.mechanism(),
                     "lock.denied",
                     &elements.join(","),
                     &error.to_string(),
@@ -195,6 +197,7 @@ pub async fn release_locks(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "lock.release".to_string(),
         subject: body.ids.join(","),
         detail: "released lock(s)".to_string(),

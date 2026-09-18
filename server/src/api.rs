@@ -130,25 +130,44 @@ fn now_seconds() -> i64 {
     now_epoch().parse().unwrap_or(0)
 }
 
-/// A body may name an actor in an `author` or `holder` field. Once authentication is
-/// configured that claimed name must agree with the verified identity, or the request is
-/// refused with 403 BEFORE anything is written, so a caller can never put another person's
-/// name into the record. A missing or empty name proceeds - it names nobody. In open mode
-/// nobody was authenticated, so no name can be "someone else's" and the check is skipped;
-/// the audit still records the honest subject, "anonymous".
+/// The author a commit records. In configured mode an empty (or absent) author defaults to
+/// the verified subject, and a non-empty author must equal it or the request is refused with
+/// 403 BEFORE anything is written - so a caller can never put another person's name into the
+/// record, and a blank author can never contradict the audit's verified subject. In open mode
+/// nobody was authenticated, so no name can be "someone else's" and the claimed name passes
+/// through unchanged.
+pub fn resolve_author(
+    auth: &AuthConfig,
+    identity: &Identity,
+    claimed: &str,
+) -> Result<String, ApiError> {
+    if matches!(auth, AuthConfig::Open) {
+        return Ok(claimed.to_string());
+    }
+    if claimed.is_empty() {
+        return Ok(identity.subject.clone());
+    }
+    if claimed == identity.subject.as_str() {
+        return Ok(claimed.to_string());
+    }
+    Err(ApiError::forbidden(
+        "the request names an actor other than the authenticated caller",
+    ))
+}
+
+/// A body may name an actor in a `holder` field. Once authentication is configured that
+/// claimed name must agree with the verified identity, or the request is refused with 403
+/// BEFORE anything is written, so a caller can never put another person's name into the
+/// record. A missing or empty name proceeds - it names nobody. In open mode nobody was
+/// authenticated, so no name can be "someone else's" and the check is skipped.
 pub fn verify_actor(
     auth: &AuthConfig,
     identity: &Identity,
     claimed: Option<&str>,
 ) -> Result<(), ApiError> {
-    if matches!(auth, AuthConfig::Open) {
-        return Ok(());
-    }
     match claimed {
-        Some(name) if !name.is_empty() && name != identity.subject.as_str() => Err(
-            ApiError::forbidden("the request names an actor other than the authenticated caller"),
-        ),
-        _ => Ok(()),
+        Some(name) => resolve_author(auth, identity, name).map(|_| ()),
+        None => Ok(()),
     }
 }
 
@@ -159,6 +178,7 @@ pub fn record_refusal(
     store: &dyn Store,
     project: &str,
     actor: &str,
+    mechanism: &str,
     action: &str,
     subject: &str,
     detail: &str,
@@ -169,6 +189,7 @@ pub fn record_refusal(
             project: project.to_string(),
             at: now_seconds(),
             actor: actor.to_string(),
+            mechanism: mechanism.to_string(),
             action: action.to_string(),
             subject: subject.to_string(),
             detail: detail.to_string(),
@@ -201,6 +222,7 @@ pub fn commit_refusal_guard(
                 state.store.as_ref(),
                 project,
                 actor,
+                state.auth.mechanism(),
                 "commit.refused",
                 branch,
                 &detail,
@@ -307,6 +329,7 @@ pub async fn create_project(
         project: body.name.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "project.create".to_string(),
         subject: body.name.clone(),
         detail: "project created".to_string(),
@@ -343,6 +366,7 @@ pub async fn list_projects(
 #[derive(Deserialize)]
 pub struct CreateCommit {
     pub branch: String,
+    #[serde(default)]
     pub author: String,
     pub message: String,
     pub okf: Value,
@@ -361,7 +385,9 @@ pub async fn create_commit(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    // In configured mode an empty author is the verified subject, never a blank string that
+    // would contradict the audit's actor.
+    let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     if state
         .store
@@ -436,6 +462,7 @@ pub async fn create_commit(
         project: project.clone(),
         at: now,
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "commit.create".to_string(),
         subject: body.branch.clone(),
         detail: body.message.clone(),
@@ -449,7 +476,7 @@ pub async fn create_commit(
             &project,
             &body.branch,
             &okf_hash,
-            &body.author,
+            &author,
             &body.message,
             Some(guard),
             Some(&audit),
@@ -540,6 +567,7 @@ pub async fn create_branch(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "branch.create".to_string(),
         subject: body.name.clone(),
         detail: format!("from {}", body.from),
@@ -601,6 +629,7 @@ pub async fn delete_branch(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "branch.delete".to_string(),
         subject: name.clone(),
         detail: "branch deleted".to_string(),
@@ -615,6 +644,7 @@ pub async fn delete_branch(
 #[derive(Deserialize)]
 pub struct ResetBranch {
     pub to: String,
+    #[serde(default)]
     pub author: String,
     pub message: String,
     /// Who is reverting. As with a commit, supplying the holder lets the lease holder
@@ -637,7 +667,7 @@ pub async fn reset_branch(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    verify_actor(&state.auth, &identity, Some(&body.author))?;
+    let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &name)?;
     if state
@@ -678,6 +708,7 @@ pub async fn reset_branch(
         project: project.clone(),
         at: now_seconds(),
         actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
         action: "branch.reset".to_string(),
         subject: name.clone(),
         detail: format!("reset to {}", body.to),
@@ -691,7 +722,7 @@ pub async fn reset_branch(
             &project,
             &name,
             &target.okf_hash,
-            &body.author,
+            &author,
             &body.message,
             Some(guard),
             Some(&audit),

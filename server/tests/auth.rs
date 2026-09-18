@@ -171,6 +171,10 @@ fn author() -> Identity {
     identity("author", &["author"], &["*"])
 }
 
+fn reviewer() -> Identity {
+    identity("reviewer", &["reviewer"], &["*"])
+}
+
 /// No roles at all: cannot even Read, so it is the denial identity for a route whose only
 /// requirement is Read and which has no project to scope (list projects).
 fn nobody() -> Identity {
@@ -222,6 +226,20 @@ fn app_with_identity(identity: Identity) -> (Router, Arc<SqliteStore>, tempfile:
         store: store.clone(),
         evidence_dir: dir.path().to_path_buf(),
         auth: AuthConfig::fixed(identity),
+    };
+    (app(state), store, dir)
+}
+
+/// Build the full application router with an ARBITRARY auth configuration (open, static or
+/// jwt), returning a handle to the store and the tempdir. Used to prove the audit log records
+/// HOW the caller authenticated, not just who they claimed to be.
+fn app_with_auth(auth: AuthConfig) -> (Router, Arc<SqliteStore>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    let state = AppState {
+        store: store.clone(),
+        evidence_dir: dir.path().to_path_buf(),
+        auth,
     };
     (app(state), store, dir)
 }
@@ -383,7 +401,7 @@ async fn every_route_denies_a_caller_without_permission_or_scope() {
         ),
         (
             "list_gate_runs",
-            author(),
+            viewer(),
             get("/projects/coffee/gate-runs"),
         ),
         ("list_audit", scoped_coffee(), get("/projects/tea/audit")),
@@ -521,6 +539,31 @@ async fn a_identity_that_reaches_nothing_sees_an_empty_listing() {
         "an identity scoped to nothing sees nothing"
     );
 }
+
+#[tokio::test]
+async fn an_author_and_a_reviewer_can_list_gate_runs() {
+    // An author may RUN a gate (Write), so it must be able to SEE the result too; a
+    // reviewer reads runs it did not start. A viewer holds neither role and stays refused.
+    for ident in [author(), reviewer()] {
+        let (router, _store, _dir) = app_with_identity(ident);
+        let response = router
+            .oneshot(get("/projects/coffee/gate-runs"))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Write OR Review must list gate runs"
+        );
+    }
+
+    let (router, _store, _dir) = app_with_identity(viewer());
+    let response = router
+        .oneshot(get("/projects/coffee/gate-runs"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
 // ---------------------------------------------------------------------------
 // Task 4: signed tokens (JWT) against a JWKS. A committed RSA-2048 key pair
 // (generated once, committed so tests need no network and no identity provider)
@@ -625,6 +668,46 @@ async fn jwt_mode_accepts_a_valid_token() {
     assert_eq!(body["roles"][0], "author");
     assert_eq!(body["roles"][1], "reviewer");
     assert_eq!(body["projects"][0], "coffee");
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_token_with_no_sub() {
+    // A signed token with no subject must be refused, not accepted as an identity whose
+    // subject is empty: such an identity reads fine and then breaks every write at the audit
+    // table's non-empty-actor constraint.
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({ "roles": ["admin"], "nbf": now() - 3600, "exp": now() + 3600 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_token_with_an_empty_sub() {
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({ "sub": "", "roles": ["admin"], "nbf": now() - 3600, "exp": now() + 3600 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jwt_mode_rejects_a_wrong_typed_sub() {
+    // A `sub` of the wrong JSON type must be refused rather than treated as absent.
+    let router = router(jwt_config(None, None));
+    let token = sign(
+        json!({ "sub": 123, "roles": ["admin"], "nbf": now() - 3600, "exp": now() + 3600 }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let response = router.oneshot(bearer("/whoami", &token)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -843,5 +926,82 @@ async fn from_jwks_file_loads_a_configuration() {
             assert!(keys.contains_key("test-key"), "the committed kid must load");
         }
         other => panic!("expected a Jwt config, got {:?}", other),
+    }
+}
+async fn audit_entries(router: &axum::Router, token: Option<&str>) -> Vec<Value> {
+    let response = match token {
+        Some(t) => router.clone().oneshot(bearer("/projects/coffee/audit", t)),
+        None => router.clone().oneshot(get("/projects/coffee/audit")),
+    }
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await.as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn audit_entries_record_how_the_caller_authenticated() {
+    // OPEN: nobody was authenticated; the honest subject is "anonymous" and the mechanism
+    // says so.
+    let (router, _store, _dir) = app_with_auth(AuthConfig::Open);
+    let created = router
+        .clone()
+        .oneshot(post("/projects", json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    for entry in audit_entries(&router, None).await {
+        assert_eq!(entry["mechanism"], "open");
+        assert_eq!(
+            entry["actor"], "anonymous",
+            "the mechanism must not change the subject"
+        );
+    }
+
+    // STATIC: a shared token maps to the fixed subject "admin", but the log must say it was a
+    // shared token rather than imply a named individual.
+    let (router, _store, _dir) = app_with_auth(AuthConfig::static_token("the-token"));
+    let created = router
+        .clone()
+        .oneshot(bearer_post(
+            "/projects",
+            json!({ "name": "coffee" }),
+            "the-token",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    for entry in audit_entries(&router, Some("the-token")).await {
+        assert_eq!(entry["mechanism"], "static");
+        assert_eq!(entry["actor"], "admin");
+    }
+
+    // JWT: the subject arrives from the verified sub claim, and the mechanism records that a
+    // signed token was verified.
+    let (router, _store, _dir) = app_with_auth(jwt_config(None, None));
+    let token = sign(
+        json!({
+            "sub": "alex",
+            "roles": ["admin"],
+            "projects": ["*"],
+            "nbf": now() - 3600,
+            "exp": now() + 3600,
+        }),
+        "test-key",
+        PRIVATE_KEY,
+    );
+    let created = router
+        .clone()
+        .oneshot(bearer_post(
+            "/projects",
+            json!({ "name": "coffee" }),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    for entry in audit_entries(&router, Some(&token)).await {
+        assert_eq!(entry["mechanism"], "jwt");
+        assert_eq!(entry["actor"], "alex");
     }
 }

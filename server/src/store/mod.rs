@@ -52,7 +52,10 @@ pub struct Lock {
 /// (callers pass 0); `at` is the wall-clock time supplied by the HTTP layer, never read
 /// inside the store; `actor` is the verified identity's subject - who actually performed
 /// the action - never a name taken from the request body. In open mode that subject is
-/// "anonymous": nobody was authenticated, which is the honest statement.
+/// "anonymous": nobody was authenticated, which is the honest statement. `mechanism` records
+/// HOW the caller authenticated (`open`, `static` or `jwt`) so a shared token is never
+/// recorded byte-identically to a named individual; it is the subject's companion, not a
+/// substitute for it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEntry {
@@ -60,6 +63,7 @@ pub struct AuditEntry {
     pub project: String,
     pub at: i64,
     pub actor: String,
+    pub mechanism: String,
     pub action: String,
     pub subject: String,
     pub detail: String,

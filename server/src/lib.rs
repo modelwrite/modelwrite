@@ -13,6 +13,7 @@ pub use error::ApiError;
 
 use std::sync::Arc;
 
+use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
@@ -85,11 +86,13 @@ pub fn app(state: AppState) -> Router {
         .with_state(api_state)
 }
 
-/// Liveness. Public on purpose, and note it takes NO state: it has no store to reach, so
-/// it cannot disclose or touch anything. A health check that needs a token is a health
-/// check that fails during the incident it exists to detect.
-async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
+/// Liveness. Public on purpose: it never reaches the store, and it needs no token - a
+/// health check that requires a credential fails exactly during the incident it exists to
+/// detect. It reports the AUTH MODE so a deployment that forgot to configure authentication
+/// is visible to monitoring rather than only in a stderr line; it reports the mode ONLY,
+/// never a token, a key or a path.
+async fn health(State(state): State<api::ApiState>) -> Json<serde_json::Value> {
+    Json(json!({ "status": "ok", "authMode": state.auth.mechanism() }))
 }
 
 /// Build information. Public and stateless for the same reason as health.

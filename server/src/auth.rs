@@ -227,6 +227,19 @@ impl AuthConfig {
     pub fn fixed(identity: Identity) -> AuthConfig {
         AuthConfig::Fixed(identity)
     }
+
+    /// HOW the caller authenticated, for the audit log and the health check. This is a
+    /// fixed set - `open`, `static`, `jwt`, or `fixed` (the test-only hook) - so a year-later
+    /// reader can tell a shared token from a named JWT subject. It is the mechanism ONLY:
+    /// never a token, a key or a path.
+    pub fn mechanism(&self) -> &'static str {
+        match self {
+            AuthConfig::Open => "open",
+            AuthConfig::Static { .. } => "static",
+            AuthConfig::Jwt { .. } => "jwt",
+            AuthConfig::Fixed(_) => "fixed",
+        }
+    }
 }
 
 /// SHA-256 of a token as lowercase hex. The configured token is hashed once at startup so
@@ -275,10 +288,11 @@ pub fn parse_identity_from_static(token: &str, config: &AuthConfig) -> Option<Id
     }
 }
 
-/// Parse a JWKS document into decoding keys, keyed by each key's `kid` (an empty string
-/// when a key declares none). Only RSA keys are kept: they are the only kind that can
-/// verify the RSA signatures this service accepts, and a set that also carries an EC or
-/// octet key is common rather than erroneous.
+/// Parse a JWKS document into decoding keys, keyed by each key's `kid`. Only RSA keys are
+/// kept: they are the only kind that can verify the RSA signatures this service accepts, and
+/// a set that also carries an EC or octet key is common rather than erroneous. A missing or
+/// duplicate `kid` is a startup ERROR rather than a silent overwrite: a rotation that made
+/// the previous key unreachable must not pass without a signal.
 pub fn parse_jwks(jwks: &str) -> anyhow::Result<HashMap<String, DecodingKey>> {
     let set: jsonwebtoken::jwk::JwkSet = serde_json::from_str(jwks)
         .map_err(|e| anyhow::anyhow!("the JWKS is not valid JSON: {}", e))?;
@@ -287,9 +301,18 @@ pub fn parse_jwks(jwks: &str) -> anyhow::Result<HashMap<String, DecodingKey>> {
         let jsonwebtoken::jwk::AlgorithmParameters::RSA(rsa) = jwk.algorithm else {
             continue;
         };
+        let kid = jwk
+            .common
+            .key_id
+            .ok_or_else(|| anyhow::anyhow!("a JWKS RSA key has no kid"))?;
+        if kid.is_empty() {
+            return Err(anyhow::anyhow!("a JWKS RSA key has an empty kid"));
+        }
         let key = DecodingKey::from_rsa_components(&rsa.n, &rsa.e)
             .map_err(|e| anyhow::anyhow!("a JWKS RSA key is unusable: {}", e))?;
-        keys.insert(jwk.common.key_id.unwrap_or_default(), key);
+        if keys.insert(kid.clone(), key).is_some() {
+            return Err(anyhow::anyhow!("duplicate JWKS kid {}", kid));
+        }
     }
     if keys.is_empty() {
         return Err(anyhow::anyhow!("the JWKS contains no RSA keys"));
@@ -375,6 +398,10 @@ pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Ident
     // treated as absent (the same type-confusion that motivated requiring `exp`).
     validation.validate_nbf = true;
     validation.required_spec_claims.insert("nbf".to_string());
+    // A subject is mandatory: the audit log records the verified `sub` as the actor, so a
+    // token without one (or with a wrong-typed one) must be refused rather than accepted as
+    // an identity with an empty subject that then breaks every write.
+    validation.required_spec_claims.insert("sub".to_string());
 
     if let Some(iss) = issuer {
         validation.set_issuer(&[iss.as_str()]);
@@ -398,11 +425,14 @@ pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Ident
     let data = decode::<serde_json::Value>(token, key, &validation).ok()?;
     let claims = data.claims;
 
+    // `required_spec_claims` guarantees the claim is PRESENT; this guarantees it is a
+    // non-empty STRING. A `sub` of the wrong JSON type (or an empty string) is refused with
+    // 401, never accepted as an identity with an empty subject.
     let subject = claims
         .get("sub")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())?;
     let roles = string_list_claim(&claims, role_claim);
     let projects = string_list_claim(&claims, project_claim);
 
@@ -587,21 +617,18 @@ mod tests {
 
     #[test]
     fn parse_jwks_keeps_rsa_keys_by_kid_and_skips_others() {
-        // Two RSA keys (one kid-less) and one octet key that must be skipped.
+        // Two RSA keys with distinct kids and one octet key that must be skipped.
         let jwks = serde_json::json!({
             "keys": [
                 { "kty": "RSA", "kid": "k1", "n": "AQID", "e": "AQAB" },
-                { "kty": "RSA", "n": "BAUG", "e": "AQAB" },
+                { "kty": "RSA", "kid": "k3", "n": "BAUG", "e": "AQAB" },
                 { "kty": "oct", "kid": "k2", "k": "c2VjcmV0" },
             ]
         });
         let keys = parse_jwks(&jwks.to_string()).expect("a JWKS with RSA keys parses");
         assert_eq!(keys.len(), 2, "the octet key must be skipped");
         assert!(keys.contains_key("k1"), "kid k1 must be present");
-        assert!(
-            keys.contains_key(""),
-            "the kid-less key maps to the empty string"
-        );
+        assert!(keys.contains_key("k3"), "kid k3 must be present");
         assert!(!keys.contains_key("k2"), "the octet key must not be kept");
     }
 
@@ -609,6 +636,34 @@ mod tests {
     fn parse_jwks_rejects_a_set_with_no_rsa_keys() {
         let jwks = serde_json::json!({
             "keys": [ { "kty": "oct", "kid": "k", "k": "c2VjcmV0" } ]
+        });
+        assert!(parse_jwks(&jwks.to_string()).is_err());
+    }
+
+    #[test]
+    fn parse_jwks_rejects_a_missing_or_empty_kid() {
+        // A rotation that ships a key without a kid would otherwise make that key silently
+        // unreachable; a missing kid must be a startup error.
+        let missing = serde_json::json!({
+            "keys": [ { "kty": "RSA", "n": "AQID", "e": "AQAB" } ]
+        });
+        assert!(parse_jwks(&missing.to_string()).is_err());
+
+        let empty = serde_json::json!({
+            "keys": [ { "kty": "RSA", "kid": "", "n": "AQID", "e": "AQAB" } ]
+        });
+        assert!(parse_jwks(&empty.to_string()).is_err());
+    }
+
+    #[test]
+    fn parse_jwks_rejects_a_duplicate_kid() {
+        // Two keys claiming the same kid would silently overwrite one with the other; the
+        // later key would never be reachable and the earlier would be lost.
+        let jwks = serde_json::json!({
+            "keys": [
+                { "kty": "RSA", "kid": "k1", "n": "AQID", "e": "AQAB" },
+                { "kty": "RSA", "kid": "k1", "n": "BAUG", "e": "AQAB" },
+            ]
         });
         assert!(parse_jwks(&jwks.to_string()).is_err());
     }
