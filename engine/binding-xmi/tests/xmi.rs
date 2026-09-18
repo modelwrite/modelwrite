@@ -214,6 +214,33 @@ fn export_round_trips_the_subset() {
     assert_eq!(round_tripped, root);
 }
 
+// --- The table's subjects are categories; the report's are instances ---
+
+#[test]
+fn every_reported_instance_relates_to_a_declared_construct() {
+    // The table declares CATEGORIES ("uml:Package (packagedElement)"); the loss report
+    // names INSTANCES ("uml:Package pkg-structure (Structure)"). The leading construct
+    // name ("uml:Package") is the shared key a reader uses to match one to the other, so
+    // every per-instance loss on a real artifact must trace to a construct the table
+    // declares.
+    let (_, loss) = import("coffee-grinder.xmi");
+    let table = XmiBinding::new().mapping_table();
+    assert!(!loss.blocking().is_empty());
+    for mapping in loss.blocking() {
+        let construct = mapping
+            .subject
+            .split_whitespace()
+            .next()
+            .unwrap_or(&mapping.subject);
+        assert!(
+            table.iter().any(|row| row.subject.contains(construct)),
+            "reported instance {:?} traces to no declared construct {:?}",
+            mapping.subject,
+            construct
+        );
+    }
+}
+
 // --- MINOR: loss-report subjects are unique, so acceptance by name is unambiguous ---
 
 #[test]

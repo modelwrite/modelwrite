@@ -2,8 +2,11 @@
 //! The subset of SysML v1 XMI this binding understands, stated as data.
 //!
 //! This is the binding's mapping matrix: one Mapping per source construct,
-//! each marked exact, lossy or unmappable. The gate and the workbench read this
-//! data rather than trusting prose, so the subset a binding claims is auditable.
+//! each marked exact, lossy or unmappable. The table is DECLARATION, not gate
+//! input: it is published so a person can read the boundary the binding claims
+//! before migrating. The gate does not read it; what the gate enforces is the
+//! per-import loss report, whose entries name - per instance - what was actually
+//! lost or left unmapped.
 
 use binding::{Mapping, MappingVerdict};
 
@@ -19,6 +22,16 @@ pub const DEPENDENCY_STEREOTYPES: &[&str] = &["Satisfy", "Allocate", "Refine", "
 /// negative set (what is not), so a reader can see the boundary from the table
 /// alone. Anything not listed is reported on import as an Unmappable entry
 /// naming the XMI element and its xmi:id - never dropped in silence.
+///
+/// This table is declaration, not gate input: nothing here is enforced. The gate
+/// enforces the per-import loss report instead. Relating the two: a row's
+/// `subject` is a CATEGORY (for example `uml:Package (packagedElement)`, naming
+/// the construct and its syntactic position), while a loss-report entry's
+/// `subject` is an INSTANCE (for example `uml:Package pkg-structure (Structure)`,
+/// naming that same construct plus the xmi:id and name of the one occurrence in
+/// that artifact). The leading construct name (`uml:Package`) is the shared key:
+/// match a report entry to its table row by that prefix, and the row's verdict
+/// and note are the general rule the instance entry instantiates.
 pub fn mapping_table() -> Vec<Mapping> {
     vec![
         Mapping {

@@ -71,9 +71,15 @@ impl std::error::Error for BindingError {}
 /// the binding's word, carried in its self-reported loss report.
 pub trait Binding {
     fn info(&self) -> BindingInfo;
-    /// The declarative mapping matrix: the source constructs this binding
-    /// understands, each marked exact, lossy or unmappable. Data the gate reads;
-    /// a binding that declares nothing understands nothing.
+    /// The declarative mapping matrix: the source constructs this binding says it
+    /// understands, each marked exact, lossy or unmappable. This is DECLARATION,
+    /// not gate input: it is published so a person can read the boundary a
+    /// binding claims before migrating, but the gate does not read it and nothing
+    /// here is enforced. What the gate enforces is the per-import `LossReport`
+    /// this binding returns from `import`: each of that report's blocking entries
+    /// names, for one specific artifact, what was actually lost or left unmapped.
+    /// A binding that declares an empty table still imports and still reports its
+    /// losses, so the declaration has no effect on import behaviour.
     fn mapping_table(&self) -> Vec<Mapping> {
         Vec::new()
     }
