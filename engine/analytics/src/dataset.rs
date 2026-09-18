@@ -31,6 +31,11 @@ pub struct Dataset {
     /// Parsed rows, each a list of field strings. A header row, if present, is row
     /// zero: parsing does not special-case it.
     pub rows: Vec<Vec<String>>,
+    /// The exact bytes the snapshot was built from, retained byte-for-byte so the
+    /// snapshot can be fetched back by its content hash and reproduced later. A hash
+    /// alone is a promise, not a snapshot: without the bytes there is nothing to
+    /// reproduce.
+    pub bytes: Vec<u8>,
     pub content_hash: String,
 }
 
@@ -55,6 +60,7 @@ impl Dataset {
             source,
             captured_at,
             rows,
+            bytes: bytes.to_vec(),
             content_hash,
         })
     }

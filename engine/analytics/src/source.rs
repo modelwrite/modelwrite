@@ -147,4 +147,17 @@ impl Registry {
     pub fn datasets(&self) -> impl Iterator<Item = &Dataset> + '_ {
         self.datasets.values()
     }
+
+    /// Fetch a snapshot by its content hash.
+    pub fn dataset(&self, content_hash: &str) -> Option<&Dataset> {
+        self.datasets.get(content_hash)
+    }
+
+    /// Fetch a snapshot's exact bytes by its content hash. This is what makes a
+    /// snapshot reproducible rather than merely hashed: the bytes are retained, so
+    /// an answer can be rebuilt a year later from the same bytes it was computed
+    /// from. A hash that was never recorded returns `None`, never a panic.
+    pub fn bytes(&self, content_hash: &str) -> Option<&[u8]> {
+        self.datasets.get(content_hash).map(|d| d.bytes.as_slice())
+    }
 }

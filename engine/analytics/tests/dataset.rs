@@ -172,3 +172,44 @@ fn from_csv_at_stamps_the_read_time() {
     let unstamped = Dataset::from_csv(source(), CSV).unwrap();
     assert_eq!(unstamped.captured_at, "");
 }
+
+#[test]
+fn a_snapshot_retains_the_exact_bytes_it_was_built_from() {
+    let bytes: &[u8] = b"id,name\nREQ-1,Widget\n";
+    let ds = Dataset::from_csv(source(), bytes).unwrap();
+    assert_eq!(ds.bytes, bytes);
+}
+
+#[test]
+fn a_snapshots_bytes_are_fetchable_by_its_content_hash() {
+    let mut registry = Registry::new();
+    registry.register(source()).unwrap();
+    let bytes: &[u8] = b"id,cost\nREQ-1,100\nREQ-2,250\n";
+    let ds = registry
+        .snapshot("erp", "2026-09-17T00:00:00Z".to_string(), bytes)
+        .unwrap();
+    assert_eq!(registry.bytes(&ds.content_hash), Some(bytes));
+    assert_eq!(registry.dataset(&ds.content_hash).unwrap().bytes, bytes);
+}
+
+#[test]
+fn bytes_round_trip_exactly_including_line_endings() {
+    let mut registry = Registry::new();
+    registry.register(source()).unwrap();
+    // CRLF line endings and a trailing newline are normalised away into rows by
+    // parsing, so only byte-for-byte retention can reproduce them; reconstructing
+    // from parsed rows would silently rewrite the source. The fetch must return the
+    // bytes exactly as handed in.
+    let bytes: &[u8] = b"id,cost\r\nREQ-1,100\r\nREQ-2,250\r\n";
+    let ds = registry.snapshot("erp", "t".to_string(), bytes).unwrap();
+    assert_eq!(registry.bytes(&ds.content_hash), Some(bytes));
+}
+
+#[test]
+fn fetching_an_unknown_hash_returns_none_not_a_panic() {
+    let mut registry = Registry::new();
+    registry.register(source()).unwrap();
+    let unknown = "0000000000000000000000000000000000000000000000000000000000000000";
+    assert!(registry.bytes(unknown).is_none());
+    assert!(registry.dataset(unknown).is_none());
+}
