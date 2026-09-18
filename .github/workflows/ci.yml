@@ -27,6 +27,23 @@ jobs:
           diff /tmp/corrupted-fail.json docs/evidence/2026-09-17-roundtrip-corrupted-fail.json
       - run: python -m unittest discover -s judge/tests -p "test_*.py" -v
 
+  msrv:
+    # Builds the whole workspace with the DECLARED minimum toolchain, not with
+    # stable. A manifest rust-version nobody tests is a claim that drifts: the
+    # server declared 1.85 while its JWT crate (via time@0.3.55) actually needs
+    # rustc 1.88, and nothing caught it because every other toolchain in use was
+    # newer. Pinning the server's declared floor and building the workspace makes
+    # the next dependency that raises the floor fail here instead of inside the
+    # container image. Keep the pinned version in step with server/Cargo.toml
+    # rust-version.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - run: cargo build --workspace --locked
+
   postgres:
     # This job proves the PostgreSQL backend, which cannot run on a machine
     # without Docker/PostgreSQL. The 13 tests in server/tests/postgres.rs are
@@ -87,18 +104,17 @@ jobs:
 
           root = pathlib.Path("deploy")
           # Helm templates/*.yaml files are Go templates rendered by helm lint,
-          # not by a YAML parser; secret.yaml.example is a plain (documented)
-          # Secret and must parse too. Every other .yml/.yaml/.yaml.example file
-          # under deploy/ must be valid YAML.
+          # not by a YAML parser, so skip everything under templates/. Every
+          # other .yml/.yaml/.yaml.example file under deploy/ must be valid YAML
+          # (that includes the chart-root secret.yaml.example documentation).
           templates_dir = root / "helm" / "modelwrite" / "templates"
-          plain_exception = {templates_dir / "secret.yaml.example"}
 
           files = sorted(
               p
               for p in root.rglob("*")
               if p.is_file()
               and p.suffix in (".yml", ".yaml", ".example")
-              and (p.parent != templates_dir or p in plain_exception)
+              and p.parent != templates_dir
           )
 
           if not files:
