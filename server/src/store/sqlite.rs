@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     now_epoch, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun, ImportProvenance,
@@ -421,6 +421,51 @@ impl Store for SqliteStore {
             None => CommitProvenance::Authored,
         };
         let provenance_col = provenance.column_value();
+
+        // A commit that DECLARES itself imported must substantiate the claim, checked HERE
+        // where the commit is written: the retained artifact it names must exist, and every
+        // blocking loss in the recorded report must have been accepted by name. This is the
+        // rule as a property of the repository, not of one endpoint - any route that writes
+        // an imported commit (the endpoint, the CLI, or one that does not exist yet) passes
+        // through this transaction and is refused here if its provenance is a lie.
+        if let Some(import) = import {
+            let artifact_exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM blobs WHERE hash = ?1",
+                    params![import.artifact_hash],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+                .unwrap_or(false);
+            if !artifact_exists {
+                return Err(StoreError::NotFound(format!(
+                    "artifact {} for import",
+                    import.artifact_hash
+                )));
+            }
+            let loss_report: Option<String> = tx
+                .query_row(
+                    "SELECT loss_report FROM imports WHERE project = ?1 AND artifact_hash = ?2",
+                    params![project, import.artifact_hash],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let loss_report = loss_report.ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "import {} for project {}",
+                    import.artifact_hash, project
+                ))
+            })?;
+            let unaccepted = super::unaccepted_losses(&loss_report, &import.accepted_losses)?;
+            if !unaccepted.is_empty() {
+                return Err(StoreError::Conflict(format!(
+                    "import provenance is unsubstantiated: blocking losses not accepted: {}",
+                    unaccepted.join(", ")
+                )));
+            }
+        }
 
         // Plain INSERT, not OR IGNORE: a constraint failure must abort this transaction
         // rather than move a branch tip to a hash that has no commit row.

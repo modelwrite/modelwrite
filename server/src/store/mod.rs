@@ -124,6 +124,26 @@ pub struct ImportProvenance {
     pub accepted_losses: Vec<String>,
 }
 
+/// The blocking losses a recorded import's loss report says were NOT accepted by name. The
+/// report is the binding's own account of its native read (not an independent measurement),
+/// and an acceptance names a loss by its entry identity ("subject [verdict]"). Returns the
+/// entry identities of the blocking losses missing from `accepted` - empty when the
+/// provenance is honest. A report that cannot be parsed is corruption, reported as a storage
+/// error rather than read as "no losses".
+pub fn unaccepted_losses(
+    loss_report: &str,
+    accepted: &[String],
+) -> Result<Vec<String>, StoreError> {
+    let report: binding::LossReport = serde_json::from_str(loss_report)
+        .map_err(|e| StoreError::Backend(format!("corrupt loss report: {}", e)))?;
+    Ok(report
+        .blocking()
+        .into_iter()
+        .map(agent::losses::entry_identity)
+        .filter(|identity| !accepted.contains(identity))
+        .collect())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateRun {
     pub project: String,
