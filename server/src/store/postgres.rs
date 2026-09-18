@@ -802,14 +802,30 @@ impl Store for PostgresStore {
                         // A different holder owns a live lease on this element. Returning
                         // the error rolls back the whole transaction, so acquiring is all
                         // or nothing for the requested elements.
-                        let (winner, winner_expires): (String, i64) = tx
-                            .query_one(
+                        // Naming the winner is a courtesy, not part of the guarantee: the
+                        // constraint already decided that this caller loses. The lease can
+                        // even have vanished between the failed insert and this read, if a
+                        // sweep expired it in that instant, so the lookup is optional and a
+                        // missing row degrades to a retryable refusal rather than a backend
+                        // error - an error a caller cannot act on, for a situation that is
+                        // simply "somebody else has it, or just had it".
+                        let winner: Option<(String, i64)> = tx
+                            .query_opt(
                                 "SELECT holder, expires_at FROM locks WHERE project = $1 AND element = $2",
                                 &[&project, &element],
                             )
-                            .map_err(backend)
-                            .map(|row| (row.get(0), row.get(1)))?;
-                        return Err(super::lock_refusal(element, &winner, winner_expires));
+                            .map_err(backend)?
+                            .map(|row| (row.get(0), row.get(1)));
+                        return Err(match winner {
+                            Some((holder, expires_at)) => {
+                                super::lock_refusal(element, &holder, expires_at)
+                            }
+                            None => super::lock_refusal(
+                                element,
+                                "another holder",
+                                now,
+                            ),
+                        });
                     }
                 }
             }
