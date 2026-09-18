@@ -16,6 +16,7 @@
 pub mod diagram;
 pub mod edit;
 pub mod gate;
+pub mod import;
 pub mod layout;
 pub mod model;
 pub mod pages;

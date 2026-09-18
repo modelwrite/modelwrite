@@ -77,6 +77,15 @@ table.requirements th, table.traceability th { background: #f4f4f4; }
 .form-errors, .lock-banner { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
 .form-errors { background: #f8d7da; color: #842029; }
 .lock-banner { background: #fff3cd; color: #664d03; }
+.import-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.import-form input, .import-form select, .import-form textarea { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; }
+.import-form textarea { min-height: 10rem; width: 100%; max-width: 40rem; }
+.loss-list { list-style: none; margin: 0; padding: 0; }
+.loss-list li { border-left: 3px solid #842029; padding-left: 0.5rem; margin-bottom: 0.35rem; }
+.loss-subject { font-family: ui-monospace, monospace; font-weight: 600; }
+.loss-note { color: #666; font-size: 0.85rem; }
+.loss-accept { list-style: none; margin: 0; padding: 0; }
+.loss-accept li { margin-bottom: 0.25rem; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {

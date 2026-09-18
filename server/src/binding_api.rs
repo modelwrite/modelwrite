@@ -26,7 +26,7 @@ use crate::audit::{IMPORT_ACCEPT, IMPORT_REFUSED};
 use crate::auth::{Identity, Permission};
 use crate::binding_registry;
 use crate::error::ApiError;
-use crate::store::{now_seconds, AuditEntry};
+use crate::store::{now_seconds, AuditEntry, Commit, Store};
 
 #[derive(Deserialize)]
 pub struct ImportRequest {
@@ -63,7 +63,7 @@ pub fn parse_binding(selector: &str) -> Result<(String, String), ApiError> {
 /// Decode the artifact field: base64 when it decodes, the raw UTF-8 bytes otherwise. An XMI
 /// document is text, so a raw body is the common case; base64 is accepted for binary source
 /// formats a later binding may read.
-fn decode_artifact(artifact: &str) -> Vec<u8> {
+pub fn decode_artifact(artifact: &str) -> Vec<u8> {
     use base64::Engine as _;
     match base64::engine::general_purpose::STANDARD.decode(artifact) {
         Ok(bytes) => bytes,
@@ -80,47 +80,72 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, ApiError> {
     })
 }
 
-pub async fn import_artifact(
-    identity: Identity,
-    State(state): State<ApiState>,
-    Path(project): Path<String>,
-    Json(body): Json<ImportRequest>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    // Permission and scope before anything else, exactly as every other write path.
-    if !identity.may(Permission::Write) {
-        return Err(ApiError::forbidden("write permission required"));
-    }
-    if !identity.may_reach(&project) {
-        return Err(ApiError::forbidden("project not in scope"));
-    }
-    let author = resolve_author(&state.auth, &identity, &body.author)?;
-    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
-    if state
-        .store
-        .project(&project)
-        .map_err(map_store_error)?
-        .is_none()
-    {
+/// What an import attempt produced, once permission, scope, the author and the branch name
+/// were resolved upstream. A refusal because blocking losses were not accepted is a RESULT
+/// here, not an error: it carries the unaccepted losses so the caller can render them and
+/// ask for a decision. Everything that can go wrong is an ApiError.
+pub enum ImportOutcome {
+    Committed {
+        commit: Commit,
+        artifact_hash: String,
+        binding_id: String,
+        binding_version: String,
+        accepted_losses: Vec<String>,
+        loss_report: binding::LossReport,
+        fidelity: binding::FidelityOutcome,
+    },
+    Blocking {
+        artifact_hash: String,
+        binding_id: String,
+        binding_version: String,
+        unaccepted: Vec<binding::Mapping>,
+        loss_report: binding::LossReport,
+        fidelity: binding::FidelityOutcome,
+    },
+}
+
+/// Everything the import core needs that the caller resolved upstream. artifact is the
+/// decoded source bytes; author is already resolved against the identity; actor and
+/// mechanism are the verified subject and how it authenticated; accept_losses names the
+/// blocking losses the request accepts by subject.
+pub struct ImportCore<'a> {
+    pub binding: &'a str,
+    pub branch: &'a str,
+    pub author: &'a str,
+    pub message: &'a str,
+    pub artifact: &'a [u8],
+    pub accept_losses: &'a [String],
+    pub holder: Option<&'a str>,
+    pub actor: &'a str,
+    pub mechanism: &'a str,
+}
+
+/// The ONE implementation of an import: retain the artifact byte-for-byte, read it through
+/// the binding, measure fidelity with the engine's harness, record the report, refuse every
+/// blocking loss that is not accepted by name, and commit the imported model through the
+/// shared commit core. Both import_artifact and the workbench import page call this, so they
+/// cannot diverge on the sequence, the acceptance rule or the audit entries.
+pub fn import_core(
+    store: &dyn Store,
+    project: &str,
+    input: &ImportCore<'_>,
+) -> Result<ImportOutcome, ApiError> {
+    if store.project(project).map_err(map_store_error)?.is_none() {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    validate_name("branch name", &body.branch)?;
 
     // A binding that does not exist is a request problem, not a server fault.
-    let (binding_id, binding_version) = parse_binding(&body.binding)?;
+    let (binding_id, binding_version) = parse_binding(input.binding)?;
     let binding = binding_registry::resolve(&binding_id, &binding_version)
-        .ok_or_else(|| ApiError::bad_request(format!("unknown binding {}", body.binding)))?;
+        .ok_or_else(|| ApiError::bad_request(format!("unknown binding {}", input.binding)))?;
 
     // Rule 1: retain the source artifact byte-for-byte and content-addressed BEFORE import
     // is even attempted, so nothing that follows can destroy the thing being migrated.
-    let artifact_bytes = decode_artifact(&body.artifact);
-    let artifact_hash = state
-        .store
-        .put_blob(&artifact_bytes)
-        .map_err(map_store_error)?;
+    let artifact_hash = store.put_blob(input.artifact).map_err(map_store_error)?;
 
     // Read the artifact through the binding. A binding that cannot read it is a clean 422,
     // never a panic; the artifact is already retained, so the refusal costs nothing.
-    let (root, loss_report) = binding.import(&artifact_bytes).map_err(|e| {
+    let (root, loss_report) = binding.import(input.artifact).map_err(|e| {
         ApiError::unprocessable(
             "the binding could not read the artifact",
             vec![e.to_string()],
@@ -143,10 +168,9 @@ pub async fn import_artifact(
     // still has a retrievable report and the caller can read exactly which losses to accept.
     let loss_report_json = to_json_string(&loss_report)?;
     let fidelity_json = to_json_string(&fidelity.diff)?;
-    state
-        .store
+    store
         .record_import(
-            &project,
+            project,
             &artifact_hash,
             &binding_id,
             &binding_version,
@@ -159,10 +183,10 @@ pub async fn import_artifact(
     // the binding, and that is exactly the failure the harness exists to catch.
     if !fidelity.diff.equal {
         if let Err(e) = record_refusal(
-            state.store.as_ref(),
-            &project,
-            &identity.subject,
-            state.auth.mechanism(),
+            store,
+            project,
+            input.actor,
+            input.mechanism,
             IMPORT_REFUSED,
             &artifact_hash,
             "the binding could not round-trip the imported model",
@@ -171,43 +195,39 @@ pub async fn import_artifact(
         }
         return Err(ApiError::unprocessable(
             "the binding could not round-trip the imported model; the import is refused",
-            fidelity.diff.missing_elements,
+            fidelity.diff.missing_elements.clone(),
         ));
     }
 
     // Rule 2: every blocking loss must be accepted by name. Anything not accepted refuses
     // the import and is returned so the caller can decide rather than lose it silently.
     let blocking = loss_report.blocking();
-    let accepted = &body.accept_losses;
-    let unaccepted: Vec<&binding::Mapping> = blocking
+    let unaccepted: Vec<binding::Mapping> = blocking
         .iter()
-        .filter(|m| !accepted.iter().any(|a| a == &m.subject))
-        .copied()
+        .filter(|m| !input.accept_losses.iter().any(|a| a == &m.subject))
+        .map(|m| (*m).clone())
         .collect();
     if !unaccepted.is_empty() {
         let subjects: Vec<String> = unaccepted.iter().map(|m| m.subject.clone()).collect();
         if let Err(e) = record_refusal(
-            state.store.as_ref(),
-            &project,
-            &identity.subject,
-            state.auth.mechanism(),
+            store,
+            project,
+            input.actor,
+            input.mechanism,
             IMPORT_REFUSED,
             &artifact_hash,
             &format!("blocking losses not accepted: {}", subjects.join(", ")),
         ) {
             eprintln!("could not record the import refusal: {:?}", e);
         }
-        let blocking_json: Vec<Value> = unaccepted
-            .iter()
-            .map(|m| serde_json::to_value(*m).unwrap_or(Value::Null))
-            .collect();
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "error": "the import has blocking losses that must be accepted by name",
-                "blocking": blocking_json
-            })),
-        ));
+        return Ok(ImportOutcome::Blocking {
+            artifact_hash,
+            binding_id,
+            binding_version,
+            unaccepted,
+            loss_report,
+            fidelity,
+        });
     }
 
     // The acceptance is recorded BEFORE the commit, so a committed import always has its
@@ -215,14 +235,13 @@ pub async fn import_artifact(
     // of "who accepted what".
     let accepted_subjects: Vec<String> = blocking.iter().map(|m| m.subject.clone()).collect();
     if !accepted_subjects.is_empty() {
-        state
-            .store
+        store
             .append_audit(&AuditEntry {
                 id: 0,
-                project: project.clone(),
+                project: project.to_string(),
                 at: now_seconds(),
-                actor: identity.subject.clone(),
-                mechanism: state.auth.mechanism().to_string(),
+                actor: input.actor.to_string(),
+                mechanism: input.mechanism.to_string(),
                 action: IMPORT_ACCEPT.to_string(),
                 subject: artifact_hash.clone(),
                 detail: format!(
@@ -256,28 +275,25 @@ pub async fn import_artifact(
     // so validation, the lock guard and the commit.create audit entry behave exactly as they
     // do for a plain commit, a reset or a merge.
     let now = now_seconds();
-    let tip_hash = state
-        .store
-        .branch_tip(&project, &body.branch)
+    let tip_hash = store
+        .branch_tip(project, input.branch)
         .map_err(map_store_error)?;
     let reference: Option<okf::types::OkfRoot> = match tip_hash.as_deref() {
-        Some(tip) => {
-            Some(load_model(state.store.as_ref(), &project, tip).map_err(map_store_error)?)
-        }
+        Some(tip) => Some(load_model(store, project, tip).map_err(map_store_error)?),
         None => None,
     };
     let commit = commit_core(
-        state.store.as_ref(),
+        store,
         &CommitCore {
-            project: &project,
-            branch: &body.branch,
-            author: &author,
-            message: &body.message,
-            actor: &identity.subject,
-            mechanism: state.auth.mechanism(),
+            project,
+            branch: input.branch,
+            author: input.author,
+            message: input.message,
+            actor: input.actor,
+            mechanism: input.mechanism,
             candidate: &commit_root,
             bytes: &commit_bytes,
-            holder: body.holder.as_deref().unwrap_or(""),
+            holder: input.holder.unwrap_or(""),
             now,
             tip: tip_hash.as_deref(),
             reference: reference.as_ref(),
@@ -296,9 +312,7 @@ pub async fn import_artifact(
     // failed link must not turn a successful commit into a misleading 500 that invites a
     // retry - which would create a second commit for the same artifact.
     if let Err(e) =
-        state
-            .store
-            .attach_import_commit(&project, &artifact_hash, &commit.hash, &accepted_subjects)
+        store.attach_import_commit(project, &artifact_hash, &commit.hash, &accepted_subjects)
     {
         eprintln!(
             "could not link import {} to commit {}: {:?}",
@@ -306,21 +320,91 @@ pub async fn import_artifact(
         );
     }
 
-    let mut commit_obj = commit_json(&commit);
-    commit_obj["provenance"] = json!({
-        "artifactHash": artifact_hash,
-        "bindingId": binding_id,
-        "bindingVersion": binding_version,
-        "acceptedLosses": accepted_subjects
-    });
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({
-            "commit": commit_obj,
-            "lossReport": serde_json::from_str::<Value>(&loss_report_json).unwrap_or(Value::Null),
-            "fidelity": serde_json::from_str::<Value>(&fidelity_json).unwrap_or(Value::Null)
-        })),
-    ))
+    Ok(ImportOutcome::Committed {
+        commit,
+        artifact_hash,
+        binding_id,
+        binding_version,
+        accepted_losses: accepted_subjects,
+        loss_report,
+        fidelity,
+    })
+}
+
+pub async fn import_artifact(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path(project): Path<String>,
+    Json(body): Json<ImportRequest>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    // Permission and scope before anything else, exactly as every other write path.
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let author = resolve_author(&state.auth, &identity, &body.author)?;
+    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
+    validate_name("branch name", &body.branch)?;
+
+    // The artifact arrives base64-encoded or as a raw UTF-8 body; decode once, then hand the
+    // bytes to the SAME core the workbench page calls, so the two cannot diverge.
+    let artifact_bytes = decode_artifact(&body.artifact);
+    match import_core(
+        state.store.as_ref(),
+        &project,
+        &ImportCore {
+            binding: &body.binding,
+            branch: &body.branch,
+            author: &author,
+            message: &body.message,
+            artifact: &artifact_bytes,
+            accept_losses: &body.accept_losses,
+            holder: body.holder.as_deref(),
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+        },
+    )? {
+        ImportOutcome::Committed {
+            commit,
+            artifact_hash,
+            binding_id,
+            binding_version,
+            accepted_losses,
+            loss_report,
+            fidelity,
+        } => {
+            let mut commit_obj = commit_json(&commit);
+            commit_obj["provenance"] = json!({
+                "artifactHash": artifact_hash,
+                "bindingId": binding_id,
+                "bindingVersion": binding_version,
+                "acceptedLosses": accepted_losses
+            });
+            Ok((
+                StatusCode::CREATED,
+                Json(json!({
+                    "commit": commit_obj,
+                    "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
+                    "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+                })),
+            ))
+        }
+        ImportOutcome::Blocking { unaccepted, .. } => {
+            let blocking_json: Vec<Value> = unaccepted
+                .iter()
+                .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                .collect();
+            Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "the import has blocking losses that must be accepted by name",
+                    "blocking": blocking_json
+                })),
+            ))
+        }
+    }
 }
 
 pub async fn import_report(

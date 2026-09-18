@@ -215,6 +215,16 @@ fn branch_list_page(
                 button type="submit" { "Compare" }
             }
         }
+        // Importing WRITES, so the link is offered only to a caller who may perform it. A
+        // read-only reviewer can still open the page by URL to read a loss report, but the
+        // person this page exists for is the one deciding what to give up, and that person
+        // can write.
+        @if identity.may(Permission::Write) {
+            h2 { "Import" }
+            p {
+                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/import" } { "Import a legacy model" }
+            }
+        }
         // Merging WRITES, so the form is offered only to a caller who may perform it. A form
         // the caller cannot submit is a trap: it invites an action, then refuses it after the
         // work is typed. The refusal is still enforced server-side for a direct request.

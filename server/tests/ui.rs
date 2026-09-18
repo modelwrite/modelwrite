@@ -189,6 +189,7 @@ async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
         "/ui/projects/coffee/model",
         "/ui/projects/coffee/diagram",
         "/ui/projects/coffee/compare?from=a&to=b",
+        "/ui/projects/coffee/import",
         "/ui/projects/coffee/gate",
         "/ui/projects/coffee/gate/aaaa/bbbb",
     ] {
@@ -2038,5 +2039,252 @@ async fn renaming_an_element_carries_its_references() {
             .any(|w| w.contains("no node in the graph")),
         "a rename must not orphan the element: {:?}",
         report.warnings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 4: the import page, where a person decides about a migration.
+
+/// Read a hand-written SysML v1 XMI fixture from the binding's corpus, the same synthetic
+/// documents the migration tests use so the page is pinned to the same hand-checked losses.
+fn xmi_fixture(name: &str) -> String {
+    let path = format!(
+        "{}/../engine/binding-xmi/fixtures/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        name
+    );
+    std::fs::read_to_string(path).expect("fixture must exist")
+}
+
+#[tokio::test]
+async fn the_import_page_offers_the_registry_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/import"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("sysml-v1-xmi@2.4"),
+        "the registry binding must be offered"
+    );
+    assert!(
+        html.contains(r#"name="artifact""#),
+        "the artifact field must render"
+    );
+    assert!(
+        html.contains(r#"name="binding""#),
+        "the binding selector must render"
+    );
+}
+
+#[tokio::test]
+async fn a_lossy_import_shows_its_losses_and_requires_acceptance_before_committing() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let artifact = xmi_fixture("coffee-grinder.xmi");
+    let expected_hash = server::store::blob_hash(artifact.as_bytes());
+
+    // Without acceptance the import is refused, and the page shows the losses by name.
+    let refused = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import coffee-grinder"),
+                ("artifact", artifact.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+
+    // The page must not claim a lossless migration the report contradicts.
+    assert!(
+        html.contains("lossy"),
+        "the page must say the import is lossy"
+    );
+    assert!(
+        !html.contains("lossless"),
+        "the page must not claim a lossless migration"
+    );
+    assert!(
+        !html.contains("Import committed"),
+        "a refused import must not render success"
+    );
+
+    // Blocking entries are named, grouped by verdict, each naming its subject.
+    assert!(
+        html.contains("<h3>Lossy</h3>"),
+        "the lossy group must render"
+    );
+    assert!(
+        html.contains("uml:Model model-grinder"),
+        "a subject must be named"
+    );
+    assert!(
+        html.contains("uml:Package pkg-structure (Structure)"),
+        "a subject must be named"
+    );
+    assert!(
+        html.contains("uml:Comment doc-grinder"),
+        "a subject must be named"
+    );
+
+    // What was retained is stated on the page, not only in a log.
+    assert!(
+        html.contains(expected_hash.as_str()),
+        "the retained artifact hash must be named"
+    );
+
+    // Accepting the six named losses commits the import, through the SAME core the
+    // endpoint calls.
+    let accepted = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import coffee-grinder"),
+                ("artifact", artifact.as_str()),
+                ("accept_loss_0", "uml:Model model-grinder"),
+                ("accept_loss_1", "uml:Comment doc-grinder"),
+                ("accept_loss_2", "uml:Property prop-motor"),
+                ("accept_loss_3", "uml:Property prop-capacity"),
+                ("accept_loss_4", "uml:Dependency dep-satisfy"),
+                ("accept_loss_5", "uml:Package pkg-structure (Structure)"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED);
+    let html = body_text(accepted).await;
+    assert!(
+        html.contains("Import committed"),
+        "the success page must render"
+    );
+    assert!(
+        html.contains(expected_hash.as_str()),
+        "the retained artifact hash must be named on success"
+    );
+
+    // The commit landed: the page and the endpoint share the same commit path.
+    let commits = router
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let commits = json_body(commits).await;
+    assert_eq!(
+        commits.as_array().unwrap().len(),
+        1,
+        "the accepted import must have committed exactly one commit"
+    );
+}
+
+#[tokio::test]
+async fn an_unmapped_import_groups_by_verdict_with_blocking_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let artifact = xmi_fixture("unknown-element.xmi");
+    let refused = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import unknown"),
+                ("artifact", artifact.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+
+    // Both verdict groups render, with the unmapped subjects named.
+    assert!(
+        html.contains("<h3>Unmappable</h3>"),
+        "the unmappable group must render"
+    );
+    assert!(
+        html.contains("<h3>Lossy</h3>"),
+        "the lossy group must render"
+    );
+    assert!(
+        html.contains("uml:StateMachine sm-1"),
+        "the unmapped element must be named"
+    );
+    assert!(
+        html.contains("uml:Class block-1 attribute"),
+        "the unmapped attribute must be named"
+    );
+    assert!(
+        html.contains("uml:Model model-unknown"),
+        "the lossy subject must be named"
+    );
+
+    // Blocking entries render first: unmappable (most severe) precedes lossy.
+    let unmappable_at = html.find("<h3>Unmappable</h3>");
+    let lossy_at = html.find("<h3>Lossy</h3>");
+    assert!(
+        unmappable_at.is_some() && lossy_at.is_some() && unmappable_at.unwrap() < lossy_at.unwrap(),
+        "the blocking unmappable group must render before the lossy group"
+    );
+}
+
+#[tokio::test]
+async fn a_viewer_cannot_start_an_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    store.create_project("coffee", None).unwrap();
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::fixed(viewer()),
+    });
+
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "steal"),
+                ("artifact", "<xmi/>"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = body_text(response).await;
+    assert!(html.contains("<html"), "a 403 must be a page, not JSON");
+    assert!(
+        html.contains("write permission required"),
+        "the page must name the permission refusal"
     );
 }
