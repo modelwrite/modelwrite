@@ -21,7 +21,7 @@ companion LandingGear.notation). Retrieved for interoperability testing.
 
 It is a **Papyrus project skeleton**, and that is worth stating plainly because it
 surprised us: the file contains **zero model elements**. No packagedElement, no
-ownedAttribute, no Class. It consists entirely of eleven `uml:ProfileApplication`
+ownedAttribute, no Class. It consists entirely of ten `uml:ProfileApplication`
 and two `uml:PackageImport` declarations whose targets are `pathmap://` URIs.
 
 `pathmap://` is an Eclipse-internal scheme. Those references resolve inside an

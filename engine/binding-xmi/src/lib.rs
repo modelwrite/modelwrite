@@ -152,6 +152,41 @@ fn escape(s: &str) -> String {
     out
 }
 
+/// The href reference carried by a declaration element (a profile application or
+/// package import), preferring a `pathmap://` URI - the Eclipse-internal
+/// reference - over other hrefs when both are present.
+fn first_child_href(node: roxmltree::Node<'_, '_>) -> String {
+    let mut fallback = String::new();
+    for child in node.children() {
+        if !child.is_element() {
+            continue;
+        }
+        if let Some(href) = attr(child, "href") {
+            if fallback.is_empty() {
+                fallback = href.to_string();
+            }
+            if href.starts_with("pathmap://") {
+                return href.to_string();
+            }
+        }
+    }
+    fallback
+}
+
+/// The note for a recognised declaration, naming the reference it carries and
+/// calling out `pathmap://` as unresolvable outside Eclipse.
+fn declaration_note(kind: &str, href: &str) -> String {
+    let mut note =
+        format!("declaration: {kind} recognised and not carried — it carries no model content");
+    if !href.is_empty() {
+        note.push_str(&format!(" (reference {href})"));
+        if href.starts_with("pathmap://") {
+            note.push_str("; pathmap:// is Eclipse-internal and cannot resolve outside the IDE");
+        }
+    }
+    note
+}
+
 /// The kind of a recognised XMI element, used to decide which attributes are
 /// understood (and therefore which are reported as unmapped).
 #[derive(Clone, Copy)]
@@ -294,6 +329,7 @@ impl Importer {
                 if self.project.is_empty() {
                     self.project = attr(node, "name").unwrap_or("").to_string();
                 }
+                self.report_root_metadata(node, &id);
                 self.report_unmapped_attributes(
                     node,
                     ElementKind::Model,
@@ -420,6 +456,37 @@ impl Importer {
                     enclosing_class: enclosing_class.map(|s| s.to_string()),
                 });
             }
+            "ProfileApplication" => {
+                // A profile application is a DECLARATION, not model content: it
+                // applies a profile and carries nothing to migrate. Not carrying
+                // it is not a loss, so it is recorded Exact, never blocking.
+                let href = first_child_href(node);
+                self.losses.push(Mapping {
+                    subject: format!("uml:ProfileApplication {id}"),
+                    verdict: MappingVerdict::Exact,
+                    note: declaration_note("profile application", &href),
+                });
+            }
+            "PackageImport" => {
+                // A package import is a DECLARATION, not model content: it
+                // imports a library and carries nothing to migrate.
+                let href = first_child_href(node);
+                self.losses.push(Mapping {
+                    subject: format!("uml:PackageImport {id}"),
+                    verdict: MappingVerdict::Exact,
+                    note: declaration_note("package import", &href),
+                });
+            }
+            "EAnnotation" | "EPackage" => {
+                // An EMF annotation (and its EPackage reference) is a
+                // DECLARATION: metadata that carries no model content.
+                let element_name = type_full.as_deref().unwrap_or(tag.as_str());
+                self.losses.push(Mapping {
+                    subject: format!("{element_name} {id}"),
+                    verdict: MappingVerdict::Exact,
+                    note: "declaration: annotation metadata recognised and not carried — it carries no model content".to_string(),
+                });
+            }
             _ => {
                 let element_name = type_full.as_deref().unwrap_or(tag.as_str()).to_string();
                 let id_part = if id.is_empty() {
@@ -436,14 +503,37 @@ impl Importer {
         }
     }
 
+    fn report_root_metadata(&mut self, node: roxmltree::Node<'_, '_>, id: &str) {
+        // Root metadata (xmi:version and its kin) is a DECLARATION: it describes
+        // the serialization, not the model, so not carrying it is not a loss.
+        for a in node.attributes() {
+            if a.name() == "version" && a.namespace() == Some(XMI_NS) {
+                self.losses.push(Mapping {
+                    subject: format!("uml:Model {id} attribute '{}'", attribute_label(&a)),
+                    verdict: MappingVerdict::Exact,
+                    note: "declaration: root metadata (XMI schema version) recognised and not carried — it carries no model content".to_string(),
+                });
+            }
+        }
+    }
+
     fn report_root_attributes(&mut self, node: roxmltree::Node<'_, '_>) {
         let tag = node.tag_name().name().to_string();
         for a in node.attributes() {
-            self.losses.push(Mapping {
-                subject: format!("{tag} root attribute '{}'", attribute_label(&a)),
-                verdict: MappingVerdict::Unmappable,
-                note: "unmapped attribute on the XMI root element".to_string(),
-            });
+            if a.name() == "version" && a.namespace() == Some(XMI_NS) {
+                // Root metadata is a DECLARATION, not a loss.
+                self.losses.push(Mapping {
+                    subject: format!("{tag} root attribute '{}'", attribute_label(&a)),
+                    verdict: MappingVerdict::Exact,
+                    note: "declaration: root metadata (XMI schema version) recognised and not carried — it carries no model content".to_string(),
+                });
+            } else {
+                self.losses.push(Mapping {
+                    subject: format!("{tag} root attribute '{}'", attribute_label(&a)),
+                    verdict: MappingVerdict::Unmappable,
+                    note: "unmapped attribute on the XMI root element".to_string(),
+                });
+            }
         }
     }
 
@@ -459,7 +549,13 @@ impl Importer {
             let uml = ns.is_none() || ns == Some(UML_NS);
             let xmi = ns == Some(XMI_NS);
             let consumed = match kind {
-                ElementKind::Model | ElementKind::Package | ElementKind::Class => {
+                ElementKind::Model => {
+                    (name == "id" && xmi)
+                        || (name == "type" && xmi)
+                        || (name == "name" && uml)
+                        || (name == "version" && xmi) // root metadata, a declaration
+                }
+                ElementKind::Package | ElementKind::Class => {
                     (name == "id" && xmi) || (name == "type" && xmi) || (name == "name" && uml)
                 }
                 ElementKind::Property => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The hand-checked acceptance for the SysML v1 XMI reader.
 
-use binding::{Binding, BindingError, Direction, MappingVerdict};
+use binding::{summarize_import, Binding, BindingError, Direction, ImportVerdict, MappingVerdict};
 use binding_xmi::{model, XmiBinding, BINDING_ID, BINDING_VERSION};
 use okf::types::{GraphEdge, OkfRoot, StateMachine};
 
@@ -413,16 +413,29 @@ fn properties_of_a_non_block_class_are_named_not_passed_over() {
     }));
 }
 
-// --- M1: attributes on the xmi:XMI root element are reported ---
+// --- M1: root metadata (xmi:version) is a declaration, never a loss ---
 
 #[test]
-fn an_attribute_on_the_root_element_is_reported() {
+fn root_metadata_on_the_xmi_root_is_a_declaration_not_a_loss() {
     let (_, loss) = import("root-attr.xmi");
+    // xmi:version is root metadata: it carries no model content, so the reader
+    // recognises it as a declaration (Exact) rather than an Unmappable loss. It
+    // is still NAMED, so nothing is dropped in silence.
     assert!(loss.mappings.iter().any(|m| {
-        m.verdict == MappingVerdict::Unmappable
+        m.verdict == MappingVerdict::Exact
             && m.subject.contains("root attribute")
             && m.subject.contains("version")
+            && m.note.contains("declaration")
     }));
+    assert!(loss
+        .declarations()
+        .iter()
+        .any(|m| m.subject.contains("version")));
+    // Nothing about the root is silently dropped as an Unmappable loss.
+    assert!(loss
+        .mappings
+        .iter()
+        .all(|m| { !(m.verdict == MappingVerdict::Unmappable && m.subject.contains("version")) }));
 }
 
 // --- M2: a foreign attribute is not read as UML, and the ambiguity is reported ---
@@ -469,4 +482,40 @@ fn a_document_without_a_model_root_is_a_clean_error_not_a_panic() {
         Err(BindingError::Import(msg)) => assert!(msg.contains("uml:Model")),
         other => panic!("expected a clean Import error, got {:?}", other.map(|_| ())),
     }
+}
+
+// --- Declarations do not hide content losses: the signal stays visible ---
+
+#[test]
+fn content_losses_stay_visible_beside_declarations() {
+    // A document WITH content and a real dropped element, alongside the same
+    // declarations a Papyrus skeleton carries. Narrowing what counts as a loss
+    // must not hide the dropped element: it is still an Unmappable content loss,
+    // counted separately from the Exact declarations.
+    let (root, loss) = import("declaration-with-content.xmi");
+    let summary = summarize_import(&root, &loss);
+
+    assert_eq!(root.structure.len(), 1);
+    assert_eq!(summary.elements_imported, 1);
+    assert_eq!(summary.declarations_recognised, 2);
+    assert_eq!(
+        summary.content_losses, 1,
+        "the dropped StateMachine is still a content loss"
+    );
+    assert_eq!(summary.verdict, ImportVerdict::ContentLosses);
+    assert!(!summary.no_model_content);
+
+    // The dropped element is STILL named Unmappable, distinct from declarations.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable && m.subject == "uml:StateMachine sm-dwc"
+    }));
+    // The declarations are Exact, not losses.
+    assert!(loss
+        .declarations()
+        .iter()
+        .all(|m| m.verdict == MappingVerdict::Exact));
+    assert!(loss
+        .declarations()
+        .iter()
+        .all(|m| m.subject.contains("ProfileApplication") || m.subject.contains("PackageImport")));
 }
