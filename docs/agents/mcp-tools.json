@@ -4,7 +4,7 @@
     "name": "modelwrite-mcp",
     "protocolVersion": "2024-11-05"
   },
-  "stability": "Tool names and input schemas are additive. Existing names never change meaning; new capability arrives as new tools.",
+  "stability": "MCP tool names and input schemas are additive: existing names never change meaning, and new capability arrives as new tools. Repository routes are named by method and path; a route that moves or is removed breaks every agent written against this contract.",
   "tools": [
     {
       "name": "okf.validate",
@@ -88,16 +88,36 @@
       "mimeType": "application/json"
     }
   ],
+  "repositoryHttpSurface": {
+    "auth": "Every endpoint except /health and /version requires the same authentication a human meets and enforces the listed permission plus project scope: an unauthenticated caller is refused 401, an under-privileged caller 403. There is no agent-only path.",
+    "endpoints": [
+      { "method": "GET", "path": "/health", "permission": "public", "summary": "Liveness; reports the auth mode and never a secret" },
+      { "method": "GET", "path": "/version", "permission": "public", "summary": "Build information" },
+      { "method": "POST", "path": "/projects", "permission": "admin", "summary": "Create a project" },
+      { "method": "GET", "path": "/projects", "permission": "read", "summary": "List projects, filtered to the caller's scope" },
+      { "method": "POST", "path": "/projects/:project/commits", "permission": "write", "summary": "Commit an OKF document to a branch" },
+      { "method": "GET", "path": "/projects/:project/commits", "permission": "read", "summary": "List commits on a branch" },
+      { "method": "GET", "path": "/projects/:project/commits/:hash", "permission": "read", "summary": "Fetch the OKF document behind a commit" },
+      { "method": "POST", "path": "/projects/:project/branches", "permission": "write", "summary": "Create a branch" },
+      { "method": "GET", "path": "/projects/:project/branches", "permission": "read", "summary": "List branches and their tips" },
+      { "method": "DELETE", "path": "/projects/:project/branches/:name", "permission": "admin", "summary": "Delete a branch" },
+      { "method": "POST", "path": "/projects/:project/branches/:name/reset", "permission": "write", "summary": "Revert a branch to an earlier commit as a new commit" },
+      { "method": "POST", "path": "/projects/:project/gate", "permission": "write", "summary": "Run the round-trip fidelity gate and record the run" },
+      { "method": "GET", "path": "/projects/:project/gate-runs", "permission": "write-or-review", "summary": "List recorded gate runs" },
+      { "method": "POST", "path": "/projects/:project/import", "permission": "write", "summary": "Import a source artifact through a binding; gated and measured" },
+      { "method": "GET", "path": "/projects/:project/import/:artifactHash/report", "permission": "read", "summary": "Read an import's loss report and fidelity measurement" },
+      { "method": "POST", "path": "/projects/:project/merge", "permission": "write", "summary": "Three-way merge one branch into another" },
+      { "method": "GET", "path": "/projects/:project/audit", "permission": "read", "summary": "Read the append-only audit log" },
+      { "method": "POST", "path": "/projects/:project/locks", "permission": "write", "summary": "Acquire element leases" },
+      { "method": "GET", "path": "/projects/:project/locks", "permission": "read", "summary": "List live element leases" },
+      { "method": "DELETE", "path": "/projects/:project/locks", "permission": "write", "summary": "Release element leases" },
+      { "method": "POST", "path": "/projects/:project/locks/release", "permission": "write", "summary": "Release element leases (POST form)" }
+    ]
+  },
   "agentContract": {
     "gateIsTheOnlyAuthority": true,
-    "plannedTools": [
-      "rules.check",
-      "model.read",
-      "model.propose",
-      "patterns.list",
-      "patterns.instantiate",
-      "evidence.write"
-    ],
-    "note": "The shipped modelwrite agent (Slice 5) binds to this manifest. Planned tools arrive with the slices that own them, and are additive."
+    "agentIsAClient": "Every agent action is an HTTP call from repositoryHttpSurface, authenticated and refused exactly as a human's. There is no privileged agent path.",
+    "documentLevel": "The MCP tools above operate on documents supplied in the request and never touch a repository. Repository operations are the HTTP surface.",
+    "audit": "Every action is recorded in the audit log with the actor (the verified subject), the mechanism (open, static, jwt or agent) and, for agents, the authorizer the agent acted for."
   }
 }
