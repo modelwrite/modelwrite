@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The example Secret is documentation, not a template. It must not be rendered
+# by Helm (rendering it would install a Secret full of CHANGE-ME placeholders),
+# and Helm rejects a non-.yaml/.yml/.tpl/.txt extension in templates/, so it is
+# excluded here.
+templates/secret.yaml.example

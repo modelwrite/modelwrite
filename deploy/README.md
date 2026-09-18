@@ -28,8 +28,11 @@ that a machine without Docker or PostgreSQL cannot, on every push:
   Helm renders them; `helm lint` is their check.)
 - **The PostgreSQL backend executes.** The `postgres` job starts a real
   `postgres:16` service container, sets `MW_TEST_DATABASE_URL`, and runs
-  `cargo test --workspace --include-ignored`, so the 13 PostgreSQL tests that
-  skip locally actually run.
+  `cargo test --workspace --include-ignored --test-threads=1`, so the 13
+  PostgreSQL tests that skip locally actually run. (`--test-threads=1` is a
+  deliberate workaround: the store's schema bootstrap is not yet safe under
+  concurrent opens, so the per-test stores open one at a time; see the comment
+  in `.github/workflows/ci.yml`.)
 
 What CI still does **not** prove: the chart is not **installed** into a live
 Kubernetes cluster, and `docker compose up` is not run end to end (the compose
@@ -151,5 +154,7 @@ Local (PyYAML 6.0.3): `docker-compose.yml`, `Chart.yaml`, `values.yaml` and
 `templates/secret.yaml.example` all parse as YAML. CI goes further: the `deploy`
 job parses those same files, runs `helm lint` on the chart (which renders the
 Go-template files and checks them for real), and builds the image with
-`docker build`. The Kubernetes API versions used (`apps/v1`, `v1`) are stable
-and long-supported.
+`docker build`. The example Secret (`templates/secret.yaml.example`) is excluded
+from Helm rendering by `.helmignore`, because Helm rejects a non-template
+extension in `templates/` and rendering it would install placeholder secrets.
+The Kubernetes API versions used (`apps/v1`, `v1`) are stable and long-supported.

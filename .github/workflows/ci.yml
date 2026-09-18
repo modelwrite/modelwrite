@@ -60,7 +60,17 @@ jobs:
           # 'prefer' to REQUIRED TLS (it never silently downgrades), and the
           # service container speaks plaintext, so the opt-out is required here.
           MW_TEST_DATABASE_URL: postgres://modelwrite:modelwrite@localhost:5432/modelwrite?sslmode=disable
-        run: cargo test --workspace --no-fail-fast -- --include-ignored
+        # --test-threads=1 serialises the test binaries. PostgresStore::open runs
+        # a schema bootstrap (CREATE TABLE IF NOT EXISTS, triggers) on every open,
+        # and CREATE TABLE IF NOT EXISTS is not safe under concurrent opens: the
+        # 13 tests each open their own store, and a parallel run races on the
+        # pg_type_typname_nsp_index unique index (observed in CI). Serialising the
+        # binaries makes the bootstrap effectively idempotent; the concurrency
+        # invariants themselves are still exercised by the threads spawned inside
+        # concurrent_commits_to_one_branch... and two_concurrent_acquires... .
+        # Making the bootstrap concurrency-safe belongs in server/, outside this
+        # task's scope.
+        run: cargo test --workspace --no-fail-fast -- --include-ignored --test-threads=1
 
   deploy:
     # Proves the parts a Docker-less machine cannot: the container image
