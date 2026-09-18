@@ -46,10 +46,10 @@ jobs:
 
   postgres:
     # This job proves the PostgreSQL backend, which cannot run on a machine
-    # without Docker/PostgreSQL. The 13 tests in server/tests/postgres.rs are
+    # without Docker/PostgreSQL. The tests in server/tests/postgres.rs are
     # marked #[ignore], so a plain 'cargo test' reports them IGNORED (not
     # passed). Here a service container provides a real database,
-    # MW_TEST_DATABASE_URL is set, and --include-ignored makes them execute.
+    # MW_TEST_DATABASE_URL is set, and the ignored suite is run by name.
     # If the database is unreachable the tests PANIC (require_store fails
     # loudly) rather than skip, so this job cannot silently pass by running
     # zero tests.
@@ -77,11 +77,16 @@ jobs:
           # 'prefer' to REQUIRED TLS (it never silently downgrades), and the
           # service container speaks plaintext, so the opt-out is required here.
           MW_TEST_DATABASE_URL: postgres://modelwrite:modelwrite@localhost:5432/modelwrite?sslmode=disable
-        # The tests run in parallel on purpose: each opens its own store, and the
-        # server serialises the schema bootstrap with pg_advisory_xact_lock, so a
-        # parallel run proves concurrent opens no longer race (CI caught exactly
-        # that race the first time these tests ever ran).
-        run: cargo test --workspace --no-fail-fast -- --include-ignored
+        # The workspace runs WITHOUT --include-ignored: scoping the flag to the
+        # postgres test target means a future #[ignore] test anywhere else would
+        # not silently start running here. The ignored suite then runs by name,
+        # and the tests run in parallel on purpose: each opens its own store, and
+        # the server serialises the schema bootstrap with pg_advisory_xact_lock,
+        # so a parallel run proves concurrent opens no longer race (CI caught
+        # exactly that race the first time these tests ever ran).
+        run: |
+          cargo test --workspace --no-fail-fast
+          cargo test -p mw-server --test postgres --no-fail-fast -- --include-ignored
 
   deploy:
     # Proves the parts a Docker-less machine cannot: the container image
