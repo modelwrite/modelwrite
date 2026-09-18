@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["engine/okf", "engine/test-support", "engine/graph", "engine/gate", "engine/binding", "engine/binding-xmi", "engine/capi", "engine/mcp", "server", "cli"]
+members = ["engine/okf", "engine/test-support", "engine/graph", "engine/gate", "engine/binding", "engine/binding-xmi", "engine/agent", "engine/capi", "engine/mcp", "server", "cli"]
 
 [workspace.package]
 edition = "2021"

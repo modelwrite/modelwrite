@@ -906,6 +906,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-agent"
+version = "0.1.0"
+dependencies = [
+ "mw-binding",
+ "mw-okf",
+ "serde",
+]
+
+[[package]]
 name = "mw-binding"
 version = "0.1.0"
 dependencies = [
