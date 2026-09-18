@@ -187,6 +187,7 @@ async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
         "/ui",
         "/ui/projects/coffee",
         "/ui/projects/coffee/model",
+        "/ui/projects/coffee/diagram",
         "/ui/projects/coffee/compare?from=a&to=b",
         "/ui/projects/coffee/gate",
         "/ui/projects/coffee/gate/aaaa/bbbb",
@@ -1664,5 +1665,252 @@ async fn hostile_content_in_the_evidence_record_is_escaped() {
     assert!(
         !html.contains("<script"),
         "a raw script tag must never reach the gate page"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 6: the diagram view.
+
+/// Extract the inline SVG from a rendered page, so assertions target the diagram itself
+/// rather than the surrounding shell (which legitimately contains its own navigation links).
+fn extract_svg(html: &str) -> &str {
+    let start = html.find("<svg").expect("an <svg> must be present");
+    let close = html[start..]
+        .find("</svg>")
+        .expect("</svg> must be present");
+    &html[start..start + close + "</svg>".len()]
+}
+
+#[tokio::test]
+async fn the_diagram_renders_the_corpus_deterministically_and_completely() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let first = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_html = body_text(first).await;
+
+    let second = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_html = body_text(second).await;
+
+    // The SAME model produces BYTE-IDENTICAL output, so a diagram can be diffed and cached.
+    assert_eq!(
+        first_html, second_html,
+        "the same model must render byte-identical output"
+    );
+
+    let svg = extract_svg(&first_html);
+
+    // Every node and edge appears: the corpus has 99 graph nodes and 165 graph edges.
+    assert_eq!(
+        count(svg, "class='node'"),
+        99,
+        "every graph node must be drawn"
+    );
+    assert_eq!(
+        count(svg, "class='edge'"),
+        165,
+        "every graph edge must be drawn"
+    );
+
+    // Both dangling endpoints are drawn as explicit markers, never dropped.
+    assert_eq!(
+        count(svg, "class='dangling'"),
+        2,
+        "both dangling endpoints must be drawn as markers"
+    );
+    assert!(
+        svg.contains("_2026x_1_12a70364_1789524431087_459748_5711"),
+        "the first dangling endpoint id must be shown"
+    );
+    assert!(
+        svg.contains("_2026x_1_12a70364_1789524431091_435540_5713"),
+        "the second dangling endpoint id must be shown"
+    );
+
+    // Requirement nodes are visually distinct: 25 of them carry the requirement fill.
+    assert_eq!(
+        count(svg, "fill='#fff3cd'"),
+        25,
+        "25 requirement nodes must be visually distinct"
+    );
+
+    // The SVG contains no script and no external reference.
+    assert!(
+        !svg.contains("<script"),
+        "the SVG must contain no script tag"
+    );
+    assert!(
+        !svg.contains("href"),
+        "the SVG must contain no external reference"
+    );
+    assert!(
+        !svg.contains("xlink:href"),
+        "the SVG must contain no xlink reference"
+    );
+    assert!(
+        !svg.contains("url("),
+        "the SVG must contain no url() reference"
+    );
+    assert!(
+        !svg.contains("<image"),
+        "the SVG must contain no image reference"
+    );
+    assert!(
+        !svg.contains("<use "),
+        "the SVG must contain no use reference"
+    );
+    assert!(
+        !svg.contains("<foreignObject"),
+        "the SVG must contain no foreignObject"
+    );
+
+    // The model page links to the diagram, keeping the two views consistent.
+    let model = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(model.status(), StatusCode::OK);
+    let model_html = body_text(model).await;
+    assert!(
+        model_html.contains("/ui/projects/coffee/diagram?branch=main"),
+        "the model page must link to the diagram, got:\n{}",
+        model_html
+    );
+}
+
+#[tokio::test]
+async fn the_diagram_resolves_branch_and_commit_and_404s_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for uri in [
+        "/ui/projects/coffee/diagram?branch=main".to_string(),
+        format!("/ui/projects/coffee/diagram?commit={}", hash),
+    ] {
+        let response = router.clone().oneshot(get(&uri)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{} must render", uri);
+        let html = body_text(response).await;
+        assert!(
+            extract_svg(&html).contains("class='node'"),
+            "{} must render the graph",
+            uri
+        );
+    }
+
+    let bad_branch = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram?branch=nope"))
+        .await
+        .unwrap();
+    assert_eq!(bad_branch.status(), StatusCode::NOT_FOUND);
+
+    let bad_commit = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram?commit=deadbeef"))
+        .await
+        .unwrap();
+    assert_eq!(bad_commit.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_hostile_label_in_the_diagram_is_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    // A hostile node name, a hostile dangling endpoint id and a hostile edge label, seeded
+    // straight through the store so the page can never trust any of them.
+    let model = serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "structure": [],
+        "graph": {
+            "nodes": [
+                { "id": "n1", "kind": "block", "name": "<script>alert(1)</script>" }
+            ],
+            "edges": [
+                { "source": "n1", "target": "<script>alert(2)</script>", "kind": "dependency", "label": "<script>alert(3)</script>" }
+            ]
+        }
+    });
+    seed_model_directly(store.as_ref(), model);
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    let svg = extract_svg(&html);
+
+    assert!(
+        svg.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "the hostile node name must be escaped"
+    );
+    assert!(
+        svg.contains("&lt;script&gt;alert(2)&lt;/script&gt;"),
+        "the hostile dangling endpoint id must be escaped"
+    );
+    assert!(
+        svg.contains("&lt;script&gt;alert(3)&lt;/script&gt;"),
+        "the hostile edge label must be escaped"
+    );
+    assert!(
+        !svg.contains("<script"),
+        "a raw script tag must never reach the SVG, got:\n{}",
+        svg
     );
 }

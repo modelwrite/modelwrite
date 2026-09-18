@@ -94,7 +94,11 @@ fn render_model_page(
 
 /// Resolve the commit to render: an explicit commit hash, else the named branch's tip
 /// (defaulting to `main`), using only the existing store reads.
-fn resolve_hash(state: &ApiState, project: &str, query: &ModelQuery) -> Result<String, ApiError> {
+pub(crate) fn resolve_hash(
+    state: &ApiState,
+    project: &str,
+    query: &ModelQuery,
+) -> Result<String, ApiError> {
     if let Some(commit) = &query.commit {
         if !commit.is_empty() {
             return Ok(commit.clone());
@@ -143,6 +147,9 @@ fn model_markup(
                 " · " (commit.message)
             }
             " · by " (commit.author)
+        }
+        p class="meta" {
+            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "View diagram" }
         }
         (structure_section(root, project, &commit.branch))
         (requirements_section(root, &ctx))

@@ -13,6 +13,7 @@
 //! maud, which HTML-escapes it by construction; the only way to emit markup is to wrap it
 //! in [maud::PreEscaped], which is used solely for the developer-written stylesheet.
 
+pub mod diagram;
 pub mod edit;
 pub mod gate;
 pub mod layout;

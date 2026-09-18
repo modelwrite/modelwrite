@@ -56,6 +56,10 @@ pub fn app(state: AppState) -> Router {
         .route("/ui/projects/:project", get(ui::pages::project_page))
         .route("/ui/projects/:project/model", get(ui::model::model_page))
         .route(
+            "/ui/projects/:project/diagram",
+            get(ui::diagram::diagram_page),
+        )
+        .route(
             "/ui/projects/:project/edit/:element",
             get(ui::edit::edit_form).post(ui::edit::submit_edit),
         )
