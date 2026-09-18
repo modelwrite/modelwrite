@@ -8,9 +8,12 @@
 # the only writable path is the /data volume (SQLite database and gate evidence).
 
 # ---- builder ---------------------------------------------------------------
-# The server crate declares rust-version = "1.85". Override RUST_VERSION to build
-# with a newer toolchain if a dependency ever raises the floor.
-ARG RUST_VERSION=1.85
+# The server crate declares rust-version = "1.88", and that number is the TRUTH rather
+# than a preference: its JWT crate pulls in `time`, which refuses to compile on anything
+# older. This was discovered by building the image, not by reading the manifest - the local
+# and CI toolchains are far newer than the declared floor, so nothing else was testing it.
+# Override RUST_VERSION only upward.
+ARG RUST_VERSION=1.88
 FROM rust:${RUST_VERSION}-slim AS builder
 
 # rusqlite is built with the "bundled" feature (compiles SQLite from C) and
