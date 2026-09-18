@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! The hand-checked acceptance for the SysML v1 XMI reader.
+
+use binding::{Binding, BindingError, Direction, MappingVerdict};
+use binding_xmi::{model, XmiBinding, BINDING_ID, BINDING_VERSION};
+use okf::types::{GraphEdge, OkfRoot};
+
+fn fixture(name: &str) -> String {
+    let path = format!("{}/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name);
+    std::fs::read_to_string(path).expect("fixture must exist")
+}
+
+fn import(name: &str) -> (OkfRoot, binding::LossReport) {
+    let bytes = fixture(name);
+    XmiBinding::new()
+        .import(bytes.as_bytes())
+        .expect("import must succeed")
+}
+
+#[test]
+fn the_binding_declares_its_identity_direction_and_subset() {
+    let binding = XmiBinding::new();
+    let info = binding.info();
+    assert_eq!(info.id, BINDING_ID);
+    assert_eq!(info.id, "sysml-v1-xmi");
+    assert_eq!(info.version, BINDING_VERSION);
+    assert_eq!(info.version, "2.4");
+    assert_eq!(info.direction, Direction::ImportAndExport);
+
+    // The subset is data, not prose: the mapping table names each construct.
+    let table = binding.mapping_table();
+    assert_eq!(table, model::mapping_table());
+    assert!(table.iter().any(|m| m.subject.contains("Block stereotype")));
+    assert!(table
+        .iter()
+        .any(|m| m.subject.contains("Satisfy/Allocate/Refine/Verify")));
+    assert!(table.iter().any(|m| m.subject == "xmi:id"));
+}
+
+#[test]
+fn the_fixture_imports_to_a_hand_checked_document() {
+    let (root, loss) = import("coffee-grinder.xmi");
+
+    assert_eq!(root.okf, "1.0");
+    assert_eq!(root.project, "Coffee Grinder");
+    assert_eq!(root.structure.len(), 2);
+
+    // The first block: a composite property resolved to the Motor block, a
+    // primitive property with a default, and a comment.
+    let grinder = &root.structure[0];
+    assert_eq!(grinder.id, "block-grinder");
+    assert_eq!(grinder.name, "Grinder");
+    assert_eq!(grinder.kind, "block");
+    assert_eq!(grinder.stereotypes, vec!["Block".to_string()]);
+    assert_eq!(
+        grinder.documentation,
+        "Grinds coffee beans to a selected size."
+    );
+    assert_eq!(grinder.attributes.len(), 2);
+    assert_eq!(grinder.attributes[0].name, "motor");
+    assert_eq!(grinder.attributes[0].attr_type, "Motor");
+    assert_eq!(grinder.attributes[0].aggregation, "composite");
+    assert_eq!(grinder.attributes[0].default, "");
+    assert_eq!(grinder.attributes[1].name, "capacity");
+    assert_eq!(grinder.attributes[1].attr_type, "Integer");
+    assert_eq!(grinder.attributes[1].aggregation, "none");
+    assert_eq!(grinder.attributes[1].default, "1");
+
+    // The second block: no properties, no documentation.
+    let motor = &root.structure[1];
+    assert_eq!(motor.id, "block-motor");
+    assert_eq!(motor.name, "Motor");
+    assert_eq!(motor.kind, "block");
+    assert!(motor.attributes.is_empty());
+    assert_eq!(motor.documentation, "");
+
+    // The graph mirrors the blocks and carries the Satisfy dependency edge.
+    let graph = root.graph.as_ref().expect("graph present");
+    assert_eq!(graph.nodes.len(), 2);
+    assert_eq!(graph.nodes[0].id, "block-grinder");
+    assert_eq!(graph.nodes[1].id, "block-motor");
+    assert_eq!(
+        graph.edges,
+        vec![GraphEdge {
+            source: "block-grinder".to_string(),
+            target: "block-motor".to_string(),
+            kind: "dependency".to_string(),
+            label: "Satisfy".to_string(),
+        }]
+    );
+
+    // Summary counts match the hand-checked structure.
+    assert_eq!(root.summary.blocks, 2);
+    assert_eq!(root.summary.graph_nodes, 2);
+    assert_eq!(root.summary.graph_edges, 1);
+
+    // The one loss is the package flattening, named - nothing is silent.
+    assert_eq!(loss.mappings.len(), 1);
+    assert_eq!(loss.mappings[0].verdict, MappingVerdict::Lossy);
+    assert_eq!(
+        loss.mappings[0].subject,
+        "uml:Package pkg-structure (Structure)"
+    );
+    assert!(!loss.is_lossless());
+}
+
+#[test]
+fn an_unknown_element_and_attribute_are_named_not_dropped() {
+    let (root, loss) = import("unknown-element.xmi");
+
+    // The known block still imports.
+    assert_eq!(root.structure.len(), 1);
+    assert_eq!(root.structure[0].id, "block-1");
+    assert_eq!(root.structure[0].name, "Known Block");
+
+    // The unknown element is named with its xmi:id.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable && m.subject == "uml:StateMachine sm-1"
+    }));
+
+    // The unmapped attribute is named on its element.
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject == "uml:Class block-1 attribute 'visibility'"
+    }));
+
+    // Exactly two losses: the unknown element and the unmapped attribute.
+    assert_eq!(loss.mappings.len(), 2);
+    assert!(!loss.is_lossless());
+}
+
+#[test]
+fn a_malformed_document_is_a_clean_error_not_a_panic() {
+    let bytes = fixture("malformed.xmi");
+    let result = XmiBinding::new().import(bytes.as_bytes());
+    match result {
+        Err(BindingError::Import(msg)) => assert!(msg.contains("malformed")),
+        other => panic!("expected a clean Import error, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn export_round_trips_the_subset() {
+    let (root, _) = import("coffee-grinder.xmi");
+    let bytes = XmiBinding::new()
+        .export(&root)
+        .expect("export must succeed");
+    let (round_tripped, _) = XmiBinding::new()
+        .import(&bytes)
+        .expect("re-import must succeed");
+    assert_eq!(round_tripped, root);
+}

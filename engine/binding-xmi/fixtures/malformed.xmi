@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-broken" name="Broken">
+    <packagedElement xmi:type="uml:Class" xmi:id="block-broken" name="Unclosed">
+</xmi:XMI>

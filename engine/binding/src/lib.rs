@@ -67,6 +67,12 @@ impl std::error::Error for BindingError {}
 /// never taken on faith.
 pub trait Binding {
     fn info(&self) -> BindingInfo;
+    /// The declarative mapping matrix: the source constructs this binding
+    /// understands, each marked exact, lossy or unmappable. Data the gate reads;
+    /// a binding that declares nothing understands nothing.
+    fn mapping_table(&self) -> Vec<Mapping> {
+        Vec::new()
+    }
     fn import(&self, source: &[u8]) -> Result<(OkfRoot, LossReport), BindingError>;
     fn export(&self, root: &OkfRoot) -> Result<Vec<u8>, BindingError>;
 }
