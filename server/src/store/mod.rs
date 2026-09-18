@@ -33,13 +33,15 @@ pub struct Commit {
 
 /// How a commit was produced. A reader must be able to tell, from the commit alone, whether
 /// it was authored (a normal commit or edit), imported (a migration read from a retained
-/// artifact through a binding), or unknown (a commit written before provenance existed).
-/// The three are deliberately distinct, and absence is never a claim: a commit with no
-/// recorded provenance reads as Unknown, never as Authored.
+/// artifact through a binding), accepted (an agent's proposal a human accepted, naming both
+/// parties), or unknown (a commit written before provenance existed). The four are
+/// deliberately distinct, and absence is never a claim: a commit with no recorded provenance
+/// reads as Unknown, never as Authored.
 ///
 /// The serialized form is the JSON a reader sees - a kind field plus, for an import, the
-/// artifact hash, binding id and version and the accepted losses - so the API's commit_json
-/// and the store's commits.provenance column can never disagree on the shape.
+/// artifact hash, binding id and version and the accepted losses, and for an acceptance the
+/// proposal id, the agent and the accepting human - so the API's commit_json and the store's
+/// commits.provenance column can never disagree on the shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum CommitProvenance {
@@ -55,6 +57,20 @@ pub enum CommitProvenance {
         binding_version: String,
         #[serde(rename = "acceptedLosses")]
         accepted_losses: Vec<String>,
+    },
+    /// A migration whose blocking losses were accepted by a human acting on an agent's
+    /// proposal. The record names both parties - the agent that proposed and the human that
+    /// accepted - plus the accepted items, so a reader a year later can see that a machine
+    /// drafted this and a person decided it, and which person.
+    Accepted {
+        #[serde(rename = "proposalId")]
+        proposal_id: String,
+        /// The agent whose proposal was accepted.
+        agent: String,
+        #[serde(rename = "acceptedBy")]
+        accepted_by: String,
+        #[serde(rename = "acceptedItems")]
+        accepted_items: Vec<String>,
     },
     /// A commit written before provenance was recorded: how it arrived was never checked.
     Unknown,
@@ -110,18 +126,112 @@ pub struct ImportRecord {
 }
 
 /// The provenance an import commit carries: the retained artifact it was read from, the
-/// binding that read it (id and version), and the blocking losses the request accepted by
-/// name. It is written INSIDE the same transaction as the commit row, so a commit can never
-/// land unlinked from the source artifact or the binding it migrated through. The loss report
-/// and round-trip diff still live on the import record itself (ImportRecord), written by
-/// record_import before the commit; this carries the fields the commit's own provenance
-/// column must record.
+/// binding that read it (id and version), the blocking losses the request accepted by name,
+/// and - when the import is the result of a human accepting an agent's proposal - the
+/// acceptance (which proposal, which agent, which human). It is written INSIDE the same
+/// transaction as the commit row, so a commit can never land unlinked from the source
+/// artifact or the binding it migrated through. The loss report and round-trip diff still
+/// live on the import record itself (ImportRecord), written by record_import before the
+/// commit; this carries the fields the commit's own provenance column must record.
+///
+/// The acceptance rides the import provenance rather than a parallel parameter so the
+/// commit path's ONE provenance input can express an authored, imported or accepted commit
+/// without changing the store's commit signature (which the offline CLI also calls).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportProvenance {
     pub artifact_hash: String,
     pub binding_id: String,
     pub binding_version: String,
     pub accepted_losses: Vec<String>,
+    /// Some when this import is a human's acceptance of an agent's proposal. The commit is
+    /// then labelled [CommitProvenance::Accepted] rather than Imported, and the proposal
+    /// record is updated (decided, decided-by, commit) inside the SAME transaction as the
+    /// commit row, so an acceptance can never outlive or precede the commit it describes.
+    pub acceptance: Option<ProposalAcceptance>,
+}
+
+/// Who accepted an agent's proposal, so an acceptance commit can name both parties. The
+/// agent is read from the recorded proposal (the agent that proposed), and accepted_by is
+/// the verified human who accepted - never a name taken from a request body. The accepted
+/// items themselves travel as the import provenance's accepted_losses: the items a
+/// loss-resolution proposal names are exactly the losses the import accepts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProposalAcceptance {
+    pub proposal_id: String,
+    pub agent: String,
+    pub accepted_by: String,
+}
+
+/// How a recorded proposal was decided. A proposal starts undecided (a NULL decision
+/// column); accepting or refusing it records one of these. An undecided proposal is
+/// addressable and actable; a decided one is a decision that can never be undone, because
+/// the decision rides the same write that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProposalDecision {
+    Accepted,
+    Refused,
+}
+
+impl ProposalDecision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProposalDecision::Accepted => "accepted",
+            ProposalDecision::Refused => "refused",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, StoreError> {
+        match raw {
+            "accepted" => Ok(ProposalDecision::Accepted),
+            "refused" => Ok(ProposalDecision::Refused),
+            other => Err(StoreError::Backend(format!(
+                "corrupt proposal decision: {}",
+                other
+            ))),
+        }
+    }
+}
+
+/// The durable record of one agent proposal: who the agent is, the task it answered, the
+/// retained artifact (when the proposal resolves a loss report) and the review artifact
+/// itself, plus - once a human decides - the decision, the human who made it, the accepted
+/// items and the commit the acceptance produced. The review artifact is stored as the JSON
+/// the agent produced, so the human's decision is recorded against exactly what the agent
+/// wrote, not a re-serialisation that could drift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProposalRecord {
+    pub id: String,
+    pub project: String,
+    pub agent: String,
+    pub task_goal: String,
+    /// The retained artifact the proposal's loss report is about, when the material is a
+    /// loss report; None for a proposal over other material.
+    pub artifact_hash: Option<String>,
+    /// The binding selector (id@version) the proposal's loss report was produced by.
+    pub binding: Option<String>,
+    /// The review artifact, as the JSON the agent produced.
+    pub review_artifact: String,
+    pub created_at: String,
+    pub decision: Option<ProposalDecision>,
+    /// The verified subject who decided (the accepting or refusing human), empty until
+    /// decided.
+    pub decided_by: String,
+    /// The accepted item identities, in the order the human named them.
+    pub accepted_items: Vec<String>,
+    /// The commit the acceptance produced, once accepted.
+    pub commit_hash: Option<String>,
+    /// Wall-clock time the decision was recorded, empty until decided.
+    pub decided_at: String,
+}
+
+/// Deterministic, content-addressed identifier for a proposal: the project, the agent that
+/// proposed and the review artifact itself. Recording the same proposal twice yields the
+/// same id, so re-recording is a no-op and a test can predict the id without a random
+/// source. Truncated to 32 hex characters, ample for a proposal.
+pub fn proposal_id(project: &str, agent: &str, review_artifact: &str) -> String {
+    let digest = Sha256::digest(format!("{}|{}|{}", project, agent, review_artifact).as_bytes());
+    let encoded = hex::encode(digest);
+    encoded[..32].to_string()
 }
 
 /// The blocking losses a recorded import's loss report says were NOT accepted by name. The
@@ -445,6 +555,40 @@ pub trait Store: Send + Sync {
         project: &str,
         artifact_hash: &str,
     ) -> Result<Option<ImportRecord>, StoreError>;
+
+    /// Record one agent proposal and return its content-addressed id. The agent is the
+    /// verified subject supplied by the caller (never a name from a request body), the task
+    /// and review artifact are what the agent produced, and the retained artifact and binding
+    /// are carried so a later acceptance can re-run the import the proposal resolves. The
+    /// audit row, when supplied, rides the same transaction, so a durable proposal always has
+    /// its record and vice versa. Re-recording the same proposal is a no-op that returns the
+    /// same id.
+    #[allow(clippy::too_many_arguments)]
+    fn record_proposal(
+        &self,
+        project: &str,
+        agent: &str,
+        task_goal: &str,
+        artifact_hash: Option<&str>,
+        binding: Option<&str>,
+        review_artifact: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<String, StoreError>;
+
+    /// The proposal record for this id in this project, if one was recorded.
+    fn proposal(&self, project: &str, id: &str) -> Result<Option<ProposalRecord>, StoreError>;
+
+    /// Record a human's decision to REFUSE a proposal. A refusal is a decision, not a failed
+    /// action: the proposal is marked refused with the verified subject and the wall clock,
+    /// and the audit row (when supplied) rides the same transaction. The proposal must exist
+    /// and be undecided; accepting or refusing a decided proposal is a conflict.
+    fn refuse_proposal(
+        &self,
+        project: &str,
+        id: &str,
+        decided_by: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError>;
 
     /// Acquire a lease on each of `elements`, all or nothing. If any element is held by a
     /// live lease owned by a DIFFERENT holder, nothing is acquired and a Conflict is

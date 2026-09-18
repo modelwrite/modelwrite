@@ -27,11 +27,11 @@ use crate::api::{
     commit_core, commit_json, load_model, map_store_error, record_refusal, resolve_author,
     validate_name, verify_actor, ApiState, CommitCore, CommitFailure,
 };
-use crate::audit::{IMPORT_ACCEPT, IMPORT_REFUSED};
+use crate::audit::{IMPORT_ACCEPT, IMPORT_REFUSED, PROPOSAL_ACCEPT};
 use crate::auth::{Identity, Permission};
 use crate::binding_registry;
 use crate::error::ApiError;
-use crate::store::{now_seconds, AuditEntry, Commit, ImportProvenance, Store};
+use crate::store::{now_seconds, AuditEntry, Commit, ImportProvenance, ProposalAcceptance, Store};
 
 #[derive(Deserialize)]
 pub struct ImportRequest {
@@ -112,7 +112,8 @@ pub enum ImportOutcome {
 /// Everything the import core needs that the caller resolved upstream. artifact is the
 /// decoded source bytes; author is already resolved against the identity; actor and
 /// mechanism are the verified subject and how it authenticated; accept_losses names the
-/// blocking losses the request accepts by subject.
+/// blocking losses the request accepts by subject; acceptance is Some when this import is a
+/// human accepting an agent's proposal, and names that proposal, its agent and the human.
 pub struct ImportCore<'a> {
     pub binding: &'a str,
     pub branch: &'a str,
@@ -124,6 +125,7 @@ pub struct ImportCore<'a> {
     pub actor: &'a str,
     pub mechanism: &'a str,
     pub authorizer: &'a str,
+    pub acceptance: Option<ProposalAcceptance>,
 }
 
 /// Whether an acceptance name, as an ENTRY IDENTITY, names this loss mapping. The entry
@@ -288,18 +290,24 @@ pub fn import_core(
         .map(|m| (**m).clone())
         .collect();
     if !unaccepted.is_empty() {
-        let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
-        if let Err(e) = record_refusal(
-            store,
-            project,
-            input.actor,
-            input.mechanism,
-            input.authorizer,
-            IMPORT_REFUSED,
-            &artifact_hash,
-            &format!("blocking losses not accepted: {}", subjects.join(", ")),
-        ) {
-            eprintln!("could not record the import refusal: {:?}", e);
+        // A direct import that leaves blocking losses unaccepted is recorded as a refusal.
+        // An ACCEPTANCE that leaves them unaccepted is an incomplete acceptance, not a
+        // decision: the proposal stays undecided and the blocking losses are returned so the
+        // human can complete the acceptance or refuse the proposal explicitly.
+        if input.acceptance.is_none() {
+            let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
+            if let Err(e) = record_refusal(
+                store,
+                project,
+                input.actor,
+                input.mechanism,
+                input.authorizer,
+                IMPORT_REFUSED,
+                &artifact_hash,
+                &format!("blocking losses not accepted: {}", subjects.join(", ")),
+            ) {
+                eprintln!("could not record the import refusal: {:?}", e);
+            }
         }
         return Ok(ImportOutcome::Blocking {
             artifact_hash,
@@ -317,6 +325,30 @@ pub fn import_core(
     // above: the entry identities the human accepted, never a raw subject two losses could
     // share.
     if !accepted_identities.is_empty() {
+        // An acceptance of an agent's proposal records proposal.accept instead of
+        // import.accept, naming the proposal and the agent that made it.
+        let (action, subject, detail) = match input.acceptance.as_ref() {
+            Some(acceptance) => (
+                PROPOSAL_ACCEPT,
+                acceptance.proposal_id.clone(),
+                format!(
+                    "proposal {} by {}; accepted items: {}",
+                    acceptance.proposal_id,
+                    acceptance.agent,
+                    accepted_identities.join(", ")
+                ),
+            ),
+            None => (
+                IMPORT_ACCEPT,
+                artifact_hash.clone(),
+                format!(
+                    "binding {}@{}; accepted losses: {}",
+                    binding_id,
+                    binding_version,
+                    accepted_identities.join(", ")
+                ),
+            ),
+        };
         store
             .append_audit(&AuditEntry {
                 id: 0,
@@ -325,14 +357,9 @@ pub fn import_core(
                 actor: input.actor.to_string(),
                 mechanism: input.mechanism.to_string(),
                 authorizer: input.authorizer.to_string(),
-                action: IMPORT_ACCEPT.to_string(),
-                subject: artifact_hash.clone(),
-                detail: format!(
-                    "binding {}@{}; accepted losses: {}",
-                    binding_id,
-                    binding_version,
-                    accepted_identities.join(", ")
-                ),
+                action: action.to_string(),
+                subject,
+                detail,
             })
             .map_err(map_store_error)?;
     }
@@ -361,6 +388,7 @@ pub fn import_core(
         binding_id: binding_id.clone(),
         binding_version: binding_version.clone(),
         accepted_losses: accepted_identities.clone(),
+        acceptance: input.acceptance.clone(),
     };
     let commit = commit_core(
         store,
@@ -433,6 +461,7 @@ pub async fn import_artifact(
             actor: &identity.subject,
             mechanism: state.auth.mechanism(),
             authorizer: state.auth.authorizer().unwrap_or(""),
+            acceptance: None,
         },
     )? {
         ImportOutcome::Committed {

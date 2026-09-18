@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     now_epoch, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun, ImportProvenance,
-    ImportRecord, Lock, Project, Store, StoreError,
+    ImportRecord, Lock, Project, ProposalDecision, ProposalRecord, Store, StoreError,
 };
 
 const SCHEMA: &str = "
@@ -58,6 +58,22 @@ CREATE TABLE IF NOT EXISTS imports (
     PRIMARY KEY (project, artifact_hash)
 );
 CREATE INDEX IF NOT EXISTS imports_by_commit ON imports (commit_hash);
+CREATE TABLE IF NOT EXISTS proposals (
+    id TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    task_goal TEXT NOT NULL,
+    artifact_hash TEXT,
+    binding TEXT,
+    review_artifact TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    decision TEXT,
+    decided_by TEXT NOT NULL DEFAULT '',
+    accepted_items TEXT NOT NULL DEFAULT '[]',
+    commit_hash TEXT,
+    decided_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS proposals_by_project ON proposals (project);
 CREATE TABLE IF NOT EXISTS locks (
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
@@ -192,6 +208,25 @@ type ImportRow = (
     String,
     Option<String>,
     String,
+    String,
+);
+
+/// One proposal row exactly as stored: id, project, agent, task_goal, artifact_hash,
+/// binding, review_artifact, created_at, decision, decided_by, accepted_items, commit_hash,
+/// decided_at.
+type ProposalRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
     String,
 );
 
@@ -412,6 +447,15 @@ impl Store for SqliteStore {
         // Nothing patches it afterwards, so the commit can never disagree with how it was
         // written.
         let provenance = match import {
+            Some(import) if import.acceptance.is_some() => {
+                let acceptance = import.acceptance.as_ref().expect("checked above");
+                CommitProvenance::Accepted {
+                    proposal_id: acceptance.proposal_id.clone(),
+                    agent: acceptance.agent.clone(),
+                    accepted_by: acceptance.accepted_by.clone(),
+                    accepted_items: import.accepted_losses.clone(),
+                }
+            }
             Some(import) => CommitProvenance::Imported {
                 artifact_hash: import.artifact_hash.clone(),
                 binding_id: import.binding_id.clone(),
@@ -483,6 +527,41 @@ impl Store for SqliteStore {
             }
         }
 
+        // An import that DECLARES itself an acceptance must substantiate that too, checked
+        // HERE where the commit is written: the proposal it names must exist, be undecided,
+        // and have been recorded by the agent the provenance names. This is the rule as a
+        // property of the repository, not of the acceptance endpoint - any route that writes
+        // an accepted commit passes through this transaction and is refused here if its
+        // acceptance is a lie.
+        if let Some(acceptance) = import.as_ref().and_then(|i| i.acceptance.as_ref()) {
+            let recorded: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT agent, decision FROM proposals WHERE project = ?1 AND id = ?2",
+                    params![project, acceptance.proposal_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let (recorded_agent, decision) = recorded.ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "proposal {} for project {}",
+                    acceptance.proposal_id, project
+                ))
+            })?;
+            if decision.is_some() {
+                return Err(StoreError::Conflict(format!(
+                    "proposal {} has already been decided",
+                    acceptance.proposal_id
+                )));
+            }
+            if recorded_agent != acceptance.agent {
+                return Err(StoreError::Conflict(format!(
+                    "acceptance names agent {} but proposal {} was recorded by {}",
+                    acceptance.agent, acceptance.proposal_id, recorded_agent
+                )));
+            }
+        }
+
         // Plain INSERT, not OR IGNORE: a constraint failure must abort this transaction
         // rather than move a branch tip to a hash that has no commit row.
         tx.execute(
@@ -515,6 +594,32 @@ impl Store for SqliteStore {
                     "import {} for project {}",
                     import.artifact_hash, project
                 )));
+            }
+            // The acceptance rides the commit transaction: the proposal is marked accepted
+            // with the human who decided, the accepted items and the commit hash, inside the
+            // SAME transaction as the commit row. The decision IS NULL guard, not the read
+            // above, is the authority against a concurrent decision.
+            if let Some(acceptance) = import.acceptance.as_ref() {
+                let decided_at = now_epoch();
+                let updated = tx
+                    .execute(
+                        "UPDATE proposals SET decision = 'accepted', decided_by = ?1, accepted_items = ?2, commit_hash = ?3, decided_at = ?4 WHERE project = ?5 AND id = ?6 AND decision IS NULL",
+                        params![
+                            acceptance.accepted_by,
+                            accepted_json,
+                            hash,
+                            decided_at,
+                            project,
+                            acceptance.proposal_id
+                        ],
+                    )
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                if updated == 0 {
+                    return Err(StoreError::Conflict(format!(
+                        "proposal {} has already been decided",
+                        acceptance.proposal_id
+                    )));
+                }
             }
         }
         tx.commit()
@@ -961,6 +1066,162 @@ impl Store for SqliteStore {
                 }))
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_proposal(
+        &self,
+        project: &str,
+        agent: &str,
+        task_goal: &str,
+        artifact_hash: Option<&str>,
+        binding: Option<&str>,
+        review_artifact: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<String, StoreError> {
+        let id = super::proposal_id(project, agent, review_artifact);
+        with_tx(&self.connection, |tx| {
+            tx.execute(
+                "INSERT OR IGNORE INTO proposals (id, project, agent, task_goal, artifact_hash, binding, review_artifact, created_at, decision, decided_by, accepted_items, commit_hash, decided_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, '', '[]', NULL, '')",
+                params![
+                    id,
+                    project,
+                    agent,
+                    task_goal,
+                    artifact_hash,
+                    binding,
+                    review_artifact,
+                    now_epoch()
+                ],
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })?;
+        Ok(id)
+    }
+
+    fn proposal(&self, project: &str, id: &str) -> Result<Option<ProposalRecord>, StoreError> {
+        // The row is read under the lock and the decision and accepted_items columns are
+        // parsed outside it, so corruption surfaces as a storage error rather than a query
+        // error.
+        let row: Option<ProposalRow> = self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, project, agent, task_goal, artifact_hash, binding, review_artifact, created_at, decision, decided_by, accepted_items, commit_hash, decided_at FROM proposals WHERE project = ?1 AND id = ?2",
+            )?;
+            let mut rows = stmt.query(params![project, id])?;
+            match rows.next()? {
+                Some(row) => Ok(Some((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                ))),
+                None => Ok(None),
+            }
+        })?;
+
+        match row {
+            None => Ok(None),
+            Some((
+                id,
+                project,
+                agent,
+                task_goal,
+                artifact_hash,
+                binding,
+                review_artifact,
+                created_at,
+                decision,
+                decided_by,
+                accepted_items,
+                commit_hash,
+                decided_at,
+            )) => {
+                let decision = decision
+                    .as_deref()
+                    .map(ProposalDecision::parse)
+                    .transpose()?;
+                let accepted_items: Vec<String> =
+                    serde_json::from_str(&accepted_items).map_err(|e| {
+                        StoreError::Backend(format!(
+                            "corrupt accepted_items column for proposal {}: {}",
+                            id, e
+                        ))
+                    })?;
+                Ok(Some(ProposalRecord {
+                    id,
+                    project,
+                    agent,
+                    task_goal,
+                    artifact_hash,
+                    binding,
+                    review_artifact,
+                    created_at,
+                    decision,
+                    decided_by,
+                    accepted_items,
+                    commit_hash,
+                    decided_at,
+                }))
+            }
+        }
+    }
+
+    fn refuse_proposal(
+        &self,
+        project: &str,
+        id: &str,
+        decided_by: &str,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError> {
+        with_tx(&self.connection, |tx| {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM proposals WHERE project = ?1 AND id = ?2",
+                    params![project, id],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+                .unwrap_or(false);
+            if !exists {
+                return Err(StoreError::NotFound(format!(
+                    "proposal {} for project {}",
+                    id, project
+                )));
+            }
+            // The decision IS NULL guard, not the read above, is the authority against a
+            // concurrent decision: a proposal already decided is a conflict, never silently
+            // overwritten.
+            let updated = tx
+                .execute(
+                    "UPDATE proposals SET decision = 'refused', decided_by = ?1, decided_at = ?2 WHERE project = ?3 AND id = ?4 AND decision IS NULL",
+                    params![decided_by, now_epoch(), project, id],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if updated == 0 {
+                return Err(StoreError::Conflict(format!(
+                    "proposal {} has already been decided",
+                    id
+                )));
+            }
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<i64, StoreError> {
