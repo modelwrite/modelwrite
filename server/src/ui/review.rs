@@ -1,0 +1,645 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! The review pages: a compare view and a merge form.
+//!
+//! The compare view renders the ENGINE's own section-scoped diff ([okf::diff::diff]) and the
+//! ENGINE's own gate verdict ([gate::run]) for a pair of commits or branches, never a diff the
+//! page computes for itself. The merge form performs a merge through the SAME functions the
+//! JSON handler [crate::merge_api::merge_branches] uses, in the SAME order, and renders a
+//! conflicting merge as a resolvable page showing base, ours and theirs for every conflict
+//! rather than as an error page: a 409 is information, not a failure.
+
+use axum::extract::{Form, Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use maud::{html, Markup};
+use serde::Deserialize;
+
+use crate::api::{
+    commit_refusal_guard, load_model, lock_refusal_message, map_store_error, resolve_author,
+    touched_elements, validate_name, verify_actor, ApiState,
+};
+use crate::auth::{identity as resolve_identity, Identity, Permission};
+use crate::error::ApiError;
+use crate::merge_api::common_ancestor;
+use crate::store::{now_seconds, AuditEntry, Commit, CommitGuard, Store};
+use crate::ui::layout;
+
+/// The query parameters of the compare page: two endpoints, each a commit hash or a branch
+/// name. Both are required.
+#[derive(Deserialize)]
+pub struct CompareQuery {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// The merge form body, submitted as `application/x-www-form-urlencoded`. `author` and
+/// `holder` are optional; the empty string means "no name supplied", exactly as an absent
+/// field does in the JSON request.
+#[derive(Deserialize)]
+pub struct MergeForm {
+    pub branch: String,
+    pub other: String,
+    #[serde(default)]
+    pub author: String,
+    pub message: String,
+    #[serde(default)]
+    pub holder: String,
+}
+
+/// `GET /ui/projects/:project/compare?from=&to=` - the engine's diff and gate verdict for a
+/// pair of commits or branches, grouped by section.
+pub async fn compare_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Query(query): Query<CompareQuery>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match render_compare_page(&state, &identity, &project, &query) {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+fn render_compare_page(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    query: &CompareQuery,
+) -> Result<Markup, ApiError> {
+    // The SAME identity, Read-permission and project-scope decisions as the JSON handlers,
+    // in the SAME order.
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    if state
+        .store
+        .project(project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
+    let from = query
+        .from
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("the from endpoint is required"))?;
+    let to = query
+        .to
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("the to endpoint is required"))?;
+    let from_hash = resolve_ref(state.store.as_ref(), project, from)?;
+    let to_hash = resolve_ref(state.store.as_ref(), project, to)?;
+    let from_commit = state
+        .store
+        .commit(project, &from_hash)
+        .map_err(map_store_error)?;
+    let to_commit = state
+        .store
+        .commit(project, &to_hash)
+        .map_err(map_store_error)?;
+    let reference =
+        load_model(state.store.as_ref(), project, &from_hash).map_err(map_store_error)?;
+    let candidate = load_model(state.store.as_ref(), project, &to_hash).map_err(map_store_error)?;
+
+    // THE ENGINE'S DIFF and THE ENGINE'S GATE: rendered, never recomputed, so the page can
+    // never disagree with the gate. The evidence path is the same deterministic name the
+    // gate handler writes, so a reviewer knows exactly where the run's record lives.
+    let report = okf::diff::diff(&reference, &candidate);
+    let outcome = gate::run(&reference, &candidate, false);
+    let evidence_path = state
+        .evidence_dir
+        .join(format!("server-{}-{}.json", from_hash, to_hash))
+        .display()
+        .to_string();
+    let isolated = isolated_nodes(&outcome.evidence);
+
+    let body = html! {
+        h1 { "Compare" }
+        p class="meta" {
+            "from " code { (short_hash(&from_hash)) }
+            @if let Some(commit) = &from_commit { " · " (commit.message.as_str()) }
+            " → to " code { (short_hash(&to_hash)) }
+            @if let Some(commit) = &to_commit { " · " (commit.message.as_str()) }
+        }
+        section id="diff" class="model-section" {
+            h2 { "Diff" }
+            @if report.equal {
+                p { "The two models are identical." }
+            } @else {
+                (diff_markup(&report))
+            }
+        }
+        section id="gate" class="model-section" {
+            h2 { "Gate" }
+            p {
+                "Verdict: "
+                @if outcome.passed { span class="covered" { "passed" } }
+                @else { span class="uncovered" { "failed" } }
+            }
+            @if !outcome.failures.is_empty() {
+                h3 { "Failures" }
+                ul class="failures" {
+                    @for failure in &outcome.failures { li { (failure.as_str()) } }
+                }
+            }
+            @if !isolated.is_empty() {
+                h3 { "Isolated nodes" }
+                ul class="isolated" {
+                    @for node in &isolated { li { code { (node.as_str()) } } }
+                }
+            }
+            p class="meta" { "Evidence: " code { (evidence_path.as_str()) } }
+        }
+    };
+    let title = format!("modelwrite — {} — compare", project);
+    Ok(layout::shell(
+        &title,
+        Some(project),
+        Some(&identity.subject),
+        state.auth.mechanism(),
+        body,
+    ))
+}
+
+/// Resolve one endpoint to a commit hash: an existing commit hash wins, otherwise the value
+/// is treated as a branch name and resolves to its tip. Both readings use the store's own
+/// lookups, so no new store method exists for this page.
+fn resolve_ref(store: &dyn Store, project: &str, value: &str) -> Result<String, ApiError> {
+    if store
+        .commit(project, value)
+        .map_err(map_store_error)?
+        .is_some()
+    {
+        return Ok(value.to_string());
+    }
+    if let Some(tip) = store.branch_tip(project, value).map_err(map_store_error)? {
+        return Ok(tip);
+    }
+    Err(ApiError::not_found(format!("commit or branch {}", value)))
+}
+
+/// The isolated graph nodes the gate reported, read straight out of the evidence's
+/// `integration.isolated` field rather than recomputed.
+fn isolated_nodes(evidence: &serde_json::Value) -> Vec<String> {
+    evidence
+        .get("integration")
+        .and_then(|integration| integration.get("isolated"))
+        .and_then(|isolated| isolated.as_array())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// The diff, grouped by section.
+
+/// The display order of the sections, and the human name for each. The trailing empty-string
+/// entry catches a malformed key that has no section separator, so nothing is silently
+/// dropped.
+const SECTION_ORDER: [(&str, &str); 9] = [
+    ("structure", "Structure"),
+    ("interfaces", "Interfaces"),
+    ("signals", "Signals"),
+    ("requirements", "Requirements"),
+    ("state", "State machine"),
+    ("activity", "Activities"),
+    ("graphnode", "Graph nodes"),
+    ("doc", "Document"),
+    ("", "Other"),
+];
+
+fn section_of(key: &str) -> &str {
+    key.split_once(':')
+        .map(|(section, _)| section)
+        .unwrap_or("")
+}
+
+struct SectionDiff {
+    name: &'static str,
+    added: Vec<String>,
+    removed: Vec<String>,
+    changed: Vec<String>,
+}
+
+/// Group the engine's diff report by section. Element and attribute keys are
+/// `<section>:<id>`; the edge keys are JSON arrays and are rendered separately.
+fn section_diffs(report: &okf::diff::DiffReport) -> Vec<SectionDiff> {
+    let mut sections: Vec<SectionDiff> = SECTION_ORDER
+        .iter()
+        .map(|(_, name)| SectionDiff {
+            name,
+            added: Vec::new(),
+            removed: Vec::new(),
+            changed: Vec::new(),
+        })
+        .collect();
+    let index = |key: &str| -> usize {
+        let section = section_of(key);
+        SECTION_ORDER
+            .iter()
+            .position(|(candidate, _)| *candidate == section)
+            .unwrap_or(SECTION_ORDER.len() - 1)
+    };
+    for key in &report.missing_elements {
+        sections[index(key)].removed.push(key.clone());
+    }
+    for key in &report.extra_elements {
+        sections[index(key)].added.push(key.clone());
+    }
+    for key in &report.changed_attributes {
+        sections[index(key)].changed.push(key.clone());
+    }
+    sections
+}
+
+fn diff_markup(report: &okf::diff::DiffReport) -> Markup {
+    let sections = section_diffs(report);
+    html! {
+        @for section in &sections {
+            @if !section.added.is_empty() || !section.removed.is_empty() || !section.changed.is_empty() {
+                h3 { (section.name) }
+                @if !section.removed.is_empty() {
+                    h4 class="diff-remove" { "Removed" }
+                    ul class="diff-list" {
+                        @for key in &section.removed { li { code { (key.as_str()) } } }
+                    }
+                }
+                @if !section.added.is_empty() {
+                    h4 class="diff-add" { "Added" }
+                    ul class="diff-list" {
+                        @for key in &section.added { li { code { (key.as_str()) } } }
+                    }
+                }
+                @if !section.changed.is_empty() {
+                    h4 class="diff-change" { "Changed" }
+                    ul class="diff-list" {
+                        @for key in &section.changed { li { code { (key.as_str()) } } }
+                    }
+                }
+            }
+        }
+        @if !report.missing_edges.is_empty() || !report.extra_edges.is_empty() {
+            h3 { "Graph edges" }
+            @if !report.missing_edges.is_empty() {
+                h4 class="diff-remove" { "Removed" }
+                ul class="diff-list" {
+                    @for key in &report.missing_edges { li { code { (edge_display(key)) } } }
+                }
+            }
+            @if !report.extra_edges.is_empty() {
+                h4 class="diff-add" { "Added" }
+                ul class="diff-list" {
+                    @for key in &report.extra_edges { li { code { (edge_display(key)) } } }
+                }
+            }
+        }
+    }
+}
+
+/// An edge key is a JSON array of source, target, kind and label; render it readably.
+fn edge_display(key: &str) -> String {
+    if let Ok(parts) = serde_json::from_str::<Vec<String>>(key) {
+        let source = parts.first().cloned().unwrap_or_default();
+        let target = parts.get(1).cloned().unwrap_or_default();
+        let kind = parts.get(2).cloned().unwrap_or_default();
+        let label = parts.get(3).cloned().unwrap_or_default();
+        if label.is_empty() {
+            format!("{} → {} [{}]", source, target, kind)
+        } else {
+            format!("{} → {} [{} {}]", source, target, kind, label)
+        }
+    } else {
+        key.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The merge form.
+
+/// `POST /ui/projects/:project/merge` - perform a merge through the same code path as the
+/// JSON endpoint, and render the outcome: a success page for a clean merge, or a conflict
+/// page showing base, ours and theirs for every conflict.
+pub async fn merge_form(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Form(form): Form<MergeForm>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match perform_merge(&state, &identity, &project, &form) {
+        Ok(result) => {
+            let status = match &result.outcome {
+                MergeOutcomeKind::Clean { .. } => StatusCode::CREATED,
+                MergeOutcomeKind::Conflict { .. } => StatusCode::CONFLICT,
+            };
+            layout::html_response(
+                status,
+                merge_result_page(&identity, mechanism, &project, &result),
+            )
+        }
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+enum MergeOutcomeKind {
+    Clean {
+        commit: Commit,
+    },
+    Conflict {
+        conflicts: Vec<crate::merge::Conflict>,
+    },
+}
+
+struct MergeResult {
+    branch: String,
+    other: String,
+    base: String,
+    outcome: MergeOutcomeKind,
+}
+
+/// The merge itself, mirroring [crate::merge_api::merge_branches] step for step with the same
+/// public functions, the same permission decisions and the same audit entries. A conflict is
+/// a RESULT here, not an error: it carries every conflicting subject's base, ours and theirs
+/// values for the page to render.
+fn perform_merge(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    form: &MergeForm,
+) -> Result<MergeResult, ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let holder = form.holder.as_str();
+    let holder = if holder.is_empty() {
+        None
+    } else {
+        Some(holder)
+    };
+    let author = resolve_author(&state.auth, identity, &form.author)?;
+    verify_actor(&state.auth, identity, holder)?;
+    validate_name("branch name", &form.branch)?;
+    validate_name("branch name", &form.other)?;
+    if state
+        .store
+        .project(project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
+
+    let ours_tip = state
+        .store
+        .branch_tip(project, &form.branch)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("branch {}", form.branch)))?;
+    let theirs_tip = state
+        .store
+        .branch_tip(project, &form.other)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("branch {}", form.other)))?;
+
+    let base_hash = common_ancestor(state.store.as_ref(), project, &ours_tip, &theirs_tip)
+        .map_err(map_store_error)?;
+    let base = load_model(state.store.as_ref(), project, &base_hash).map_err(map_store_error)?;
+    let ours = load_model(state.store.as_ref(), project, &ours_tip).map_err(map_store_error)?;
+    let theirs = load_model(state.store.as_ref(), project, &theirs_tip).map_err(map_store_error)?;
+
+    let outcome = crate::merge::merge(&base, &ours, &theirs);
+    if !outcome.conflicts.is_empty() {
+        // The attempt is recorded, exactly as the JSON handler records it, so the audit log
+        // shows what was tried rather than only what succeeded.
+        state
+            .store
+            .append_audit(&AuditEntry {
+                id: 0,
+                project: project.to_string(),
+                at: now_seconds(),
+                actor: identity.subject.clone(),
+                mechanism: state.auth.mechanism().to_string(),
+                action: "merge.conflict".to_string(),
+                subject: form.branch.clone(),
+                detail: format!("merge conflict between {} and {}", form.branch, form.other),
+            })
+            .map_err(map_store_error)?;
+        return Ok(MergeResult {
+            branch: form.branch.clone(),
+            other: form.other.clone(),
+            base: base_hash,
+            outcome: MergeOutcomeKind::Conflict {
+                conflicts: outcome.conflicts,
+            },
+        });
+    }
+
+    let merged = outcome.merged.ok_or_else(|| {
+        ApiError::internal("the merge reported no conflicts but produced nothing")
+    })?;
+
+    let report = okf::validate::validate(&merged);
+    if !report.valid {
+        eprintln!("merged model failed validation: {:?}", report.errors);
+        return Err(ApiError::internal(
+            "the merged model failed validation and was not stored",
+        ));
+    }
+
+    {
+        let touched = touched_elements(&ours, &merged);
+        let held = state
+            .store
+            .holders_of(project, &touched, now_seconds())
+            .map_err(map_store_error)?;
+        let holder = holder.unwrap_or("");
+        if let Some(blocked) = held.iter().find(|lock| lock.holder != holder) {
+            return Err(ApiError::conflict(lock_refusal_message(
+                &blocked.element,
+                &blocked.holder,
+                blocked.expires_at,
+            )));
+        }
+    }
+
+    let bytes = serde_json::to_vec(&merged).map_err(|e| {
+        eprintln!("merged model could not be serialised: {}", e);
+        ApiError::internal("the merged model could not be stored")
+    })?;
+    let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
+    let touched = touched_elements(&ours, &merged);
+    let parents = vec![ours_tip.clone(), theirs_tip.clone()];
+    let guard = CommitGuard {
+        holder: holder.unwrap_or(""),
+        elements: &touched,
+        now: now_seconds(),
+        expected_tip: Some(&parents[0]),
+    };
+    let audit = AuditEntry {
+        id: 0,
+        project: project.to_string(),
+        at: now_seconds(),
+        actor: identity.subject.clone(),
+        mechanism: state.auth.mechanism().to_string(),
+        action: "merge.clean".to_string(),
+        subject: form.branch.clone(),
+        detail: format!("merged {} into {}", form.other, form.branch),
+    };
+    let commit = commit_refusal_guard(
+        state.store.as_ref(),
+        project,
+        &form.branch,
+        &identity.subject,
+        state.auth.mechanism(),
+        state.store.commit_merge(
+            project,
+            &form.branch,
+            &parents,
+            &okf_hash,
+            &author,
+            &form.message,
+            Some(guard),
+            Some(&audit),
+        ),
+    )
+    .map_err(map_store_error)?;
+
+    Ok(MergeResult {
+        branch: form.branch.clone(),
+        other: form.other.clone(),
+        base: base_hash,
+        outcome: MergeOutcomeKind::Clean { commit },
+    })
+}
+
+fn merge_result_page(
+    identity: &Identity,
+    mechanism: &str,
+    project: &str,
+    result: &MergeResult,
+) -> Markup {
+    let body = match &result.outcome {
+        MergeOutcomeKind::Clean { commit } => html! {
+            h1 { "Merge complete" }
+            p {
+                "Merged " strong { (result.other.as_str()) } " into " strong { (result.branch.as_str()) } "."
+            }
+            p { "Commit " code { (short_hash(&commit.hash)) } }
+            p { "Merge base " code { (short_hash(&result.base)) } }
+            p {
+                a href={ "/ui/projects/" (project) "/model?commit=" (commit.hash.as_str()) } {
+                    "View the merged model"
+                }
+            }
+        },
+        MergeOutcomeKind::Conflict { conflicts } => html! {
+            h1 { "Merge conflict" }
+            p {
+                "Merging " strong { (result.other.as_str()) } " into " strong { (result.branch.as_str()) }
+                " conflicts; nothing was written. Resolve each conflict, then merge again."
+            }
+            p class="meta" { "Merge base " code { (short_hash(&result.base)) } }
+            @for conflict in conflicts {
+                section class="conflict" {
+                    h2 { (conflict.subject.as_str()) }
+                    p class="meta" { "kind: " code { (conflict.kind.as_str()) } }
+                    div class="conflict-columns" {
+                        div class="conflict-side" {
+                            h3 { "Base" }
+                            (conflict_value(&conflict.base))
+                        }
+                        div class="conflict-side" {
+                            h3 { "Ours" }
+                            (conflict_value(&conflict.ours))
+                        }
+                        div class="conflict-side" {
+                            h3 { "Theirs" }
+                            (conflict_value(&conflict.theirs))
+                        }
+                    }
+                }
+            }
+            h2 { "Resolve" }
+            p { "Edit one of the branches to choose its value, then merge again." }
+            (merge_form_markup(project, &result.branch, &result.other))
+        },
+    };
+    let title = format!("modelwrite — {} — merge", project);
+    layout::shell(
+        &title,
+        Some(project),
+        Some(&identity.subject),
+        mechanism,
+        body,
+    )
+}
+
+fn conflict_value(value: &Option<String>) -> Markup {
+    match value {
+        Some(text) => html! { pre class="conflict-value" { (text.as_str()) } },
+        None => html! { pre class="conflict-value" { "(absent)" } },
+    }
+}
+
+/// The merge form, shared by the project page and the conflict page's resolution form.
+pub fn merge_form_markup(project: &str, branch: &str, other: &str) -> Markup {
+    html! {
+        form method="post" action={ "/ui/projects/" (project) "/merge" } class="merge-form" {
+            p {
+                label for="branch" { "Merge into branch" }
+                input type="text" id="branch" name="branch" value=(branch) required;
+            }
+            p {
+                label for="other" { "from branch" }
+                input type="text" id="other" name="other" value=(other) required;
+            }
+            p {
+                label for="author" { "author" }
+                input type="text" id="author" name="author";
+            }
+            p {
+                label for="message" { "message" }
+                input type="text" id="message" name="message" required;
+            }
+            p {
+                label for="holder" { "holder (optional)" }
+                input type="text" id="holder" name="holder";
+            }
+            button type="submit" { "Merge" }
+        }
+    }
+}
+
+fn short_hash(hash: &str) -> &str {
+    hash.get(..8).unwrap_or(hash)
+}

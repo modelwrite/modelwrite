@@ -14,6 +14,7 @@ use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{Commit, Store};
 use crate::ui::layout;
+use crate::ui::review::merge_form_markup;
 
 struct ProjectRow {
     name: String,
@@ -191,6 +192,20 @@ fn branch_list_page(
                 }
             }
         }
+        h2 { "Compare" }
+        form method="get" action={ "/ui/projects/" (project) "/compare" } class="compare-form" {
+            p {
+                label for="from" { "from" }
+                input type="text" id="from" name="from" placeholder="branch or commit";
+            }
+            p {
+                label for="to" { "to" }
+                input type="text" id="to" name="to" placeholder="branch or commit";
+            }
+            button type="submit" { "Compare" }
+        }
+        h2 { "Merge" }
+        (merge_form_markup(project, "", ""))
     };
     layout::shell(
         &title,

@@ -56,6 +56,11 @@ pub fn app(state: AppState) -> Router {
         .route("/ui/projects/:project", get(ui::pages::project_page))
         .route("/ui/projects/:project/model", get(ui::model::model_page))
         .route(
+            "/ui/projects/:project/compare",
+            get(ui::review::compare_page),
+        )
+        .route("/ui/projects/:project/merge", post(ui::review::merge_form))
+        .route(
             "/projects",
             post(api::create_project).get(api::list_projects),
         )

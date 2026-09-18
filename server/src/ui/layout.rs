@@ -54,6 +54,19 @@ table.requirements th, table.traceability th { background: #f4f4f4; }
 .unresolved-edge { border-left: 3px solid #842029; padding-left: 0.5rem; margin-bottom: 0.25rem; }
 .activity { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
 .activity-name { margin-top: 0; }
+.diff-add { color: #0f5132; }
+.diff-remove { color: #842029; }
+.diff-change { color: #8a6d1a; }
+.diff-list { list-style: none; margin: 0; padding: 0; }
+.diff-list li { font-family: ui-monospace, monospace; font-size: 0.85rem; margin-bottom: 0.15rem; }
+.conflict { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.conflict h2 { margin-top: 0; }
+.conflict-columns { display: flex; gap: 1rem; }
+.conflict-side { flex: 1 1 0; min-width: 0; }
+.conflict-side h3 { margin-top: 0; }
+.conflict-value { font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f4f4; padding: 0.5rem; border-radius: 4px; }
+.merge-form label, .compare-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.merge-form input, .compare-form input { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {
