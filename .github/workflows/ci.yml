@@ -28,21 +28,32 @@ jobs:
       - run: python -m unittest discover -s judge/tests -p "test_*.py" -v
 
   msrv:
-    # Builds the whole workspace with the DECLARED minimum toolchain, not with
-    # stable. A manifest rust-version nobody tests is a claim that drifts: the
-    # server declared 1.85 while its JWT crate (via time@0.3.55) actually needs
-    # rustc 1.88, and nothing caught it because every other toolchain in use was
-    # newer. Pinning the server's declared floor and building the workspace makes
-    # the next dependency that raises the floor fail here instead of inside the
-    # container image. Keep the pinned version in step with server/Cargo.toml
-    # rust-version.
+    # Builds each crate with its DECLARED minimum toolchain, not with stable. A
+    # manifest rust-version nobody tests is a claim that drifts: the server
+    # declared 1.85 while its JWT crate (via time@0.3.55) actually needs rustc
+    # 1.88, and nothing caught it because every other toolchain in use was
+    # newer. The workspace has two declared floors, kept distinct here rather
+    # than collapsed to the larger:
+    #   - engine/* inherits workspace.package rust-version = 1.75
+    #   - server and cli declare rust-version = 1.88
+    # The 1.75 engine floor is kept true by pinning indexmap (petgraph's
+    # transitive dependency) to the last release whose MSRV is <= 1.75; indexmap
+    # 2.14 requires edition2024 (rustc 1.85). Keep the two pinned toolchains in
+    # step with workspace.package and server/Cargo.toml + cli/Cargo.toml
+    # rust-version respectively.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: engine layer at the engine floor (1.75)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+      - run: cargo build -p mw-okf -p mw-test-support -p mw-graph -p mw-gate -p mw-binding -p mw-binding-xmi -p mw-agent -p mw-capi -p mw-mcp -p mw-analytics --locked
+      - name: server layer at the server floor (1.88)
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
-      - run: cargo build --workspace --locked
+      - run: cargo build -p mw-server -p mw-cli --locked
 
   postgres:
     # This job proves the PostgreSQL backend, which cannot run on a machine

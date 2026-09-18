@@ -12,6 +12,13 @@ repository = "https://github.com/modelwrite/modelwrite"
 anyhow = "1.0"
 hex = "0.4"
 petgraph = "0.6"
+# indexmap is petgraph's transitive dependency (via engine/graph). It is pinned
+# to the last release whose rust-version is <= the workspace floor of 1.75:
+# indexmap 2.12 raised its MSRV to 1.82 and 2.14 to 1.85 (edition2024). Without
+# this pin the engine layer resolves indexmap 2.14 and silently breaks the
+# declared 1.75 floor. The msrv CI job builds the engine layer at 1.75 to keep
+# the claim verified.
+indexmap = "=2.11.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
