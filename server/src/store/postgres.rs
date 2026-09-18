@@ -94,6 +94,21 @@ FOR EACH ROW
 EXECUTE FUNCTION audit_append_only();
 ";
 
+/// Bring a database created by an earlier schema up to the current one. `CREATE TABLE IF NOT
+/// EXISTS` is not a migration: a table that already exists keeps its old shape, so a column
+/// added to the CREATE statement never reaches an existing database. Each migration here is an
+/// idempotent additive statement (`ADD COLUMN IF NOT EXISTS`), chosen over a `schema_version`
+/// table because a migration that states WHAT it changes cannot drift from the schema it
+/// changes, while a version row can claim N while a column is missing. If a non-additive
+/// migration (a rename or a drop) is ever needed, introduce a versioned table then.
+///
+/// `mechanism` is the same migration SQLite carries: an audit table written before
+/// authentication existed has no `mechanism` column, and the default is the honest value for
+/// those rows — they came from a build where nobody was verified.
+const MIGRATIONS: &str = "
+ALTER TABLE audit ADD COLUMN IF NOT EXISTS mechanism TEXT NOT NULL DEFAULT 'open';
+";
+
 type PlainPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
 type TlsPool = r2d2::Pool<PostgresConnectionManager<MakeRustlsConnect>>;
 
@@ -184,6 +199,7 @@ impl PostgresStore {
             tx.batch_execute("SELECT pg_advisory_xact_lock(7071175)")
                 .map_err(backend)?;
             tx.batch_execute(SCHEMA).map_err(backend)?;
+            tx.batch_execute(MIGRATIONS).map_err(backend)?;
             tx.commit().map_err(backend)?;
         }
         Ok(Self { pool })
@@ -249,12 +265,45 @@ fn insert_audit<G: postgres::GenericClient>(
     Ok(row.get(0))
 }
 
+/// The stable 64-bit advisory-lock key for one (project, element) lease. Both
+/// `enforce_guard` (checking a lease) and `acquire_locks` (taking one) take
+/// `pg_advisory_xact_lock` on this key, so a check and a take on the same element are
+/// mutually exclusive. FNV-1a is chosen because it is deterministic across processes and Rust
+/// versions — two service replicas must agree on the key — while `std::hash::RandomState` is
+/// deliberately seeded per process. The 0 byte separates project from element so ("ab", "c")
+/// and ("a", "bc") hash differently.
+pub fn element_lock_key(project: &str, element: &str) -> i64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for byte in project
+        .bytes()
+        .chain(std::iter::once(0u8))
+        .chain(element.bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash as i64
+}
+
 fn enforce_guard<G: postgres::GenericClient>(
     client: &mut G,
     project: &str,
     guard: &CommitGuard<'_>,
 ) -> Result<(), StoreError> {
     for element in guard.elements {
+        // Take the per-element advisory lock BEFORE reading the lease. Under READ COMMITTED a
+        // plain SELECT sees a statement snapshot, so a lease acquired and committed between
+        // this read and the commit's own insert would be invisible and the guarded commit
+        // would land after a live lock exists. The advisory lock makes checking a lease and
+        // taking one (acquire_locks) mutually exclusive: they serialise on the same key.
+        client
+            .execute(
+                "SELECT pg_advisory_xact_lock($1)",
+                &[&element_lock_key(project, element)],
+            )
+            .map_err(backend)?;
         let held: Option<(String, i64)> = client
             .query_opt(
                 "SELECT holder, expires_at FROM locks WHERE project = $1 AND element = $2 AND expires_at > $3 AND holder != $4 LIMIT 1",
@@ -786,6 +835,15 @@ impl Store for PostgresStore {
             let expires_at = now + ttl_seconds;
             let mut locks = Vec::with_capacity(elements.len());
             for element in elements {
+                // Take the per-element advisory lock BEFORE the insert, so this acquire is
+                // mutually exclusive with a guarded commit's enforce_guard check on the same
+                // element: neither can observe the other mid-flight, and a guarded commit
+                // cannot land after a live lock on an element it just checked.
+                tx.execute(
+                    "SELECT pg_advisory_xact_lock($1)",
+                    &[&element_lock_key(project, element)],
+                )
+                .map_err(backend)?;
                 // One statement, settled by the database: insert a fresh lease, or extend
                 // this holder's existing lease. The UNIQUE(project, element) constraint is
                 // the arbiter between two concurrent acquires by different holders - the

@@ -659,3 +659,203 @@ fn two_concurrent_acquires_by_different_holders_cannot_both_succeed() {
         "the refusal must name the holder that actually won"
     );
 }
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn a_guarded_commit_racing_an_acquire_cannot_slip_through() {
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+
+    // The other side of the race is simulated with a raw connection that holds the SAME
+    // per-element advisory lock the store takes, inserts a live lease, and commits only at
+    // the end — so the lease becomes visible exactly when the advisory lock is released,
+    // which is the interleaving the bug lived in.
+    let url = std::env::var("MW_TEST_DATABASE_URL").unwrap();
+    let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+    let mut acquire = conn.transaction().unwrap();
+    acquire
+        .execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&server::store::postgres::element_lock_key(&project, "b1")],
+        )
+        .unwrap();
+    acquire
+        .execute(
+            "INSERT INTO locks (id, project, branch, element, holder, acquired_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            &[&"raw".to_string(), &project, &"main", &"b1", &"alex", &1000i64, &1600i64],
+        )
+        .unwrap();
+
+    let store = std::sync::Arc::new(store);
+    let touched = vec!["b1".to_string()];
+    let handle = {
+        let store = store.clone();
+        let project = project.clone();
+        std::thread::spawn(move || {
+            store.commit_model(
+                &project,
+                "main",
+                "okf-sam",
+                "sam",
+                "sam edits a locked element",
+                Some(CommitGuard {
+                    holder: "sam",
+                    elements: &touched,
+                    now: 1000,
+                    expected_tip: None,
+                }),
+                None,
+            )
+        })
+    };
+
+    // The guarded commit must WAIT on the advisory lock, not check past the uncommitted
+    // lease and land after it.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        !handle.is_finished(),
+        "a guarded commit must wait for an in-progress acquire, not slip past it"
+    );
+
+    // The acquire lands: the lease is live, and the blocked guard must now see it.
+    acquire.commit().unwrap();
+
+    let raced = handle.join().expect("worker thread");
+    match raced {
+        Err(StoreError::Locked {
+            element, holder, ..
+        }) => {
+            assert_eq!(element, "b1", "the refusal must name the element");
+            assert_eq!(holder, "alex", "the refusal must name the holder");
+        }
+        other => panic!(
+            "a commit racing an acquire must be refused, got {:?}",
+            other.map(|c| c.hash)
+        ),
+    }
+    assert_eq!(
+        store.commits_on(&project, "main").unwrap().len(),
+        0,
+        "the refused commit must leave no commit behind"
+    );
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn acquiring_waits_for_an_in_progress_lease_check() {
+    let store = require_store();
+    let project = unique_project();
+    store.create_project(&project, None).unwrap();
+
+    // Hold the per-element advisory lock open with a raw connection, simulating a guarded
+    // commit whose enforce_guard check is in flight. An acquire must wait on it, not race it.
+    let url = std::env::var("MW_TEST_DATABASE_URL").unwrap();
+    let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+    let mut checking = conn.transaction().unwrap();
+    checking
+        .execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&server::store::postgres::element_lock_key(&project, "b1")],
+        )
+        .unwrap();
+
+    let store = std::sync::Arc::new(store);
+    let handle = {
+        let store = store.clone();
+        let project = project.clone();
+        std::thread::spawn(move || {
+            store.acquire_locks(
+                &project,
+                "main",
+                &["b1".to_string()],
+                "alex",
+                600,
+                1000,
+                None,
+            )
+        })
+    };
+
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        !handle.is_finished(),
+        "an acquire must wait for an in-progress lease check, not race it"
+    );
+
+    checking.commit().unwrap();
+
+    let acquired = handle.join().expect("worker thread").unwrap();
+    assert_eq!(acquired.len(), 1);
+    assert_eq!(acquired[0].element, "b1");
+}
+
+/// Derive a connection URL for a different database on the same server, preserving the host,
+/// credentials and query parameters (sslmode in particular).
+fn database_url_for(base: &str, database: &str) -> String {
+    let (authority, query) = match base.split_once('?') {
+        Some((rest, query)) => (rest, query),
+        None => (base, ""),
+    };
+    let (scheme_and_host, _old_db) = authority
+        .rsplit_once('/')
+        .expect("url must name a database");
+    if query.is_empty() {
+        format!("{}/{}", scheme_and_host, database)
+    } else {
+        format!("{}/{}?{}", scheme_and_host, database, query)
+    }
+}
+
+#[test]
+#[ignore = "requires MW_TEST_DATABASE_URL"]
+fn an_older_database_gains_the_mechanism_column_instead_of_failing() {
+    let url = std::env::var("MW_TEST_DATABASE_URL").unwrap();
+    let database = unique_project();
+    let project = unique_project();
+
+    // A scratch database with the OLD audit shape: the table exists, but without the
+    // mechanism column. CREATE TABLE IF NOT EXISTS cannot add it, so only the migration can.
+    {
+        let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+        conn.batch_execute(&format!("CREATE DATABASE \"{}\"", database))
+            .expect("create scratch database");
+    }
+    let scratch = database_url_for(&url, &database);
+    {
+        let mut conn = postgres::Client::connect(&scratch, NoTls).expect("connect scratch");
+        conn.batch_execute(
+            "CREATE TABLE audit (id BIGSERIAL PRIMARY KEY, project TEXT NOT NULL, at BIGINT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL)",
+        )
+        .expect("create old-shape audit table");
+    }
+
+    // Opening the store must bring the old database up to date, not fail.
+    let store = PostgresStore::open(&scratch).expect("an older database must open, not fail");
+    store.create_project(&project, None).unwrap();
+    store
+        .append_audit(&AuditEntry {
+            id: 0,
+            project: project.clone(),
+            at: 1,
+            actor: "alex".to_string(),
+            mechanism: "static".to_string(),
+            action: "commit.create".to_string(),
+            subject: "main".to_string(),
+            detail: "after the migration".to_string(),
+        })
+        .expect("the migrated table must accept a write");
+    let rows = store.audit(&project, 10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].mechanism, "static");
+
+    drop(store);
+
+    {
+        let mut conn = postgres::Client::connect(&url, NoTls).expect("connect raw client");
+        conn.batch_execute(&format!(
+            "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+            database
+        ))
+        .expect("drop scratch database");
+    }
+}
