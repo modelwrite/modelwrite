@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Default values for the modelwrite chart.
 #
 # Secrets are NEVER inlined here. The bearer token, the JWKS document and the

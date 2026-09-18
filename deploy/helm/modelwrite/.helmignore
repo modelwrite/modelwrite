@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The example Secret is documentation for the operator, not a template. It lives at the
 # chart root rather than in templates/ for exactly that reason: Helm renders every .yaml
 # in templates/, which would install a Secret full of CHANGE-ME placeholders, and Helm

@@ -1,23 +1,23 @@
-﻿# Modelwrite
+# Modelwrite
 
 **The model you can prove.**
 
 Modelwrite is an open-source MBSE platform that turns legacy SysML models
-into portable, provable data â€” the Open Knowledge Format (OKF) â€” and
+into portable, provable data — the Open Knowledge Format (OKF) — and
 automates the skilled work of building and reviewing models with grounded
 AI.
 
 ## What is in this repository
 
-- engine/ â€” the Rust engine (AGPL-3.0-or-later): okf types, validation,
+- engine/ — the Rust engine (AGPL-3.0-or-later): okf types, validation,
   hashing and diffing; graph analysis; the round-trip fidelity gate with
   evidence records; the C ABI; the MCP server
-- judge/ â€” the gate-as-judge harness for scoring model migrations
-- agents/ â€” rule packs for AI coding agents working against OKF
-- sample/ â€” the coffee-machine corpus: the legacy CATIA Magic model, its
+- judge/ — the gate-as-judge harness for scoring model migrations
+- agents/ — rule packs for AI coding agents working against OKF
+- sample/ — the coffee-machine corpus: the legacy CATIA Magic model, its
   OKF export, and the corrupted fixture the gate must reject
-- docs/ â€” the OKF 1.0 spec, the design documents, and the evidence annex
-- deploy/ â€” the container image, a Docker Compose trial stack, and a Helm chart
+- docs/ — the OKF 1.0 spec, the design documents, and the evidence annex
+- deploy/ — the container image, a Docker Compose trial stack, and a Helm chart
 
 ## Quickstart
 
