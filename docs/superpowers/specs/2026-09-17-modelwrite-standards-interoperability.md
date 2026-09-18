@@ -56,7 +56,13 @@ A binding is a versioned adapter with obligations, not a best-effort importer:
   records. The corpus is the definition of what the binding means, exactly as the coffee-machine
   corpus defines the engine's round trip.
 - **A mapping matrix.** Every element and attribute the source standard can express, marked
-  `exact`, `lossy` or `unmappable`. This is data, not prose: the gate reads it.
+  `exact`, `lossy` or `unmappable`. This is data, not prose: it is DECLARATION, published so a
+  person can read the boundary before migrating. It is NOT gate input, and the earlier draft of
+  this document said it was; Slice 6 corrected that claim to match the code (commit 72f48fd).
+  What the gate enforces at an import is the per-import LOSS REPORT, which names losses at
+  instance granularity (`uml:Package pkg-structure`) while the matrix declares them at category
+  granularity (`uml:Package (packagedElement)`) - the leading construct name is the shared key,
+  and a test pins that every blocking loss traces to a declared construct.
 - **A fidelity record per import.** Produced by the existing gate, in the existing evidence format,
   so a migration is proved with the same machinery as any other change.
 
