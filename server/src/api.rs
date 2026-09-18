@@ -7,6 +7,9 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::audit::{
+    BRANCH_CREATE, BRANCH_DELETE, BRANCH_RESET, COMMIT_CREATE, COMMIT_REFUSED, PROJECT_CREATE,
+};
 use crate::auth::{AuthConfig, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{
@@ -242,7 +245,7 @@ pub fn commit_refusal_guard(
                 project,
                 actor,
                 mechanism,
-                "commit.refused",
+                COMMIT_REFUSED,
                 branch,
                 &detail,
             ) {
@@ -326,6 +329,107 @@ pub fn commit_json(commit: &Commit) -> Value {
     })
 }
 
+/// The elements a commit to this base would touch. A first commit (`reference` is `None`)
+/// has nothing to diff against, so it touches every element the document names; a later
+/// commit touches the difference between the tip model and the candidate. This is the ONE
+/// place a commit decides what "changed" means, shared by the JSON handler, the editor, and
+/// any future write path.
+pub fn commit_touched(
+    reference: Option<&okf::types::OkfRoot>,
+    candidate: &okf::types::OkfRoot,
+) -> Vec<String> {
+    match reference {
+        Some(reference) => touched_elements(reference, candidate),
+        None => all_touched(candidate),
+    }
+}
+
+/// What a commit attempt produced. A validation failure is NOT a storage failure: the JSON
+/// handler renders it as 422 and the editor as its form errors, but the decision of what
+/// counts as an invalid document lives in one place.
+pub enum CommitFailure {
+    Invalid { errors: Vec<String> },
+    Store(StoreError),
+}
+
+/// Everything the commit core needs that the caller resolved upstream. `author` and
+/// `actor` are already resolved against the identity; `bytes` are the exact bytes to
+/// store (the JSON handler stores the client's document, the editor stores its re-serialised
+/// model); `tip` and `reference` are the tip the candidate was computed against and that
+/// tip's model, both `None` for a first commit.
+pub struct CommitCore<'a> {
+    pub project: &'a str,
+    pub branch: &'a str,
+    pub author: &'a str,
+    pub message: &'a str,
+    pub actor: &'a str,
+    pub mechanism: &'a str,
+    pub candidate: &'a okf::types::OkfRoot,
+    pub bytes: &'a [u8],
+    /// The guard's holder: the identity that may change the touched elements. An empty
+    /// string means the caller holds no lease, so any live lease on a touched element
+    /// refuses the commit. The editor passes its verified subject because it acquired a
+    /// request-duration lease on the element before committing; a plain commit passes the
+    /// optional holder field (or an empty string).
+    pub holder: &'a str,
+    pub now: i64,
+    pub tip: Option<&'a str>,
+    pub reference: Option<&'a okf::types::OkfRoot>,
+}
+
+/// The ONE implementation of a commit: validate the document, store its bytes, compute the
+/// touched set, build the lock guard against the expected tip, and write the commit and its
+/// audit row in one store transaction, recording a refusal if the guard refuses. Both
+/// [create_commit] and the editor's `perform_edit` call this, so they cannot diverge on
+/// the sequence, the guard or the audit entry.
+pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, CommitFailure> {
+    // Every commit path validates before it stores. A future rule that produced a
+    // self-contradicting document turns a silent bad write into a loud refusal here.
+    let report = okf::validate::validate(input.candidate);
+    if !report.valid {
+        return Err(CommitFailure::Invalid {
+            errors: report.errors,
+        });
+    }
+
+    let touched = commit_touched(input.reference, input.candidate);
+    let guard = CommitGuard {
+        holder: input.holder,
+        elements: &touched,
+        now: input.now,
+        expected_tip: input.tip,
+    };
+
+    let okf_hash = store.put_blob(input.bytes).map_err(CommitFailure::Store)?;
+    let audit = AuditEntry {
+        id: 0,
+        project: input.project.to_string(),
+        at: input.now,
+        actor: input.actor.to_string(),
+        mechanism: input.mechanism.to_string(),
+        action: COMMIT_CREATE.to_string(),
+        subject: input.branch.to_string(),
+        detail: input.message.to_string(),
+    };
+    commit_refusal_guard(
+        store,
+        input.project,
+        input.branch,
+        input.actor,
+        input.mechanism,
+        store.commit_model(
+            input.project,
+            input.branch,
+            &okf_hash,
+            input.author,
+            input.message,
+            Some(guard),
+            Some(&audit),
+        ),
+    )
+    .map_err(CommitFailure::Store)
+}
+
 #[derive(Deserialize)]
 pub struct CreateProject {
     pub name: String,
@@ -349,7 +453,7 @@ pub async fn create_project(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
-        action: "project.create".to_string(),
+        action: PROJECT_CREATE.to_string(),
         subject: body.name.clone(),
         detail: "project created".to_string(),
     };
@@ -441,25 +545,18 @@ pub async fn create_commit(
         .store
         .branch_tip(&project, &body.branch)
         .map_err(map_store_error)?;
-    let touched = match tip_hash.as_deref() {
+    let reference: Option<okf::types::OkfRoot> = match tip_hash.as_deref() {
         Some(tip) => {
-            let tip_model =
-                load_model(state.store.as_ref(), &project, tip).map_err(map_store_error)?;
-            touched_elements(&tip_model, &root)
+            Some(load_model(state.store.as_ref(), &project, tip).map_err(map_store_error)?)
         }
-        None => all_touched(&root),
-    };
-    let guard = CommitGuard {
-        holder: body.holder.as_deref().unwrap_or(""),
-        elements: &touched,
-        now,
-        expected_tip: tip_hash.as_deref(),
+        None => None,
     };
 
     // Cheap refusal BEFORE anything is stored, so a rejected commit leaves no orphaned
     // blob behind. The store checks again inside its transaction, and THAT check is the
     // authority: this one exists to avoid writing bytes we already know will be refused.
     if let Some(holder) = body.holder.as_deref() {
+        let touched = commit_touched(reference.as_ref(), &root);
         let held = state
             .store
             .holders_of(&project, &touched, now_seconds())
@@ -473,38 +570,33 @@ pub async fn create_commit(
         }
     }
 
-    let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
-    // One call, one transaction: the parents come from the tip the store reads inside the
-    // same lock that writes the commit, so two concurrent commits to one branch chain
-    // instead of forking the history. The audit row rides the SAME transaction, so the
-    // commit and its record of who made it succeed or fail together.
-    let audit = AuditEntry {
-        id: 0,
-        project: project.clone(),
-        at: now,
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        action: "commit.create".to_string(),
-        subject: body.branch.clone(),
-        detail: body.message.clone(),
-    };
-    let commit = commit_refusal_guard(
+    // The commit itself is the SAME sequence the editor runs: validate, store the bytes,
+    // compute the touched set, guard against the expected tip, and write the commit and its
+    // audit row in one transaction. Keeping the validation above is deliberate: it refuses
+    // an invalid document BEFORE any store read, exactly as before.
+    let commit = commit_core(
         state.store.as_ref(),
-        &project,
-        &body.branch,
-        &identity.subject,
-        state.auth.mechanism(),
-        state.store.commit_model(
-            &project,
-            &body.branch,
-            &okf_hash,
-            &author,
-            &body.message,
-            Some(guard),
-            Some(&audit),
-        ),
+        &CommitCore {
+            project: &project,
+            branch: &body.branch,
+            author: &author,
+            message: &body.message,
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+            candidate: &root,
+            bytes: &bytes,
+            holder: body.holder.as_deref().unwrap_or(""),
+            now,
+            tip: tip_hash.as_deref(),
+            reference: reference.as_ref(),
+        },
     )
-    .map_err(map_store_error)?;
+    .map_err(|failure| match failure {
+        CommitFailure::Invalid { errors } => {
+            ApiError::unprocessable("the model failed validation", errors)
+        }
+        CommitFailure::Store(error) => map_store_error(error),
+    })?;
     Ok((StatusCode::CREATED, Json(commit_json(&commit))))
 }
 
@@ -591,7 +683,7 @@ pub async fn create_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
-        action: "branch.create".to_string(),
+        action: BRANCH_CREATE.to_string(),
         subject: body.name.clone(),
         detail: format!("from {}", body.from),
     };
@@ -653,7 +745,7 @@ pub async fn delete_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
-        action: "branch.delete".to_string(),
+        action: BRANCH_DELETE.to_string(),
         subject: name.clone(),
         detail: "branch deleted".to_string(),
     };
@@ -734,7 +826,7 @@ pub async fn reset_branch(
         at: now_seconds(),
         actor: identity.subject.clone(),
         mechanism: state.auth.mechanism().to_string(),
-        action: "branch.reset".to_string(),
+        action: BRANCH_RESET.to_string(),
         subject: name.clone(),
         detail: format!("reset to {}", body.to),
     };

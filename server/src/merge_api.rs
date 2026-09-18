@@ -6,13 +6,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{
-    commit_json, commit_refusal_guard, load_model, lock_refusal_message, map_store_error,
-    resolve_author, touched_elements, validate_name, verify_actor, ApiState,
+    commit_json, commit_refusal_guard, load_model, map_store_error, resolve_author,
+    touched_elements, validate_name, verify_actor, ApiState,
 };
+use crate::audit::{MERGE_CLEAN, MERGE_CONFLICT};
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::merge::merge;
-use crate::store::{now_seconds, AuditEntry, CommitGuard, Store, StoreError};
+use crate::store::{now_seconds, AuditEntry, Commit, CommitGuard, Store, StoreError};
 
 #[derive(Deserialize)]
 pub struct MergeRequest {
@@ -128,32 +129,88 @@ pub async fn merge_branches(
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &body.branch)?;
     validate_name("branch name", &body.other)?;
-    if state
-        .store
-        .project(&project)
-        .map_err(map_store_error)?
-        .is_none()
+
+    match merge_core(
+        state.store.as_ref(),
+        &project,
+        &MergeCore {
+            branch: &body.branch,
+            other: &body.other,
+            author: &author,
+            message: &body.message,
+            holder: body.holder.as_deref(),
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+        },
+    )
+    .map_err(map_store_error)?
     {
-        return Err(ApiError::not_found(format!("project {}", project)));
+        MergeOutcome::Merged { commit, base } => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "commit": commit_json(&commit), "base": base })),
+        )),
+        MergeOutcome::Conflict { base, conflicts } => Ok((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "base": base,
+                "branch": body.branch,
+                "other": body.other,
+                "conflicts": conflicts
+            })),
+        )),
     }
+}
 
-    let ours_tip = state
-        .store
-        .branch_tip(&project, &body.branch)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {}", body.branch)))?;
-    let theirs_tip = state
-        .store
-        .branch_tip(&project, &body.other)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {}", body.other)))?;
+/// The outcome of a merge, described without any HTTP or page rendering. The JSON handler
+/// and the merge page each map this to their own surface, so the two cannot diverge on what
+/// a merge actually did.
+pub enum MergeOutcome {
+    Merged {
+        commit: Commit,
+        base: String,
+    },
+    Conflict {
+        base: String,
+        conflicts: Vec<crate::merge::Conflict>,
+    },
+}
 
-    let base_hash = common_ancestor(state.store.as_ref(), &project, &ours_tip, &theirs_tip)
-        .map_err(map_store_error)?;
-    let base = load_model(state.store.as_ref(), &project, &base_hash).map_err(map_store_error)?;
-    let ours = load_model(state.store.as_ref(), &project, &ours_tip).map_err(map_store_error)?;
-    let theirs =
-        load_model(state.store.as_ref(), &project, &theirs_tip).map_err(map_store_error)?;
+/// Everything the merge core needs that the caller resolved upstream. The author is already
+/// resolved against the identity; `holder` is the optional holder (empty becomes `None`).
+pub struct MergeCore<'a> {
+    pub branch: &'a str,
+    pub other: &'a str,
+    pub author: &'a str,
+    pub message: &'a str,
+    pub holder: Option<&'a str>,
+    pub actor: &'a str,
+    pub mechanism: &'a str,
+}
+
+/// The ONE implementation of a merge: resolve the two branch tips and their lowest common
+/// ancestor, run the three-way merge, then either record the conflict or validate, lock-guard
+/// and commit the merged document with its audit row. Both [merge_branches] and the merge
+/// page's `perform_merge` call this, so they cannot record different audit entries or apply
+/// a different lock strategy.
+pub fn merge_core(
+    store: &dyn Store,
+    project: &str,
+    input: &MergeCore<'_>,
+) -> Result<MergeOutcome, StoreError> {
+    if store.project(project)?.is_none() {
+        return Err(StoreError::NotFound(format!("project {}", project)));
+    }
+    let ours_tip = store
+        .branch_tip(project, input.branch)?
+        .ok_or_else(|| StoreError::NotFound(format!("branch {}", input.branch)))?;
+    let theirs_tip = store
+        .branch_tip(project, input.other)?
+        .ok_or_else(|| StoreError::NotFound(format!("branch {}", input.other)))?;
+
+    let base_hash = common_ancestor(store, project, &ours_tip, &theirs_tip)?;
+    let base = load_model(store, project, &base_hash)?;
+    let ours = load_model(store, project, &ours_tip)?;
+    let theirs = load_model(store, project, &theirs_tip)?;
 
     let outcome = merge(&base, &ours, &theirs);
     if !outcome.conflicts.is_empty() {
@@ -161,32 +218,27 @@ pub async fn merge_branches(
         // every conflicting subject with its base, ours and theirs values so a human or an
         // agent can resolve it deliberately rather than guess. The attempt is still
         // recorded: the audit log exists to show what was tried, not only what succeeded.
-        state
-            .store
-            .append_audit(&AuditEntry {
-                id: 0,
-                project: project.clone(),
-                at: now_seconds(),
-                actor: identity.subject.clone(),
-                mechanism: state.auth.mechanism().to_string(),
-                action: "merge.conflict".to_string(),
-                subject: body.branch.clone(),
-                detail: format!("merge conflict between {} and {}", body.branch, body.other),
-            })
-            .map_err(map_store_error)?;
-        return Ok((
-            StatusCode::CONFLICT,
-            Json(json!({
-                "base": base_hash,
-                "branch": body.branch,
-                "other": body.other,
-                "conflicts": outcome.conflicts
-            })),
-        ));
+        store.append_audit(&AuditEntry {
+            id: 0,
+            project: project.to_string(),
+            at: now_seconds(),
+            actor: input.actor.to_string(),
+            mechanism: input.mechanism.to_string(),
+            action: MERGE_CONFLICT.to_string(),
+            subject: input.branch.to_string(),
+            detail: format!(
+                "merge conflict between {} and {}",
+                input.branch, input.other
+            ),
+        })?;
+        return Ok(MergeOutcome::Conflict {
+            base: base_hash,
+            conflicts: outcome.conflicts,
+        });
     }
 
     let merged = outcome.merged.ok_or_else(|| {
-        ApiError::internal("the merge reported no conflicts but produced nothing")
+        StoreError::Backend("the merge reported no conflicts but produced nothing".to_string())
     })?;
 
     // Every commit path validates before it stores. A merge must not be the one that skips
@@ -195,77 +247,72 @@ pub async fn merge_branches(
     let report = okf::validate::validate(&merged);
     if !report.valid {
         eprintln!("merged model failed validation: {:?}", report.errors);
-        return Err(ApiError::internal(
-            "the merged model failed validation and was not stored",
+        return Err(StoreError::Backend(
+            "the merged model failed validation and was not stored".to_string(),
         ));
     }
+
+    let touched = touched_elements(&ours, &merged);
 
     // Refuse before storing the merged document, so a lock-refused merge leaves no
     // orphaned blob. The store checks again inside its transaction, and that check is the
     // authority; this one avoids writing bytes we already know will be rejected.
     {
-        let touched = touched_elements(&ours, &merged);
-        let held = state
-            .store
-            .holders_of(&project, &touched, now_seconds())
-            .map_err(map_store_error)?;
-        let holder = body.holder.as_deref().unwrap_or("");
-        if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
-            return Err(ApiError::conflict(lock_refusal_message(
-                &blocked.element,
-                &blocked.holder,
-                blocked.expires_at,
-            )));
+        let held = store.holders_of(project, &touched, now_seconds())?;
+        let holder = input.holder.unwrap_or("");
+        if let Some(blocked) = held.iter().find(|lock| lock.holder != holder) {
+            return Err(StoreError::Locked {
+                element: blocked.element.clone(),
+                holder: blocked.holder.clone(),
+                expires_at: blocked.expires_at,
+            });
         }
     }
 
     let bytes = serde_json::to_vec(&merged).map_err(|e| {
         eprintln!("merged model could not be serialised: {}", e);
-        ApiError::internal("the merged model could not be stored")
+        StoreError::Backend("the merged model could not be stored".to_string())
     })?;
-    let okf_hash = state.store.put_blob(&bytes).map_err(map_store_error)?;
+    let okf_hash = store.put_blob(&bytes)?;
     // A merge is a write path like any other: it refuses to change an element another
     // holder has locked. The touched set is the difference between OUR tip model and the
     // MERGED model. A caller that holds the leases passes its holder and proceeds.
-    let touched = touched_elements(&ours, &merged);
-    let parents = vec![ours_tip, theirs_tip];
+    let parents = vec![ours_tip.clone(), theirs_tip.clone()];
     let guard = CommitGuard {
-        holder: body.holder.as_deref().unwrap_or(""),
+        holder: input.holder.unwrap_or(""),
         elements: &touched,
         now: now_seconds(),
         expected_tip: Some(&parents[0]),
     };
     let audit = AuditEntry {
         id: 0,
-        project: project.clone(),
+        project: project.to_string(),
         at: now_seconds(),
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        action: "merge.clean".to_string(),
-        subject: body.branch.clone(),
-        detail: format!("merged {} into {}", body.other, body.branch),
+        actor: input.actor.to_string(),
+        mechanism: input.mechanism.to_string(),
+        action: MERGE_CLEAN.to_string(),
+        subject: input.branch.to_string(),
+        detail: format!("merged {} into {}", input.other, input.branch),
     };
     let commit = commit_refusal_guard(
-        state.store.as_ref(),
-        &project,
-        &body.branch,
-        &identity.subject,
-        state.auth.mechanism(),
-        state.store.commit_merge(
-            &project,
-            &body.branch,
+        store,
+        project,
+        input.branch,
+        input.actor,
+        input.mechanism,
+        store.commit_merge(
+            project,
+            input.branch,
             &parents,
             &okf_hash,
-            &author,
-            &body.message,
+            input.author,
+            input.message,
             Some(guard),
             Some(&audit),
         ),
-    )
-    .map_err(map_store_error)?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "commit": commit_json(&commit), "base": base_hash })),
-    ))
+    )?;
+    Ok(MergeOutcome::Merged {
+        commit,
+        base: base_hash,
+    })
 }
