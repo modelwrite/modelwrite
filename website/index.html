@@ -16,7 +16,7 @@
   <nav aria-label="Sections">
     <a href="#what">What it is</a>
     <a href="#why">Why it exists</a>
-    <a href="#run">Run it</a>
+    <a href="#run">Install and run</a>
     <a href="#works">What works</a>
     <a href="#does-not">What it does not do</a>
     <a href="#architecture">Architecture</a>
@@ -48,15 +48,22 @@ models, while a human makes every commit. Agents draft; the gate and the human c
 </section>
 
 <section id="run">
-<h2>Run it locally</h2>
-<p>One command, from the repository root:</p>
+<h2>Install and run</h2>
+<p>The Rust crates are not published to crates.io — both declare
+<code>publish = false</code> in their manifests — so <code>cargo install</code> will not
+work. Build from this repository.</p>
+<p>The crates build and run from source. The service is <code>mw-server</code>; the CLI is
+<code>mw-cli</code>, which builds the <code>mw</code> binary:</p>
+<pre><code>cargo build --workspace
+cargo run -p mw-server</code></pre>
+<p>The container image builds from <code>deploy/Dockerfile</code> (see
+<code>deploy/README.md</code>):</p>
+<pre><code>docker build -f deploy/Dockerfile -t modelwrite/modelwrite:0.1.0 .</code></pre>
+<p>To try the full stack on one machine, from the repository root:</p>
 <pre><code>docker compose -f deploy/docker-compose.yml up --build</code></pre>
-<p>That starts <code>mw-server</code> and a PostgreSQL 16 database. To run the server
-directly instead, on a single-user SQLite store:</p>
-<pre><code>cargo run -p mw-server</code></pre>
 <p>The server runs in open mode (anonymous admin) unless a token or JWKS is configured.
 The container refuses to start open on a reachable interface unless
-<code>MW_ALLOW_OPEN=yes</code> is set. See <code>deploy/README.md</code>.</p>
+<code>MW_ALLOW_OPEN=yes</code> is set.</p>
 </section>
 
 <section id="works">
@@ -125,10 +132,21 @@ An agent token cannot hold a write or admin role.</li>
 <code>engine/agent</code> consumes the reasoner&rsquo;s proposals, so a proposal does
 not reach the server on its own; a human drives the accept route. Acceptance is
 import-scoped: migration loss-report proposals only.</li>
-<li><strong>No content-rich real vendor XMI has been tested.</strong> Every XMI fixture
-except one is hand-written and says so. The one real document,
-<code>real-world/LandingGear.uml</code>, is a Papyrus project skeleton with zero model
-elements. A content-rich real export and its fidelity report remain unproven.</li>
+<li><strong>The first real vendor model has been tested — and the result is measured,
+not reassuring.</strong> The MagicDraw SysML model in
+<code>sample/corpus/coffee-machine/legacy/CoffeeMachine-SysML-Model.mdzip</code> (a
+193&nbsp;KB XMI in its <code>com.nomagic.magicdraw.uml_model.model</code> entry) contains
+148 <code>packagedElement</code> and 57 <code>ownedAttribute</code> elements: 34 Blocks,
+25 Requirements, 20 Satisfy links and 3 Allocate links. Importing it produces 34 structure
+elements (the Blocks), <em>zero</em> requirements, <em>zero</em> graph edges, and 348
+content losses — every one Unmappable and named. Requirements, Satisfy and Allocate links,
+Ports, Operations and Associations are all reported as unmappable: named, never dropped in
+silence, but not carried. Reproduce it with
+<code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code>.</li>
+<li><strong>Real vendor migration is not ready.</strong> The reader carries a subset: the
+first real model tested lost every requirement (25) and every traceability link (20 Satisfy
+and 3 Allocate), and produced no graph edges. Migrating a MagicDraw or CATIA Magic model
+without those losses is not yet supported.</li>
 <li><strong>The native XMI-to-OKF direction is not independently measured.</strong>
 The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip; the read rests
 on the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</li>

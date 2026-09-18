@@ -43,6 +43,17 @@ cargo run -p mw-gate -- --reference sample/corpus/coffee-machine/okf/expected/co
 
 Expected output: GATE PASS.
 
+## Install and run
+
+The Rust crates are not published to crates.io — both declare `publish = false`
+(`server/Cargo.toml`, `cli/Cargo.toml`) — so there is no working `cargo install`.
+Build from this repository:
+
+- **Crates** — `cargo build --workspace` (see Quickstart above). The service is the
+  `mw-server` crate; the CLI is the `mw-cli` crate, which builds the `mw` binary.
+- **Container image** — `docker build -f deploy/Dockerfile -t
+  modelwrite/modelwrite:0.1.0 .` (see the next section and deploy/README.md).
+
 ## Run the service
 
 Deploy it as a container, a Compose trial, or a Helm release:
