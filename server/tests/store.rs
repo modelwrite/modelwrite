@@ -632,6 +632,8 @@ fn an_import_commit_rolls_back_when_its_import_record_is_missing() {
 
     let provenance = server::store::ImportProvenance {
         artifact_hash: "missing-artifact".to_string(),
+        binding_id: "sysml-v1-xmi".to_string(),
+        binding_version: "2.4".to_string(),
         accepted_losses: vec!["uml:Model m".to_string()],
     };
     let refused = store.commit_model(

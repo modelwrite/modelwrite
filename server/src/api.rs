@@ -350,7 +350,8 @@ pub fn commit_json(commit: &Commit) -> Value {
         "okfHash": commit.okf_hash,
         "author": commit.author,
         "message": commit.message,
-        "createdAt": commit.created_at
+        "createdAt": commit.created_at,
+        "provenance": commit.provenance
     })
 }
 

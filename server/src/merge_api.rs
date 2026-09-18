@@ -167,7 +167,7 @@ pub async fn merge_branches(
 /// a merge actually did.
 pub enum MergeOutcome {
     Merged {
-        commit: Commit,
+        commit: Box<Commit>,
         base: String,
     },
     Conflict {
@@ -317,7 +317,7 @@ pub fn merge_core(
         ),
     )?;
     Ok(MergeOutcome::Merged {
-        commit,
+        commit: Box::new(commit),
         base: base_hash,
     })
 }

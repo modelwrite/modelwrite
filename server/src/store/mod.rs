@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 #[cfg(feature = "postgres")]
@@ -24,6 +24,64 @@ pub struct Commit {
     pub author: String,
     pub message: String,
     pub created_at: String,
+    /// How this commit was produced. Authored and Imported are written in the SAME
+    /// transaction as the commit; Unknown is only ever read back from a commit whose
+    /// provenance column was never written (a commit made before provenance existed), so
+    /// absence is never upgraded to a claim that the commit was authored.
+    pub provenance: CommitProvenance,
+}
+
+/// How a commit was produced. A reader must be able to tell, from the commit alone, whether
+/// it was authored (a normal commit or edit), imported (a migration read from a retained
+/// artifact through a binding), or unknown (a commit written before provenance existed).
+/// The three are deliberately distinct, and absence is never a claim: a commit with no
+/// recorded provenance reads as Unknown, never as Authored.
+///
+/// The serialized form is the JSON a reader sees - a kind field plus, for an import, the
+/// artifact hash, binding id and version and the accepted losses - so the API's commit_json
+/// and the store's commits.provenance column can never disagree on the shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CommitProvenance {
+    /// A normal commit or edit, made through a write path that is not an import.
+    Authored,
+    /// A migration read from a retained artifact through a binding.
+    Imported {
+        #[serde(rename = "artifactHash")]
+        artifact_hash: String,
+        #[serde(rename = "bindingId")]
+        binding_id: String,
+        #[serde(rename = "bindingVersion")]
+        binding_version: String,
+        #[serde(rename = "acceptedLosses")]
+        accepted_losses: Vec<String>,
+    },
+    /// A commit written before provenance was recorded: how it arrived was never checked.
+    Unknown,
+}
+
+impl CommitProvenance {
+    /// Read the stored commits.provenance column. A NULL column - a commit written before
+    /// provenance existed - reads as Unknown, so absence is never mistaken for a claim that
+    /// the commit was authored. A column that cannot be parsed is corruption, reported as a
+    /// storage error rather than silently read as Unknown.
+    pub fn parse_column(raw: Option<&str>) -> Result<Self, StoreError> {
+        match raw {
+            None => Ok(CommitProvenance::Unknown),
+            Some(raw) => serde_json::from_str(raw)
+                .map_err(|e| StoreError::Backend(format!("corrupt provenance column: {}", e))),
+        }
+    }
+
+    /// The value to store in commits.provenance when a commit is being written now. Unknown
+    /// is never written - it exists only as the read-back of an absent value - so it maps to
+    /// None (a NULL column), while authored and imported serialize to their JSON.
+    pub fn column_value(&self) -> Option<String> {
+        match self {
+            CommitProvenance::Unknown => None,
+            _ => Some(serde_json::to_string(self).expect("provenance serializes")),
+        }
+    }
 }
 
 /// The durable record of one import: the retained artifact's content address, the binding
@@ -51,15 +109,18 @@ pub struct ImportRecord {
     pub created_at: String,
 }
 
-/// The provenance an import commit carries: the retained artifact it was read from and the
-/// blocking losses the request accepted by name. It is written INSIDE the same transaction as
-/// the commit row, so a commit can never land unlinked from the source artifact it migrated.
-/// The binding id, version, loss report and round-trip diff already live on the import record
-/// itself ([ImportRecord]), written by `record_import` before the commit; this carries only
-/// what the commit transaction must link.
+/// The provenance an import commit carries: the retained artifact it was read from, the
+/// binding that read it (id and version), and the blocking losses the request accepted by
+/// name. It is written INSIDE the same transaction as the commit row, so a commit can never
+/// land unlinked from the source artifact or the binding it migrated through. The loss report
+/// and round-trip diff still live on the import record itself (ImportRecord), written by
+/// record_import before the commit; this carries the fields the commit's own provenance
+/// column must record.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportProvenance {
     pub artifact_hash: String,
+    pub binding_id: String,
+    pub binding_version: String,
     pub accepted_losses: Vec<String>,
 }
 

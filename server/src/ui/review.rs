@@ -371,7 +371,7 @@ pub async fn merge_form(
 
 enum MergeOutcomeKind {
     Clean {
-        commit: Commit,
+        commit: Box<Commit>,
     },
     Conflict {
         conflicts: Vec<crate::merge::Conflict>,

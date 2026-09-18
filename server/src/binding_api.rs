@@ -90,7 +90,7 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, ApiError> {
 /// ask for a decision. Everything that can go wrong is an ApiError.
 pub enum ImportOutcome {
     Committed {
-        commit: Commit,
+        commit: Box<Commit>,
         artifact_hash: String,
         binding_id: String,
         binding_version: String,
@@ -357,6 +357,8 @@ pub fn import_core(
     // source artifact; if the link cannot be written, the commit rolls back with it.
     let provenance = ImportProvenance {
         artifact_hash: artifact_hash.clone(),
+        binding_id: binding_id.clone(),
+        binding_version: binding_version.clone(),
         accepted_losses: accepted_identities.clone(),
     };
     let commit = commit_core(
@@ -386,7 +388,7 @@ pub fn import_core(
     })?;
 
     Ok(ImportOutcome::Committed {
-        commit,
+        commit: Box::new(commit),
         artifact_hash,
         binding_id,
         binding_version,
@@ -434,29 +436,17 @@ pub async fn import_artifact(
     )? {
         ImportOutcome::Committed {
             commit,
-            artifact_hash,
-            binding_id,
-            binding_version,
-            accepted_losses,
             loss_report,
             fidelity,
-        } => {
-            let mut commit_obj = commit_json(&commit);
-            commit_obj["provenance"] = json!({
-                "artifactHash": artifact_hash,
-                "bindingId": binding_id,
-                "bindingVersion": binding_version,
-                "acceptedLosses": accepted_losses
-            });
-            Ok((
-                StatusCode::CREATED,
-                Json(json!({
-                    "commit": commit_obj,
-                    "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
-                    "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
-                })),
-            ))
-        }
+            ..
+        } => Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "commit": commit_json(&commit),
+                "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
+                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+            })),
+        )),
         ImportOutcome::Blocking { unaccepted, .. } => {
             let blocking_json: Vec<Value> = unaccepted
                 .iter()

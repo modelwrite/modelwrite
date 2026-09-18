@@ -5,8 +5,8 @@ use r2d2_postgres::PostgresConnectionManager;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportProvenance, ImportRecord, Lock,
-    Project, Store, StoreError,
+    now_epoch, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun, ImportProvenance,
+    ImportRecord, Lock, Project, Store, StoreError,
 };
 
 /// The schema, ported from the SQLite reference implementation. TEXT stays TEXT, the
@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS commits (
     okf_hash TEXT NOT NULL,
     author TEXT NOT NULL,
     message TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    provenance TEXT
 );
 CREATE INDEX IF NOT EXISTS commits_by_project_branch ON commits (project, branch);
 CREATE TABLE IF NOT EXISTS branches (
@@ -123,6 +124,7 @@ EXECUTE FUNCTION audit_append_only();
 const MIGRATIONS: &str = "
 ALTER TABLE audit ADD COLUMN IF NOT EXISTS mechanism TEXT NOT NULL DEFAULT 'open';
 ALTER TABLE audit ADD COLUMN IF NOT EXISTS authorizer TEXT NOT NULL DEFAULT '';
+ALTER TABLE commits ADD COLUMN IF NOT EXISTS provenance TEXT;
 ";
 
 type PlainPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
@@ -252,6 +254,7 @@ type CommitRow = (
     String,
     String,
     String,
+    Option<String>,
 );
 
 fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
@@ -471,9 +474,25 @@ impl Store for PostgresStore {
             let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
             let parents_json = serde_json::to_string(&parents).map_err(backend)?;
 
+            // Provenance is decided HERE, from the same import the caller supplied, and written
+            // in this transaction: an authored commit (import None) is labelled authored, an
+            // import is labelled imported with its retained artifact, binding and accepted
+            // losses. Nothing patches it afterwards, so the commit can never disagree with how
+            // it was written.
+            let provenance = match import {
+                Some(import) => CommitProvenance::Imported {
+                    artifact_hash: import.artifact_hash.clone(),
+                    binding_id: import.binding_id.clone(),
+                    binding_version: import.binding_version.clone(),
+                    accepted_losses: import.accepted_losses.clone(),
+                },
+                None => CommitProvenance::Authored,
+            };
+            let provenance_col = provenance.column_value();
+
             tx.execute(
-                "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                &[&hash, &project, &branch, &parents_json, &okf_hash, &author, &message, &created_at],
+                "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at, provenance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                &[&hash, &project, &branch, &parents_json, &okf_hash, &author, &message, &created_at, &provenance_col],
             )
             .map_err(backend)?;
             tx.execute(
@@ -511,6 +530,7 @@ impl Store for PostgresStore {
                 author: author.to_string(),
                 message: message.to_string(),
                 created_at,
+                provenance,
             })
         })
     }
@@ -572,9 +592,14 @@ impl Store for PostgresStore {
             let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
             let parents_json = serde_json::to_string(&parents).map_err(backend)?;
 
+            // A merge is a write path, not a migration: it is labelled authored, never left for
+            // a reader to guess.
+            let provenance = CommitProvenance::Authored;
+            let provenance_col = provenance.column_value();
+
             tx.execute(
-                "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                &[&hash, &project, &branch, &parents_json, &okf_hash, &author, &message, &created_at],
+                "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at, provenance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                &[&hash, &project, &branch, &parents_json, &okf_hash, &author, &message, &created_at, &provenance_col],
             )
             .map_err(backend)?;
             tx.execute(
@@ -594,6 +619,7 @@ impl Store for PostgresStore {
                 author: author.to_string(),
                 message: message.to_string(),
                 created_at,
+                provenance,
             })
         })
     }
@@ -602,7 +628,7 @@ impl Store for PostgresStore {
         let row: Option<CommitRow> = self.with_client(|client| {
             client
                 .query_opt(
-                    "SELECT hash, project, branch, parents, okf_hash, author, message, created_at FROM commits WHERE project = $1 AND hash = $2",
+                    "SELECT hash, project, branch, parents, okf_hash, author, message, created_at, provenance FROM commits WHERE project = $1 AND hash = $2",
                     &[&project, &hash],
                 )
                 .map_err(backend)
@@ -617,24 +643,34 @@ impl Store for PostgresStore {
                             row.get(5),
                             row.get(6),
                             row.get(7),
+                            row.get(8),
                         )
                     })
                 })
         })?;
         match row {
             None => Ok(None),
-            Some((hash, project, branch, parents, okf_hash, author, message, created_at)) => {
-                Ok(Some(Commit {
-                    parents: parse_parents(&hash, &parents)?,
-                    hash,
-                    project,
-                    branch,
-                    okf_hash,
-                    author,
-                    message,
-                    created_at,
-                }))
-            }
+            Some((
+                hash,
+                project,
+                branch,
+                parents,
+                okf_hash,
+                author,
+                message,
+                created_at,
+                provenance,
+            )) => Ok(Some(Commit {
+                parents: parse_parents(&hash, &parents)?,
+                provenance: CommitProvenance::parse_column(provenance.as_deref())?,
+                hash,
+                project,
+                branch,
+                okf_hash,
+                author,
+                message,
+                created_at,
+            })),
         }
     }
 
@@ -642,7 +678,7 @@ impl Store for PostgresStore {
         let rows: Vec<CommitRow> = self.with_client(|client| {
             let rows = client
                 .query(
-                    "SELECT hash, project, branch, parents, okf_hash, author, message, created_at FROM commits WHERE project = $1 AND branch = $2 ORDER BY id",
+                    "SELECT hash, project, branch, parents, okf_hash, author, message, created_at, provenance FROM commits WHERE project = $1 AND branch = $2 ORDER BY id",
                     &[&project, &branch],
                 )
                 .map_err(backend)?;
@@ -657,14 +693,18 @@ impl Store for PostgresStore {
                         row.get(5),
                         row.get(6),
                         row.get(7),
+                        row.get(8),
                     ))
                 })
                 .collect()
         })?;
         let mut commits = Vec::with_capacity(rows.len());
-        for (hash, project, branch, parents, okf_hash, author, message, created_at) in rows {
+        for (hash, project, branch, parents, okf_hash, author, message, created_at, provenance) in
+            rows
+        {
             commits.push(Commit {
                 parents: parse_parents(&hash, &parents)?,
+                provenance: CommitProvenance::parse_column(provenance.as_deref())?,
                 hash,
                 project,
                 branch,

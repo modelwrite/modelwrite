@@ -301,7 +301,7 @@ fn perform_import(
             loss_report,
             ..
         } => Ok(ImportResult::Committed {
-            commit,
+            commit: *commit,
             artifact_hash,
             loss_report,
         }),
