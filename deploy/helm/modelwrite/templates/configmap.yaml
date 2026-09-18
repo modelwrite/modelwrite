@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "modelwrite.fullname" . }}
+  labels:
+    {{- include "modelwrite.labels" . | nindent 4 }}
+data:
+  MW_PORT: {{ .Values.service.port | quote }}
+  MW_EVIDENCE_DIR: {{ printf "%s/evidence" .Values.persistence.mountPath | quote }}
+  MW_AUTH_ISSUER: {{ .Values.auth.issuer | quote }}
+  MW_AUTH_AUDIENCE: {{ .Values.auth.audience | quote }}
+  MW_AUTH_ROLES_CLAIM: {{ .Values.auth.rolesClaim | quote }}
+  MW_AUTH_PROJECTS_CLAIM: {{ .Values.auth.projectsClaim | quote }}
