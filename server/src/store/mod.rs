@@ -27,9 +27,9 @@ pub struct Commit {
 }
 
 /// The durable record of one import: the retained artifact's content address, the binding
-/// that read it, the binding's own loss report and the engine's fidelity measurement, plus -
-/// once the import is committed - the commit and the losses the request accepted by name.
-/// The artifact bytes themselves live in the blob store under `artifact_hash`, so the record
+/// that read it, the binding's own loss report and the engine's round-trip diff, plus - once
+/// the import is committed - the commit and the losses the request accepted by name. The
+/// artifact bytes themselves live in the blob store under `artifact_hash`, so the record
 /// and the artifact are always addressable together.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportRecord {
@@ -37,16 +37,30 @@ pub struct ImportRecord {
     pub project: String,
     pub binding_id: String,
     pub binding_version: String,
-    /// The binding's own claim, as JSON (a `binding::LossReport`).
+    /// The binding's own claim, as JSON (a `binding::LossReport`) - the only account of the
+    /// native XMI->OKF read, which is not independently measured.
     pub loss_report: String,
-    /// The engine's measurement, as JSON (an `okf::diff::DiffReport`), produced by the
-    /// round-trip harness rather than taken from the binding.
+    /// The engine's diff of the binding's own OKF->XMI->OKF round trip, as JSON (an
+    /// `okf::diff::DiffReport`). This measures the round trip only - the native XMI->OKF
+    /// read is covered by `loss_report` (the binding's own claim), not by this field.
     pub fidelity_diff: String,
     /// The commit that landed this import, once it has been committed.
     pub commit_hash: Option<String>,
     /// The blocking loss subjects the request accepted by name, in request order.
     pub accepted_losses: Vec<String>,
     pub created_at: String,
+}
+
+/// The provenance an import commit carries: the retained artifact it was read from and the
+/// blocking losses the request accepted by name. It is written INSIDE the same transaction as
+/// the commit row, so a commit can never land unlinked from the source artifact it migrated.
+/// The binding id, version, loss report and round-trip diff already live on the import record
+/// itself ([ImportRecord]), written by `record_import` before the commit; this carries only
+/// what the commit transaction must link.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportProvenance {
+    pub artifact_hash: String,
+    pub accepted_losses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -255,6 +269,12 @@ pub trait Store: Send + Sync {
     /// and writing afterwards leaves a window in which another holder acquires the lock and
     /// the guarded commit lands anyway, which would make a lock advisory in the worst way -
     /// it would look enforced and not be.
+    ///
+    /// An optional `import` provenance is written INSIDE the same transaction as the commit
+    /// row: the commit and its link to the source artifact succeed or fail together, so a
+    /// committed import can never be permanently unlinked from its source. When the import
+    /// record it names does not exist, the whole commit is refused with `NotFound` and no
+    /// commit row is written.
     #[allow(clippy::too_many_arguments)]
     fn commit_model(
         &self,
@@ -265,6 +285,7 @@ pub trait Store: Send + Sync {
         message: &str,
         guard: Option<CommitGuard<'_>>,
         audit: Option<&AuditEntry>,
+        import: Option<&ImportProvenance>,
     ) -> Result<Commit, StoreError>;
 
     /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
@@ -310,11 +331,13 @@ pub trait Store: Send + Sync {
     fn record_gate_run(&self, run: &GateRun, audit: Option<&AuditEntry>) -> Result<(), StoreError>;
     fn gate_runs(&self, project: &str) -> Result<Vec<GateRun>, StoreError>;
 
-    /// Record an import's loss report and fidelity measurement, keyed by the retained
-    /// artifact's content address. This runs BEFORE the commit is attempted, so a refused
-    /// import still has its report retrievable - the caller must be able to read exactly
-    /// which losses to accept. Re-recording an artifact already recorded is a no-op, since
-    /// the same bytes always produce the same report.
+    /// Record an import's loss report and round-trip diff, keyed by (project, artifact_hash).
+    /// This runs BEFORE the commit is attempted, so a refused import still has its report
+    /// retrievable - the caller must be able to read exactly which losses to accept. The key
+    /// is the PROJECT plus the retained artifact's content address, never the address alone:
+    /// a content address is global, so two projects importing the same artifact each get their
+    /// own record. Re-recording the same (project, artifact) is a no-op, since the same bytes
+    /// always produce the same report.
     #[allow(clippy::too_many_arguments)]
     fn record_import(
         &self,
@@ -326,23 +349,12 @@ pub trait Store: Send + Sync {
         fidelity_diff: &str,
     ) -> Result<(), StoreError>;
 
-    /// The import record for a retained artifact, if one was recorded.
+    /// The import record for a retained artifact in this project, if one was recorded.
     fn import_report(
         &self,
         project: &str,
         artifact_hash: &str,
     ) -> Result<Option<ImportRecord>, StoreError>;
-
-    /// Attach the landed commit and the named accepted losses to an import record, so the
-    /// commit's provenance (artifact hash, binding and accepted losses) is durable beside
-    /// the report it was admitted on.
-    fn attach_import_commit(
-        &self,
-        project: &str,
-        artifact_hash: &str,
-        commit_hash: &str,
-        accepted_losses: &[String],
-    ) -> Result<(), StoreError>;
 
     /// Acquire a lease on each of `elements`, all or nothing. If any element is held by a
     /// live lease owned by a DIFFERENT holder, nothing is acquired and a Conflict is

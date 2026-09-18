@@ -5,8 +5,8 @@ use r2d2_postgres::PostgresConnectionManager;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportRecord, Lock, Project, Store,
-    StoreError,
+    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportProvenance, ImportRecord, Lock,
+    Project, Store, StoreError,
 };
 
 /// The schema, ported from the SQLite reference implementation. TEXT stays TEXT, the
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS imports (
-    artifact_hash TEXT PRIMARY KEY,
+    artifact_hash TEXT NOT NULL,
     project TEXT NOT NULL,
     binding_id TEXT NOT NULL,
     binding_version TEXT NOT NULL,
@@ -64,9 +64,9 @@ CREATE TABLE IF NOT EXISTS imports (
     fidelity_diff TEXT NOT NULL,
     commit_hash TEXT,
     accepted_losses TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, artifact_hash)
 );
-CREATE INDEX IF NOT EXISTS imports_by_project ON imports (project);
 CREATE INDEX IF NOT EXISTS imports_by_commit ON imports (commit_hash);
 CREATE TABLE IF NOT EXISTS locks (
     id TEXT PRIMARY KEY,
@@ -432,6 +432,7 @@ impl Store for PostgresStore {
         message: &str,
         guard: Option<CommitGuard<'_>>,
         audit: Option<&AuditEntry>,
+        import: Option<&ImportProvenance>,
     ) -> Result<Commit, StoreError> {
         self.with_tx(|tx| {
             if let Some(guard) = guard.as_ref() {
@@ -479,6 +480,24 @@ impl Store for PostgresStore {
             .map_err(backend)?;
             if let Some(audit) = audit {
                 insert_audit(tx, audit)?;
+            }
+            // I2: the import link is written INSIDE the commit transaction. If the import record
+            // it names is missing, the UPDATE affects no rows and the whole transaction rolls back,
+            // so a commit can never land without its provenance (and vice versa).
+            if let Some(import) = import {
+                let accepted_json = serde_json::to_string(&import.accepted_losses).map_err(backend)?;
+                let updated = tx
+                    .execute(
+                        "UPDATE imports SET commit_hash = $1, accepted_losses = $2 WHERE project = $3 AND artifact_hash = $4",
+                        &[&hash, &accepted_json, &project, &import.artifact_hash],
+                    )
+                    .map_err(backend)?;
+                if updated == 0 {
+                    return Err(StoreError::NotFound(format!(
+                        "import {} for project {}",
+                        import.artifact_hash, project
+                    )));
+                }
             }
             Ok(Commit {
                 hash,
@@ -814,7 +833,7 @@ impl Store for PostgresStore {
         self.with_client(|client| {
             client
                 .execute(
-                    "INSERT INTO imports (artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at) VALUES ($1, $2, $3, $4, $5, $6, NULL, '[]', $7) ON CONFLICT (artifact_hash) DO NOTHING",
+                    "INSERT INTO imports (artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at) VALUES ($1, $2, $3, $4, $5, $6, NULL, '[]', $7) ON CONFLICT (project, artifact_hash) DO NOTHING",
                     &[
                         &artifact_hash,
                         &project,
@@ -866,29 +885,6 @@ impl Store for PostgresStore {
                     }))
                 }
             }
-        })
-    }
-
-    fn attach_import_commit(
-        &self,
-        project: &str,
-        artifact_hash: &str,
-        commit_hash: &str,
-        accepted_losses: &[String],
-    ) -> Result<(), StoreError> {
-        let accepted_json = serde_json::to_string(accepted_losses)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        self.with_client(|client| {
-            let updated = client
-                .execute(
-                    "UPDATE imports SET commit_hash = $1, accepted_losses = $2 WHERE project = $3 AND artifact_hash = $4",
-                    &[&commit_hash, &accepted_json, &project, &artifact_hash],
-                )
-                .map_err(backend)?;
-            if updated == 0 {
-                return Err(StoreError::NotFound(format!("import {}", artifact_hash)));
-            }
-            Ok(())
         })
     }
 

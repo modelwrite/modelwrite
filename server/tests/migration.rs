@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Migration as a gated operation: the import endpoint retains the source artifact
-//! byte-for-byte, refuses a blocking loss until it is accepted by name, measures fidelity
-//! with the engine's harness, and records provenance on the commit.
+//! byte-for-byte, refuses a blocking loss until it is accepted by name, diffs the binding's
+//! OWN OKF->XMI->OKF round trip with the engine (the native XMI->OKF read is the binding's
+//! self-reported loss report, not an independent measurement), and records provenance on the
+//! commit atomically.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -119,7 +121,7 @@ async fn importing_the_fixture_commits_with_provenance_and_retains_the_artifact(
         ])
     );
 
-    // The engine's fidelity measurement says the round trip lost nothing.
+    // The engine diffed the binding's own OKF->XMI->OKF round trip and found it lossless.
     assert_eq!(body["fidelity"]["equal"], true);
 
     // The source artifact is retained byte-for-byte, retrievable by its content address.
@@ -294,4 +296,53 @@ async fn a_base64_artifact_imports_the_same_as_a_raw_body() {
         body["commit"]["provenance"]["artifactHash"],
         server::store::blob_hash(&bytes).as_str()
     );
+}
+
+#[tokio::test]
+async fn the_same_artifact_imported_into_two_projects_keeps_a_report_each() {
+    // A content address is global, so the imports table must key on (project, artifact_hash),
+    // never the address alone: otherwise the second project's import is a no-op insert and its
+    // report becomes unretrievable - the caller's attach silently links nothing.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    create_project(&router, "coffee").await;
+    create_project(&router, "tea").await;
+
+    let bytes = fixture("coffee-grinder.xmi");
+    let artifact_hash = server::store::blob_hash(&bytes);
+    let accept = [
+        "uml:Model model-grinder",
+        "uml:Comment doc-grinder",
+        "uml:Property prop-motor",
+        "uml:Property prop-capacity",
+        "uml:Dependency dep-satisfy",
+        "uml:Package pkg-structure (Structure)",
+    ];
+
+    for project in ["coffee", "tea"] {
+        let response = router
+            .clone()
+            .oneshot(post(
+                &format!("/projects/{}/import", project),
+                import_body("coffee-grinder.xmi", &accept),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED, "{}", project);
+    }
+
+    for project in ["coffee", "tea"] {
+        let report = router
+            .clone()
+            .oneshot(get(&format!(
+                "/projects/{}/import/{}/report",
+                project, artifact_hash
+            )))
+            .await
+            .unwrap();
+        assert_eq!(report.status(), StatusCode::OK, "{}", project);
+        let body = json_body(report).await;
+        assert_eq!(body["artifactHash"], artifact_hash.as_str());
+        assert_eq!(body["bindingId"], "sysml-v1-xmi");
+    }
 }

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The binding contract: a versioned adapter between a source standard and OKF,
-//! plus the fidelity harness that measures - rather than trusts - what it keeps.
+//! plus a round-trip harness. The harness measures ONE thing: the binding's own
+//! OKF->XMI->OKF round trip, diffed by the engine against the OKF reference. The
+//! native XMI->OKF direction - the actual migration - is NOT independently measured;
+//! it rests on the binding's self-reported loss report.
 
 pub mod report;
 
@@ -19,7 +22,7 @@ pub use report::{LossReport, Mapping, MappingVerdict};
 pub enum Direction {
     /// Reads a source artifact into OKF but cannot write it back. A viewer.
     ImportOnly,
-    /// Reads and writes; a round trip can be measured.
+    /// Reads and writes; its own OKF->XMI->OKF round trip can be measured.
     ImportAndExport,
 }
 
@@ -63,8 +66,9 @@ impl fmt::Display for BindingError {
 impl std::error::Error for BindingError {}
 
 /// A versioned adapter between a source standard and OKF, with a declared
-/// direction and a mapping matrix. Its fidelity is measured by the harness,
-/// never taken on faith.
+/// direction and a mapping matrix. What the harness can measure is the binding's
+/// own OKF->XMI->OKF round trip, never the native XMI->OKF read: that direction is
+/// the binding's word, carried in its self-reported loss report.
 pub trait Binding {
     fn info(&self) -> BindingInfo;
     /// The declarative mapping matrix: the source constructs this binding
@@ -77,9 +81,10 @@ pub trait Binding {
     fn export(&self, root: &OkfRoot) -> Result<Vec<u8>, BindingError>;
 }
 
-/// The measured result of a round trip: the import loss report (the binding's
-/// own claim) plus the engine's diff (the engine's measurement of the same
-/// journey). The two must agree before anyone trusts the binding.
+/// The result of one OKF->XMI->OKF round trip: the binding's self-reported loss
+/// report plus the engine's own diff of the round-tripped document against the OKF
+/// reference. The diff is the measured half; the loss report is the binding's claim
+/// about its native XMI->OKF read, which the round trip cannot check.
 #[derive(Debug, Clone, Serialize)]
 pub struct FidelityOutcome {
     /// Content address of the source document, computed before anything else.
@@ -95,15 +100,17 @@ pub fn artifact_hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// Round-trip a source OKF document through a binding and back, then measure
-/// the result with the engine's own diff against the engine's own reading of
-/// the source.
+/// Round-trip a source OKF document through a binding and back, then diff the
+/// result with the engine's own diff against the engine's own reading of the source.
 ///
-/// The reference is never the binding's own reading: it is `serde_json` read
-/// directly into `OkfRoot`, which is exactly what is under test. A viewer is
-/// refused outright; a binding whose metadata claims export but whose export
-/// fails is rejected, never trusted; anything dropped on the way is named by
-/// the diff.
+/// What this measures is the binding's OKF->XMI->OKF round trip and nothing else: the
+/// reference is the OKF document fed in, export turns it into the source form, import
+/// turns it back, and the engine's diff names anything dropped on that journey. It does
+/// NOT measure the native XMI->OKF read of a real artifact - that direction is covered
+/// only by the binding's self-reported loss report. The reference is never the binding's
+/// own reading: it is `serde_json` read directly into `OkfRoot`. A viewer is refused
+/// outright; a binding whose metadata claims export but whose export fails is rejected,
+/// never trusted.
 pub fn round_trip(binding: &dyn Binding, source: &[u8]) -> Result<FidelityOutcome, BindingError> {
     // Content-address the source before anything else happens.
     let artifact_hash = artifact_hash(source);

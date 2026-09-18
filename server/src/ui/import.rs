@@ -33,6 +33,30 @@ use crate::ui::layout;
 /// The branch an import targets when the form omits one, matching the model page's default.
 const DEFAULT_BRANCH: &str = "main";
 
+/// The honest boundary of what the engine measured, stated on the page so a person accepting
+/// a loss knows which half is measured and which half is the binding's word: the engine diffed
+/// the binding's own OKF->XMI->OKF round trip; the native XMI->OKF read is NOT independently
+/// measured and rests on the binding's self-reported loss report.
+fn fidelity_note_markup() -> Markup {
+    html! {
+        p class="fidelity-note" {
+            "Fidelity: the engine measured the binding's own OKF->XMI->OKF round trip and diffed "
+            "it. The native XMI->OKF read of your artifact is NOT independently measured - the "
+            "loss report is the binding's own account of that read."
+        }
+    }
+}
+
+/// A human-readable label for a mapping verdict, shown beside each loss so two entries that
+/// name the same subject but drop different things are still distinguishable.
+fn verdict_label(verdict: MappingVerdict) -> &'static str {
+    match verdict {
+        MappingVerdict::Exact => "exact",
+        MappingVerdict::Lossy => "lossy",
+        MappingVerdict::Unmappable => "unmappable",
+    }
+}
+
 /// The values the form carries. There is no author field: like the editor and the merge
 /// form, the author is the verified identity, never a name the browser supplies. The
 /// acceptance checkboxes are carried as indexed accept_loss_ fields, so a submitted form
@@ -314,6 +338,7 @@ fn import_page_markup(
             "report names everything the binding could not carry, and nothing lossy is "
             "committed until its loss is accepted by name."
         }
+        (fidelity_note_markup())
         (import_form_markup(project, bindings, can_import))
     };
     let title = format!("modelwrite — {} — import", project);
@@ -389,6 +414,7 @@ fn blocking_page(
         }
         (retained_markup(artifact_hash, None))
         (loss_report_markup(loss_report))
+        (fidelity_note_markup())
         h2 { "Accept the losses and import" }
         (accept_form_markup(project, form, &blocking, unaccepted))
     };
@@ -415,6 +441,7 @@ fn committed_page(
         p { "Commit " code { (short_hash(&commit.hash)) } }
         (retained_markup(artifact_hash, Some(&commit.hash)))
         (loss_report_markup(loss_report))
+        (fidelity_note_markup())
         p {
             a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model?commit=" (crate::ui::urlencode(commit.hash.as_str())) } {
                 "View the imported model"
@@ -456,6 +483,10 @@ fn accept_form_markup(
                                 value=(mapping.subject.as_str())
                                 checked[!unaccepted.iter().any(|m| m.subject == mapping.subject)];
                             span class="loss-subject" { (mapping.subject.as_str()) }
+                            span class="loss-verdict" { " (" (verdict_label(mapping.verdict)) ")" }
+                            @if !mapping.note.is_empty() {
+                                span class="loss-note" { " — " (mapping.note.as_str()) }
+                            }
                         }
                     }
                 }
@@ -535,6 +566,7 @@ fn verdict_group(heading: &str, mappings: &[&Mapping]) -> Markup {
             @for mapping in mappings {
                 li class="loss" {
                     span class="loss-subject" { (mapping.subject.as_str()) }
+                    span class="loss-verdict" { " (" (verdict_label(mapping.verdict)) ")" }
                     @if !mapping.note.is_empty() {
                         span class="loss-note" { " — " (mapping.note.as_str()) }
                     }

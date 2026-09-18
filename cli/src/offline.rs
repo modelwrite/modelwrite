@@ -100,6 +100,7 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                     &message,
                     Some(guard),
                     Some(&audit),
+                    None,
                 ),
             )
             .map_err(map)?;
@@ -206,6 +207,7 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                     &message,
                     Some(guard),
                     Some(&audit),
+                    None,
                 ),
             )
             .map_err(map)?;

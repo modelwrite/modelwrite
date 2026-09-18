@@ -65,7 +65,7 @@ impl Binding for JsonBinding {
 
         // The drop is SILENT on purpose: nothing is added to the loss report. A fixture that
         // recorded its own drop could only prove that the harness copies a report it was
-        // given - it could not tell a real engine measurement from a fabricated one. A silent
+        // given - it could not tell the engine's round-trip diff from a fabricated one. A silent
         // dropper is the only shape that can distinguish them, and it is also the shape real
         // bindings have when they are WRONG: an exporter that loses an element does not
         // usually announce it.
@@ -158,13 +158,14 @@ fn a_lossless_binding_reports_a_lossless_result() {
 
 #[test]
 fn a_silently_lossy_binding_is_caught_by_the_engine_and_not_by_its_own_report() {
-    // THE TEST THAT PROVES THE HARNESS MEASURES RATHER THAN BELIEVES.
+    // THE TEST THAT PROVES THE ROUND-TRIP HARNESS DIFFS RATHER THAN BELIEVES.
     //
     // This fixture drops an element and says NOTHING about it. The binding therefore reports a
     // LOSSLESS import, and the only thing that can contradict it is the engine's own diff
-    // against the original. If the harness were ever weakened to build its diff from the
-    // binding's report - which is the easy, tempting implementation - this test fails on the
-    // very first assertion, while a fixture that recorded its own drop would have passed.
+    // against the original on the OKF->XMI->OKF journey. If the harness were ever weakened to
+    // build its diff from the binding's report - which is the easy, tempting implementation -
+    // this test fails on the very first assertion, while a fixture that recorded its own drop
+    // would have passed.
     let outcome = round_trip(&dropping(), &source_bytes()).expect("import must succeed");
 
     assert!(

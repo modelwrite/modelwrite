@@ -176,6 +176,67 @@ async fn a_viewer_sees_the_pages() {
 }
 
 #[tokio::test]
+async fn the_import_pages_state_the_fidelity_boundary_and_label_losses() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    // The form states which half of fidelity is measured and which half is the binding's word.
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/import"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        html.contains("NOT independently measured"),
+        "the import page must state the measurement boundary, got:\n{}",
+        html
+    );
+
+    // A refused import renders each blocking loss with its verdict and note, so a person can
+    // tell a dropped id from a dropped body that happen to name the same subject.
+    let fixture = std::fs::read_to_string(format!(
+        "{}/../engine/binding-xmi/fixtures/unknown-element.xmi",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("fixture must exist");
+    let response = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import"),
+                ("artifact", &fixture),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(response).await;
+    assert!(
+        html.contains("(unmappable)"),
+        "each loss must be labelled with its verdict, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("loss-note"),
+        "each loss must show its note, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("NOT independently measured"),
+        "the refusal page must state the measurement boundary"
+    );
+}
+
+#[tokio::test]
 async fn an_unauthenticated_request_renders_a_sign_in_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state_with_auth(
@@ -918,7 +979,9 @@ fn seed_model_directly(store: &dyn Store, okf: serde_json::Value) {
     let bytes = serde_json::to_vec(&root).unwrap();
     let okf_hash = store.put_blob(&bytes).unwrap();
     store
-        .commit_model("coffee", "main", &okf_hash, "seeder", "seed", None, None)
+        .commit_model(
+            "coffee", "main", &okf_hash, "seeder", "seed", None, None, None,
+        )
         .unwrap();
 }
 

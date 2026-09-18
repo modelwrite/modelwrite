@@ -13,7 +13,8 @@ use crate::audit::{
 use crate::auth::{AuthConfig, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{
-    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, Store, StoreError,
+    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, ImportProvenance, Store,
+    StoreError,
 };
 
 #[derive(Clone)]
@@ -356,7 +357,8 @@ pub enum CommitFailure {
 /// `actor` are already resolved against the identity; `bytes` are the exact bytes to
 /// store (the JSON handler stores the client's document, the editor stores its re-serialised
 /// model); `tip` and `reference` are the tip the candidate was computed against and that
-/// tip's model, both `None` for a first commit.
+/// tip's model, both `None` for a first commit; `import` is the provenance an import
+/// commit carries, `None` for every other commit.
 pub struct CommitCore<'a> {
     pub project: &'a str,
     pub branch: &'a str,
@@ -366,6 +368,7 @@ pub struct CommitCore<'a> {
     pub mechanism: &'a str,
     pub candidate: &'a okf::types::OkfRoot,
     pub bytes: &'a [u8],
+    pub import: Option<&'a ImportProvenance>,
     /// The guard's holder: the identity that may change the touched elements. An empty
     /// string means the caller holds no lease, so any live lease on a touched element
     /// refuses the commit. The editor passes its verified subject because it acquired a
@@ -425,6 +428,7 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
             input.message,
             Some(guard),
             Some(&audit),
+            input.import,
         ),
     )
     .map_err(CommitFailure::Store)
@@ -585,6 +589,7 @@ pub async fn create_commit(
             mechanism: state.auth.mechanism(),
             candidate: &root,
             bytes: &bytes,
+            import: None,
             holder: body.holder.as_deref().unwrap_or(""),
             now,
             tip: tip_hash.as_deref(),
@@ -844,6 +849,7 @@ pub async fn reset_branch(
             &body.message,
             Some(guard),
             Some(&audit),
+            None,
         ),
     )
     .map_err(map_store_error)?;

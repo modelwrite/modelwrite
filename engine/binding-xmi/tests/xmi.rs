@@ -3,7 +3,7 @@
 
 use binding::{Binding, BindingError, Direction, MappingVerdict};
 use binding_xmi::{model, XmiBinding, BINDING_ID, BINDING_VERSION};
-use okf::types::{GraphEdge, OkfRoot};
+use okf::types::{GraphEdge, OkfRoot, StateMachine};
 
 fn fixture(name: &str) -> String {
     let path = format!("{}/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name);
@@ -214,6 +214,73 @@ fn export_round_trips_the_subset() {
     assert_eq!(round_tripped, root);
 }
 
+// --- MINOR: loss-report subjects are unique, so acceptance by name is unambiguous ---
+
+#[test]
+fn blocking_loss_subjects_are_unique() {
+    // Acceptance keys on the subject string: two DIFFERENT losses that share a subject would
+    // be impossible to accept or refuse separately. A comment produces BOTH a Lossy id-drop
+    // and an Unmappable body-drop, so the reader must disambiguate their subjects.
+    let (_, loss) = import("comment-nonblock.xmi");
+    let mut subjects: Vec<&str> = loss.blocking().iter().map(|m| m.subject.as_str()).collect();
+    subjects.sort_unstable();
+    let unique: Vec<&str> = {
+        let mut s = subjects.clone();
+        s.dedup();
+        s
+    };
+    assert_eq!(
+        subjects.len(),
+        unique.len(),
+        "blocking loss subjects must be unique: {:?}",
+        subjects
+    );
+}
+
+// --- I3: the binding emits the empty state machine, and export tolerates it ---
+
+#[test]
+fn import_emits_the_empty_state_machine_okf_requires() {
+    let (root, _) = import("coffee-grinder.xmi");
+    // OKF validation requires the stateMachine section even when the model has none, so the
+    // binding emits the empty section itself rather than leaving the platform to patch it in.
+    assert_eq!(
+        root.state_machine,
+        Some(StateMachine {
+            name: "stateMachine".to_string(),
+            regions: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn export_tolerates_an_empty_state_machine_but_refuses_states() {
+    let (mut root, _) = import("coffee-grinder.xmi");
+
+    // The empty state machine is the binding's own output, so export must accept it.
+    XmiBinding::new()
+        .export(&root)
+        .expect("an empty state machine must export");
+
+    // A state machine WITH states is outside the subset and must still be refused.
+    root.state_machine = Some(StateMachine {
+        name: "stateMachine".to_string(),
+        regions: vec![okf::types::Region {
+            states: vec![okf::types::State {
+                id: "s1".to_string(),
+                name: "s1".to_string(),
+                entry: None,
+                do_activity: None,
+                exit: None,
+            }],
+        }],
+    });
+    match XmiBinding::new().export(&root) {
+        Err(BindingError::Export(msg)) => assert!(msg.contains("state machine")),
+        other => panic!("expected Export refusal, got {:?}", other.map(|_| ())),
+    }
+}
+
 // --- CRITICAL 1: a comment whose target is not an emitted block is reported ---
 
 #[test]
@@ -230,17 +297,17 @@ fn a_comment_on_a_non_block_target_is_reported_not_dropped() {
     // the multi-target comment are each named.
     assert!(loss.mappings.iter().any(|m| {
         m.verdict == MappingVerdict::Unmappable
-            && m.subject == "uml:Comment comment-pkg"
+            && m.subject == "uml:Comment comment-pkg body (target pkg-a)"
             && m.note.contains("not an emitted block")
     }));
     assert!(loss.mappings.iter().any(|m| {
         m.verdict == MappingVerdict::Unmappable
-            && m.subject == "uml:Comment comment-dangling"
+            && m.subject == "uml:Comment comment-dangling body (target no-such-id)"
             && m.note.contains("dangling id")
     }));
     assert!(loss.mappings.iter().any(|m| {
         m.verdict == MappingVerdict::Unmappable
-            && m.subject == "uml:Comment comment-multi"
+            && m.subject == "uml:Comment comment-multi body (target no-such-id)"
             && m.note.contains("dangling id")
     }));
 }

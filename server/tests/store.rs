@@ -33,7 +33,16 @@ fn commits_land_on_a_branch_and_move_its_tip() {
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
     let first = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
+        .commit_model(
+            "coffee",
+            "main",
+            "okf1",
+            "alex",
+            "first commit",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(
         store.branch_tip("coffee", "main").unwrap().unwrap(),
@@ -47,6 +56,7 @@ fn commits_land_on_a_branch_and_move_its_tip() {
             "okf2",
             "alex",
             "second commit",
+            None,
             None,
             None,
         )
@@ -71,7 +81,16 @@ fn duplicate_projects_and_branches_are_conflicts() {
         other => panic!("expected a conflict, got {:?}", other),
     }
     let commit = store
-        .commit_model("coffee", "main", "okf1", "alex", "first commit", None, None)
+        .commit_model(
+            "coffee",
+            "main",
+            "okf1",
+            "alex",
+            "first commit",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     store
         .create_branch("coffee", "review", &commit.hash, None)
@@ -108,6 +127,7 @@ fn concurrent_commits_to_one_branch_form_a_linear_chain() {
                     &format!("okf-{}", i),
                     "alex",
                     "concurrent",
+                    None,
                     None,
                     None,
                 )
@@ -173,7 +193,9 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .commit_model(
+            "coffee", "main", "okf-root", "alex", "root", None, None, None,
+        )
         .unwrap();
     store
         .create_branch("coffee", "feature", &root.hash, None)
@@ -187,6 +209,7 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
             "feature",
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -198,6 +221,7 @@ fn a_merge_refuses_when_the_branch_moved_under_it() {
             "okf-concurrent",
             "alex",
             "concurrent",
+            None,
             None,
             None,
         )
@@ -242,7 +266,9 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .commit_model(
+            "coffee", "main", "okf-root", "alex", "root", None, None, None,
+        )
         .unwrap();
     let root_hash = root.hash.clone();
 
@@ -274,6 +300,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             expected_tip: Some(&root_hash),
         }),
         None,
+        None,
     );
     match refused {
         Err(StoreError::Locked {
@@ -299,6 +326,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             now: 2000,
             expected_tip: Some(&root_hash),
         }),
+        None,
         None,
     );
     assert!(allowed.is_ok(), "an expired lease must not block a commit");
@@ -331,6 +359,7 @@ fn a_guarded_commit_is_refused_inside_the_transaction() {
             expected_tip: tip_now.as_deref(),
         }),
         None,
+        None,
     );
     assert!(unrelated.is_ok(), "only the guarded elements are protected");
 }
@@ -345,12 +374,23 @@ fn a_guard_computed_against_an_old_tip_is_refused() {
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .commit_model(
+            "coffee", "main", "okf-root", "alex", "root", None, None, None,
+        )
         .unwrap();
 
     // A concurrent commit moves the branch after the caller read the tip.
     store
-        .commit_model("coffee", "main", "okf-other", "alex", "moved", None, None)
+        .commit_model(
+            "coffee",
+            "main",
+            "okf-other",
+            "alex",
+            "moved",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let touched = vec!["b1".to_string()];
@@ -366,6 +406,7 @@ fn a_guard_computed_against_an_old_tip_is_refused() {
             now: 1000,
             expected_tip: Some(&root.hash),
         }),
+        None,
         None,
     );
     match stale {
@@ -406,7 +447,9 @@ fn audit_rows_ride_each_mutation_transaction() {
         .create_project("coffee", Some(&entry("project.create")))
         .unwrap();
     let root = store
-        .commit_model("coffee", "main", "okf-root", "alex", "root", None, None)
+        .commit_model(
+            "coffee", "main", "okf-root", "alex", "root", None, None, None,
+        )
         .unwrap();
     store
         .create_branch(
@@ -572,4 +615,37 @@ fn an_older_database_gains_the_mechanism_column_instead_of_failing() {
     let rows = store.audit("coffee", 10).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].mechanism, "static");
+}
+
+#[test]
+fn an_import_commit_rolls_back_when_its_import_record_is_missing() {
+    // Provenance must be atomic with the commit: if the import record it names does not exist,
+    // the commit and its link must fail together. A commit that landed without its source link
+    // is exactly what an import must never produce, because it can no longer be traced to the
+    // artifact it migrated.
+    let (store, _dir) = store();
+    store.create_project("coffee", None).unwrap();
+
+    let provenance = server::store::ImportProvenance {
+        artifact_hash: "missing-artifact".to_string(),
+        accepted_losses: vec!["uml:Model m".to_string()],
+    };
+    let refused = store.commit_model(
+        "coffee",
+        "main",
+        "okf-hash",
+        "alex",
+        "import",
+        None,
+        None,
+        Some(&provenance),
+    );
+    match refused {
+        Err(StoreError::NotFound(_)) => {}
+        other => panic!("expected NotFound, got {:?}", other.map(|c| c.hash)),
+    }
+    assert!(
+        store.commits_on("coffee", "main").unwrap().is_empty(),
+        "the commit must roll back with its missing provenance"
+    );
 }

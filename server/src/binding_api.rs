@@ -7,10 +7,12 @@
 //! 2. No mapping is applied silently: a blocking loss (Lossy or Unmappable) refuses the
 //!    import unless the request names that exact loss as accepted, and the acceptance is
 //!    recorded in the audit trail.
-//! 3. Fidelity is measured, not trusted: the imported document is round-tripped through the
-//!    binding and diffed by the engine, which must agree nothing was lost.
-//! 4. Provenance is durable: the commit records the artifact hash, the binding id and
-//!    version, and the accepted losses.
+//! 3. The one half of fidelity the engine can see is measured, not trusted: the binding's
+//!    OWN OKF->XMI->OKF round trip is diffed by the engine, which must agree nothing was lost
+//!    on that journey. The native XMI->OKF read - the actual migration - is NOT independently
+//!    measured; it rests on the binding's self-reported loss report.
+//! 4. Provenance is durable and atomic: the commit and its link to the source artifact are
+//!    written in one transaction, so a committed import can never be unlinked from its source.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -26,7 +28,7 @@ use crate::audit::{IMPORT_ACCEPT, IMPORT_REFUSED};
 use crate::auth::{Identity, Permission};
 use crate::binding_registry;
 use crate::error::ApiError;
-use crate::store::{now_seconds, AuditEntry, Commit, Store};
+use crate::store::{now_seconds, AuditEntry, Commit, ImportProvenance, Store};
 
 #[derive(Deserialize)]
 pub struct ImportRequest {
@@ -121,10 +123,11 @@ pub struct ImportCore<'a> {
 }
 
 /// The ONE implementation of an import: retain the artifact byte-for-byte, read it through
-/// the binding, measure fidelity with the engine's harness, record the report, refuse every
-/// blocking loss that is not accepted by name, and commit the imported model through the
-/// shared commit core. Both import_artifact and the workbench import page call this, so they
-/// cannot diverge on the sequence, the acceptance rule or the audit entries.
+/// the binding, measure the binding's OKF->XMI->OKF round trip with the engine's diff, record
+/// the report, refuse every blocking loss that is not accepted by name, and commit the
+/// imported model through the shared commit core with its provenance written atomically. Both
+/// import_artifact and the workbench import page call this, so they cannot diverge on the
+/// sequence, the acceptance rule or the audit entries.
 pub fn import_core(
     store: &dyn Store,
     project: &str,
@@ -152,9 +155,11 @@ pub fn import_core(
         )
     })?;
 
-    // Rule 3: measure fidelity with the engine's harness, not the binding's claim. The
-    // imported document is round-tripped through the binding and the engine's own diff must
-    // agree nothing was lost.
+    // Rule 3: the ONE thing the engine can measure is the binding's own OKF->XMI->OKF round
+    // trip. The imported document is exported by the binding and imported back, and the
+    // engine's own diff of that journey must agree nothing was lost. The native XMI->OKF read
+    // that produced this document is the binding's word (the loss report), not something the
+    // engine independently measured.
     let import_bytes = serde_json::to_vec(&root).map_err(|e| {
         eprintln!("imported model could not be serialised: {}", e);
         ApiError::internal("the imported model could not be prepared")
@@ -254,23 +259,11 @@ pub fn import_core(
             .map_err(map_store_error)?;
     }
 
-    // The SysML v1 XMI subset has no state-machine concept, so the binding emits none; OKF
-    // requires the section to be present. An empty state machine is the honest
-    // representation of "this model has no state machine", and it lets the imported document
-    // pass the SAME validation every other commit passes. It is added AFTER the fidelity
-    // measurement, which runs on the binding's own output and must agree nothing was lost.
-    let mut commit_root = root;
-    if commit_root.state_machine.is_none() {
-        commit_root.state_machine = Some(okf::types::StateMachine {
-            name: "stateMachine".to_string(),
-            regions: Vec::new(),
-        });
-    }
-    let commit_bytes = serde_json::to_vec(&commit_root).map_err(|e| {
-        eprintln!("imported model could not be re-serialised: {}", e);
-        ApiError::internal("the imported model could not be prepared")
-    })?;
-
+    // I3: the document that was measured IS the document that is committed. The XMI binding
+    // emits the empty state machine itself (OKF requires the section even when the model has
+    // no state machine), so import_bytes - the bytes the round trip above measured - are the
+    // exact bytes committed. Nothing is mutated after measurement.
+    //
     // The import commit is a commit like any other: it goes through the shared commit core,
     // so validation, the lock guard and the commit.create audit entry behave exactly as they
     // do for a plain commit, a reset or a merge.
@@ -282,6 +275,13 @@ pub fn import_core(
         Some(tip) => Some(load_model(store, project, tip).map_err(map_store_error)?),
         None => None,
     };
+    // Rule 4: provenance is durable and atomic. The import provenance rides the SAME commit
+    // transaction as the commit row, so a committed import can never be unlinked from its
+    // source artifact; if the link cannot be written, the commit rolls back with it.
+    let provenance = ImportProvenance {
+        artifact_hash: artifact_hash.clone(),
+        accepted_losses: accepted_subjects.clone(),
+    };
     let commit = commit_core(
         store,
         &CommitCore {
@@ -291,8 +291,9 @@ pub fn import_core(
             message: input.message,
             actor: input.actor,
             mechanism: input.mechanism,
-            candidate: &commit_root,
-            bytes: &commit_bytes,
+            candidate: &root,
+            bytes: &import_bytes,
+            import: Some(&provenance),
             holder: input.holder.unwrap_or(""),
             now,
             tip: tip_hash.as_deref(),
@@ -305,20 +306,6 @@ pub fn import_core(
         }
         CommitFailure::Store(error) => map_store_error(error),
     })?;
-
-    // Rule 4: provenance is durable. The import record now names the landed commit, the
-    // artifact hash, the binding and the accepted losses. The link is best-effort: the
-    // commit has already landed and the acceptance is already on the audit trail, so a
-    // failed link must not turn a successful commit into a misleading 500 that invites a
-    // retry - which would create a second commit for the same artifact.
-    if let Err(e) =
-        store.attach_import_commit(project, &artifact_hash, &commit.hash, &accepted_subjects)
-    {
-        eprintln!(
-            "could not link import {} to commit {}: {:?}",
-            artifact_hash, commit.hash, e
-        );
-    }
 
     Ok(ImportOutcome::Committed {
         commit,

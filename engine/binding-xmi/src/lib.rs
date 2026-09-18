@@ -14,7 +14,7 @@ use binding::{
     artifact_hash, Binding, BindingError, BindingInfo, Direction, LossReport, Mapping,
     MappingVerdict,
 };
-use okf::types::{Attribute, Element, Graph, GraphEdge, GraphNode, OkfRoot, Summary};
+use okf::types::{Attribute, Element, Graph, GraphEdge, GraphNode, OkfRoot, StateMachine, Summary};
 
 /// The binding identity the gate and the workbench use to select this reader.
 pub const BINDING_ID: &str = "sysml-v1-xmi";
@@ -547,7 +547,10 @@ impl Importer {
             };
             if targets.is_empty() {
                 self.losses.push(Mapping {
-                    subject: format!("uml:Comment {}", comment.id),
+                    // MINOR: the subject names WHAT is lost (the body), distinct from the
+                    // id-drop Lossy entry ("uml:Comment <id>"). Acceptance keys on the subject,
+                    // so two different losses must never share one.
+                    subject: format!("uml:Comment {} body", comment.id),
                     verdict: MappingVerdict::Unmappable,
                     note: "uml:Comment body dropped: not attached to any element".to_string(),
                 });
@@ -560,7 +563,7 @@ impl Importer {
                         .push_str(&comment.body);
                 } else if let Some(label) = known.get(target) {
                     self.losses.push(Mapping {
-                        subject: format!("uml:Comment {}", comment.id),
+                        subject: format!("uml:Comment {} body (target {target})", comment.id),
                         verdict: MappingVerdict::Unmappable,
                         note: format!(
                             "uml:Comment body dropped: annotatedElement {target} ({label}) is not an emitted block"
@@ -568,7 +571,7 @@ impl Importer {
                     });
                 } else {
                     self.losses.push(Mapping {
-                        subject: format!("uml:Comment {}", comment.id),
+                        subject: format!("uml:Comment {} body (target {target})", comment.id),
                         verdict: MappingVerdict::Unmappable,
                         note: format!(
                             "uml:Comment body dropped: annotatedElement {target} is a dangling id"
@@ -706,7 +709,14 @@ impl Importer {
             interfaces: Vec::new(),
             signals: Vec::new(),
             requirements: Vec::new(),
-            state_machine: None,
+            // I3: OKF requires the stateMachine section to be present even when the model
+            // has no state machine. The binding emits the empty section itself, so the document
+            // it produces passes OKF validation UNCHANGED - the measured document is the committed
+            // document, never mutated afterwards.
+            state_machine: Some(StateMachine {
+                name: "stateMachine".to_string(),
+                regions: Vec::new(),
+            }),
             activities: Vec::new(),
             graph: Some(Graph {
                 nodes: graph_nodes,
@@ -764,10 +774,17 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
             "cannot export activities: outside the sysml-v1-xmi subset".to_string(),
         ));
     }
-    if root.state_machine.is_some() {
-        return Err(BindingError::Export(
-            "cannot export a state machine: outside the sysml-v1-xmi subset".to_string(),
-        ));
+    // I3: an EMPTY state machine is the binding's own output (OKF requires the section even
+    // when there is no state machine to describe), so export must accept it rather than refuse
+    // the subset it just emitted. A state machine WITH states is genuinely outside the subset
+    // and is still refused.
+    if let Some(sm) = &root.state_machine {
+        if sm.regions.iter().any(|region| !region.states.is_empty()) {
+            return Err(BindingError::Export(
+                "cannot export a state machine with states: outside the sysml-v1-xmi subset"
+                    .to_string(),
+            ));
+        }
     }
 
     let mut name_to_id: HashMap<&str, &str> = HashMap::new();

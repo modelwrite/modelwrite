@@ -4,8 +4,8 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportRecord, Lock, Project, Store,
-    StoreError,
+    now_epoch, AuditEntry, Commit, CommitGuard, GateRun, ImportProvenance, ImportRecord, Lock,
+    Project, Store, StoreError,
 };
 
 const SCHEMA: &str = "
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS imports (
-    artifact_hash TEXT PRIMARY KEY,
+    artifact_hash TEXT NOT NULL,
     project TEXT NOT NULL,
     binding_id TEXT NOT NULL,
     binding_version TEXT NOT NULL,
@@ -53,9 +53,9 @@ CREATE TABLE IF NOT EXISTS imports (
     fidelity_diff TEXT NOT NULL,
     commit_hash TEXT,
     accepted_losses TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, artifact_hash)
 );
-CREATE INDEX IF NOT EXISTS imports_by_project ON imports (project);
 CREATE INDEX IF NOT EXISTS imports_by_commit ON imports (commit_hash);
 CREATE TABLE IF NOT EXISTS locks (
     id TEXT PRIMARY KEY,
@@ -337,6 +337,7 @@ impl Store for SqliteStore {
         message: &str,
         guard: Option<CommitGuard<'_>>,
         audit: Option<&AuditEntry>,
+        import: Option<&ImportProvenance>,
     ) -> Result<Commit, StoreError> {
         let connection = self
             .connection
@@ -397,6 +398,25 @@ impl Store for SqliteStore {
         .map_err(|e| StoreError::Backend(e.to_string()))?;
         if let Some(audit) = audit {
             insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        // I2: the import link is written INSIDE the commit transaction. If the import record
+        // it names is missing, the UPDATE affects no rows and the whole transaction rolls back,
+        // so a commit can never land without its provenance (and vice versa).
+        if let Some(import) = import {
+            let accepted_json = serde_json::to_string(&import.accepted_losses)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let updated = tx
+                .execute(
+                    "UPDATE imports SET commit_hash = ?1, accepted_losses = ?2 WHERE project = ?3 AND artifact_hash = ?4",
+                    params![hash, accepted_json, project, import.artifact_hash],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if updated == 0 {
+                return Err(StoreError::NotFound(format!(
+                    "import {} for project {}",
+                    import.artifact_hash, project
+                )));
+            }
         }
         tx.commit()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
@@ -727,9 +747,9 @@ impl Store for SqliteStore {
         loss_report: &str,
         fidelity_diff: &str,
     ) -> Result<(), StoreError> {
-        // The same bytes always produce the same report, so re-recording is a no-op. A
-        // record must exist BEFORE the commit is attempted, so a refused import still has
-        // a retrievable report.
+        // The same bytes always produce the same report, so re-recording the same
+        // (project, artifact) is a no-op. A record must exist BEFORE the commit is attempted,
+        // so a refused import still has a retrievable report.
         self.with(|c| {
             c.execute(
                 "INSERT OR IGNORE INTO imports (artifact_hash, project, binding_id, binding_version, loss_report, fidelity_diff, commit_hash, accepted_losses, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, '[]', ?7)",
@@ -800,27 +820,6 @@ impl Store for SqliteStore {
                 }))
             }
         }
-    }
-
-    fn attach_import_commit(
-        &self,
-        project: &str,
-        artifact_hash: &str,
-        commit_hash: &str,
-        accepted_losses: &[String],
-    ) -> Result<(), StoreError> {
-        let accepted_json = serde_json::to_string(accepted_losses)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        let updated = self.with(|c| {
-            c.execute(
-                "UPDATE imports SET commit_hash = ?1, accepted_losses = ?2 WHERE project = ?3 AND artifact_hash = ?4",
-                params![commit_hash, accepted_json, project, artifact_hash],
-            )
-        })?;
-        if updated == 0 {
-            return Err(StoreError::NotFound(format!("import {}", artifact_hash)));
-        }
-        Ok(())
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<i64, StoreError> {

@@ -376,6 +376,7 @@ fn perform_edit(
                 mechanism: state.auth.mechanism(),
                 candidate: &candidate,
                 bytes: &bytes,
+                import: None,
                 holder,
                 now,
                 tip: Some(&tip),
