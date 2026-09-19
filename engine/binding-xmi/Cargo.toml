@@ -20,3 +20,4 @@ roxmltree.workspace = true
 [dev-dependencies]
 mw-binding = { path = "../binding", version = "0.1.0" }
 mw-okf = { path = "../okf", version = "0.1.0" }
+serde_json.workspace = true
