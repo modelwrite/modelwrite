@@ -169,6 +169,14 @@ fn the_openai_reasoner_posts_the_shape_and_validates_a_good_answer() {
     );
     assert_eq!(captured.body["model"], "qwen3.8-27b-fp8");
     assert_eq!(captured.body["temperature"], 0);
+    assert_eq!(
+        captured.body["max_tokens"], 2048,
+        "the answer must be bounded"
+    );
+    assert_eq!(
+        captured.body["response_format"]["type"], "json_object",
+        "the strict-JSON response_format must be kept"
+    );
     let messages = captured.body["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["role"], "system");
@@ -180,6 +188,20 @@ fn the_openai_reasoner_posts_the_shape_and_validates_a_good_answer() {
     let user = messages[1]["content"].as_str().unwrap();
     assert!(user.contains("add a heater block with a water inlet port"));
     assert!(user.contains("coffee"));
+    // The COMPACT inventory is sent, not the full document: the graph node count is reported
+    // but the node's own id (and the state machine) are not.
+    assert!(
+        user.contains("\"graphNodes\":1"),
+        "the inventory must carry the graph node count"
+    );
+    assert!(
+        !user.contains("stateMachine"),
+        "the full document must not be sent"
+    );
+    assert!(
+        !user.contains("\"root\""),
+        "graph node ids must not be sent, only the count"
+    );
 }
 
 #[test]

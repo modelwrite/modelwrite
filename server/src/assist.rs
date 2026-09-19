@@ -42,6 +42,10 @@ pub const LIVE_AGENT: &str = "mw-assist";
 const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 /// The Messages API endpoint. The key is sent as a header on this request only, never stored.
 const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
+/// The token ceiling on the live OpenAI-compatible reasoner's answer. Bounding the completion
+/// keeps a long reasoning pass from ballooning the response: the strict-JSON proposal is far
+/// smaller than this.
+const OPENAI_MAX_TOKENS: u64 = 2048;
 
 /// One concrete model change a reasoner proposed: the action (always model-changing) plus the
 /// element or requirement it carries. This is the STRICT JSON shape the live model must
@@ -366,20 +370,74 @@ Return only the JSON object."#
         .to_string()
 }
 
+/// The COMPACT model inventory a reasoner reads instead of the full document. Proposing a
+/// change needs the id/name inventory - so a new id can be checked against the ids that already
+/// exist - and the request; it does not need every element's documentation, attributes,
+/// provenance or the graph edge list, which would only bloat the prompt (and, on the fast tier,
+/// overflow the 24k-token context window). Nothing else is serialised here: no documentation
+/// bodies, no attributes, no edge endpoints, no provenance.
+fn model_inventory(current: &OkfRoot) -> Value {
+    let structure: Vec<Value> = current
+        .structure
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id.clone(),
+                "name": e.name.clone(),
+                "kind": e.kind.clone(),
+                "stereotypes": e.stereotypes.clone(),
+            })
+        })
+        .collect();
+    let interfaces: Vec<Value> = current
+        .interfaces
+        .iter()
+        .map(|e| json!({ "id": e.id.clone(), "name": e.name.clone() }))
+        .collect();
+    let signals: Vec<Value> = current
+        .signals
+        .iter()
+        .map(|e| json!({ "id": e.id.clone(), "name": e.name.clone() }))
+        .collect();
+    let requirements: Vec<Value> = current
+        .requirements
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.id.clone(),
+                "name": r.name.clone(),
+                "reqId": r.req_id.clone(),
+            })
+        })
+        .collect();
+    // The model must know edges EXIST, but proposing a change needs the id/name inventory, not
+    // every edge endpoint. Report the counts from the graph itself (the truth of "edges
+    // exist"); fall back to the summary when a graph is absent.
+    let (graph_nodes, graph_edges) = match current.graph.as_ref() {
+        Some(graph) => (graph.nodes.len(), graph.edges.len()),
+        None => (
+            current.summary.graph_nodes as usize,
+            current.summary.graph_edges as usize,
+        ),
+    };
+    json!({
+        "structure": structure,
+        "interfaces": interfaces,
+        "signals": signals,
+        "requirements": requirements,
+        "graphNodes": graph_nodes,
+        "graphEdges": graph_edges,
+    })
+}
+
 fn user_prompt(project: &str, request: &str, current: &OkfRoot) -> Result<String, ApiError> {
-    let model = serde_json::to_value(current).map_err(|e| {
-        eprintln!("current model could not be serialised: {}", e);
+    let inventory = serde_json::to_string(&model_inventory(current)).map_err(|e| {
+        eprintln!("current model inventory could not be serialised: {}", e);
         ApiError::internal("the current model could not be prepared")
     })?;
     Ok(format!(
-        "Project: {}
-The current OKF model is:
-{}
-
-The request is: {}
-
-Propose the changes that honour this request.",
-        project, model, request
+        "Project: {}\nThe current model inventory (ids and names only; no documentation, attributes or edge lists) is:\n{}\n\nThe request is: {}\n\nPropose the changes that honour this request.",
+        project, inventory, request
     ))
 }
 
@@ -442,6 +500,7 @@ fn call_openai(
                 {"role": "user", "content": user}
             ],
             "temperature": 0,
+            "max_tokens": OPENAI_MAX_TOKENS,
             "response_format": {"type": "json_object"}
         }))
         .map_err(|e| {
@@ -894,6 +953,239 @@ pub async fn assist(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use okf::types::{Attribute, Graph, GraphEdge, Provenance, Summary};
+
+    fn empty_model() -> OkfRoot {
+        OkfRoot {
+            okf: "1.0".to_string(),
+            project: "coffee".to_string(),
+            exported_at: String::new(),
+            summary: Summary::default(),
+            structure: Vec::new(),
+            interfaces: Vec::new(),
+            signals: Vec::new(),
+            requirements: Vec::new(),
+            state_machine: None,
+            activities: Vec::new(),
+            graph: None,
+            provenance: None,
+            references: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_inventory_lists_every_element_and_requirement_id() {
+        let mut current = empty_model();
+        current.structure.push(Element {
+            id: "block-a".to_string(),
+            name: "Block A".to_string(),
+            kind: "block".to_string(),
+            stereotypes: vec!["Block".to_string()],
+            attributes: Vec::new(),
+            documentation: String::new(),
+        });
+        current.interfaces.push(Element {
+            id: "iface-a".to_string(),
+            name: "Iface A".to_string(),
+            kind: "interface".to_string(),
+            stereotypes: Vec::new(),
+            attributes: Vec::new(),
+            documentation: String::new(),
+        });
+        current.signals.push(Element {
+            id: "sig-a".to_string(),
+            name: "Sig A".to_string(),
+            kind: "signal".to_string(),
+            stereotypes: Vec::new(),
+            attributes: Vec::new(),
+            documentation: String::new(),
+        });
+        current.requirements.push(Requirement {
+            id: "req-a".to_string(),
+            name: "Req A".to_string(),
+            kind: "requirement".to_string(),
+            stereotypes: Vec::new(),
+            attributes: Vec::new(),
+            documentation: String::new(),
+            req_id: "REQ-A".to_string(),
+            req_text: String::new(),
+        });
+        current.graph = Some(Graph {
+            nodes: vec![GraphNode {
+                id: "block-a".to_string(),
+                kind: "block".to_string(),
+                name: "Block A".to_string(),
+                stereotypes: Vec::new(),
+            }],
+            edges: vec![GraphEdge {
+                source: "block-a".to_string(),
+                target: "iface-a".to_string(),
+                kind: "part".to_string(),
+                label: String::new(),
+            }],
+        });
+
+        let inventory = serde_json::to_string(&model_inventory(&current)).unwrap();
+        for id in ["block-a", "iface-a", "sig-a", "req-a"] {
+            assert!(
+                inventory.contains(id),
+                "the inventory must carry id {}, got: {}",
+                id,
+                inventory
+            );
+        }
+        assert!(inventory.contains("REQ-A"), "the reqId must be carried");
+        assert!(
+            inventory.contains("\"graphNodes\":1"),
+            "the graph node count must be carried"
+        );
+        assert!(
+            inventory.contains("\"graphEdges\":1"),
+            "the graph edge count must be carried"
+        );
+    }
+
+    #[test]
+    fn the_inventory_omits_documentation_attributes_edges_and_provenance() {
+        let mut current = empty_model();
+        current.structure.push(Element {
+            id: "block-a".to_string(),
+            name: "Block A".to_string(),
+            kind: "block".to_string(),
+            stereotypes: Vec::new(),
+            attributes: vec![Attribute {
+                name: "secretAttr".to_string(),
+                attr_type: "secretType".to_string(),
+                aggregation: "secretAgg".to_string(),
+                default: "secretDefault".to_string(),
+            }],
+            documentation: "SECRET-DOC-BLOCK".to_string(),
+        });
+        current.requirements.push(Requirement {
+            id: "req-a".to_string(),
+            name: "Req A".to_string(),
+            kind: "requirement".to_string(),
+            stereotypes: Vec::new(),
+            attributes: Vec::new(),
+            documentation: "SECRET-DOC-REQ".to_string(),
+            req_id: "REQ-A".to_string(),
+            req_text: "SECRET-REQ-TEXT".to_string(),
+        });
+        current.graph = Some(Graph {
+            nodes: vec![GraphNode {
+                id: "block-a".to_string(),
+                kind: "block".to_string(),
+                name: "Block A".to_string(),
+                stereotypes: Vec::new(),
+            }],
+            edges: vec![GraphEdge {
+                source: "block-a".to_string(),
+                target: "req-a".to_string(),
+                kind: "part".to_string(),
+                label: "SECRET-EDGE-LABEL".to_string(),
+            }],
+        });
+        current.provenance = Some(Provenance {
+            source_tool: "SECRET-TOOL".to_string(),
+            exporter: "SECRET-EXPORTER".to_string(),
+            exporter_version: "SECRET-VER".to_string(),
+        });
+
+        let inventory = serde_json::to_string(&model_inventory(&current)).unwrap();
+        for omitted in [
+            "SECRET-DOC-BLOCK",
+            "SECRET-DOC-REQ",
+            "SECRET-REQ-TEXT",
+            "secretAttr",
+            "secretType",
+            "secretAgg",
+            "secretDefault",
+            "SECRET-EDGE-LABEL",
+            "SECRET-TOOL",
+            "SECRET-EXPORTER",
+            "SECRET-VER",
+        ] {
+            assert!(
+                !inventory.contains(omitted),
+                "the inventory must omit {}, got: {}",
+                omitted,
+                inventory
+            );
+        }
+        assert!(inventory.contains("block-a"), "ids must still be present");
+        assert!(inventory.contains("req-a"));
+        assert!(inventory.contains("REQ-A"));
+    }
+
+    #[test]
+    fn the_coffee_machine_inventory_is_compact_and_complete() {
+        let full = test_support::load_okf_expected();
+        let current: OkfRoot =
+            serde_json::from_str(&full).expect("the corpus fixture must deserialise");
+        let inventory = serde_json::to_string(&model_inventory(&current)).unwrap();
+
+        // Every element and requirement id must be present so the reasoner can see the ids it
+        // must not collide with - the uniqueness validation stays meaningful.
+        for element in current
+            .structure
+            .iter()
+            .chain(current.interfaces.iter())
+            .chain(current.signals.iter())
+        {
+            assert!(
+                inventory.contains(&element.id),
+                "the inventory must carry element id {}",
+                element.id
+            );
+        }
+        for requirement in &current.requirements {
+            assert!(
+                inventory.contains(&requirement.id),
+                "the inventory must carry requirement id {}",
+                requirement.id
+            );
+        }
+
+        // Nothing else: the full document's keys for documentation bodies, attributes,
+        // requirement text, edge lists, provenance, state machines, activities, references,
+        // export metadata and the okf marker must not appear in the inventory.
+        for needle in [
+            "\"documentation\"",
+            "\"attributes\"",
+            "\"reqText\"",
+            "\"edges\"",
+            "\"provenance\"",
+            "\"stateMachine\"",
+            "\"activities\"",
+            "\"references\"",
+            "\"exportedAt\"",
+            "\"okf\"",
+        ] {
+            assert!(
+                !inventory.contains(needle),
+                "the inventory must omit full-model key {}, got: {}",
+                needle,
+                inventory
+            );
+        }
+
+        // Compact: the corpus inventory is ~9k chars (~5k fleet tokens) versus ~64k chars
+        // (~33.5k fleet tokens) for the full document - the overflow this fix removes. Bound it
+        // far below the full document and under an absolute cap so the 24k-token fast tier holds
+        // it with room for the answer.
+        assert!(
+            inventory.len() < 12_000,
+            "the inventory must be compact, got {} chars",
+            inventory.len()
+        );
+        assert!(
+            inventory.len() < full.len() / 5,
+            "the inventory must be much smaller than the full document ({} vs {} chars)",
+            inventory.len(),
+            full.len()
+        );
+    }
 
     #[test]
     fn no_key_and_no_mode_reports_no_live_reasoner() {
