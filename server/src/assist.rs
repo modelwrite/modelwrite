@@ -28,7 +28,7 @@ use crate::audit::PROPOSAL_RECORD;
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::proposal_api::proposal_json;
-use crate::store::{now_seconds, proposal_id, AuditEntry};
+use crate::store::{now_seconds, proposal_id, AuditEntry, ProposalRecord, Store};
 
 /// The name the scripted reasoner records as its agent.
 pub const SCRIPTED_AGENT: &str = "scripted-assist";
@@ -487,6 +487,47 @@ pub fn build_review_artifact(
     }
 }
 
+/// The reasoner the next assist request will use, for the panel's status line. Mirrors
+/// [select_reasoner_from] exactly: the two must never disagree about what a request will do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReasonerStatus {
+    /// A live reasoner is configured (MW_ANTHROPIC_API_KEY set).
+    Live,
+    /// The deterministic scripted reasoner is forced (MW_ASSIST_REASONER=scripted).
+    Scripted,
+    /// No live reasoner and no scripted override: the panel must say so plainly.
+    NotConfigured,
+    /// MW_ASSIST_REASONER names something other than "scripted".
+    UnknownMode(String),
+}
+
+/// Read the reasoner status from the process environment WITHOUT running a reasoner. The
+/// assist panel calls this to say what a request WOULD do before the caller submits, so a
+/// deployment without a key is told up front rather than only after a 503.
+pub fn reasoner_status() -> ReasonerStatus {
+    let key = std::env::var("MW_ANTHROPIC_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty());
+    let mode = std::env::var("MW_ASSIST_REASONER")
+        .ok()
+        .filter(|m| !m.trim().is_empty());
+    reasoner_status_from(key.as_deref(), mode.as_deref())
+}
+
+/// The pure status decision, factored out of [reasoner_status] so a unit test can exercise
+/// every branch without touching the process environment. [select_reasoner_from] delegates to
+/// this so the status and the actual selection cannot drift apart.
+fn reasoner_status_from(key: Option<&str>, mode: Option<&str>) -> ReasonerStatus {
+    match mode {
+        Some("scripted") => ReasonerStatus::Scripted,
+        Some(other) => ReasonerStatus::UnknownMode(other.to_string()),
+        None => match key {
+            Some(_) => ReasonerStatus::Live,
+            None => ReasonerStatus::NotConfigured,
+        },
+    }
+}
+
 /// Select the reasoner from the environment, so a test can force the deterministic script and
 /// a deployment can supply a key. The key is read from the environment ONLY - never from a
 /// request, never logged, never committed.
@@ -506,18 +547,16 @@ fn select_reasoner_from(
     key: Option<&str>,
     mode: Option<&str>,
 ) -> Result<Box<dyn ModelReasoner>, ApiError> {
-    match mode {
-        Some("scripted") => Ok(Box::new(ScriptedReasoner::example())),
-        Some(other) => Err(ApiError::bad_request(format!(
+    match reasoner_status_from(key, mode) {
+        ReasonerStatus::Scripted => Ok(Box::new(ScriptedReasoner::example())),
+        ReasonerStatus::Live => Ok(Box::new(LiveReasoner::new(key.unwrap_or("").to_string()))),
+        ReasonerStatus::NotConfigured => Err(ApiError::service_unavailable(
+            "no live reasoner configured: set MW_ANTHROPIC_API_KEY, or MW_ASSIST_REASONER=scripted for the deterministic test mode",
+        )),
+        ReasonerStatus::UnknownMode(other) => Err(ApiError::bad_request(format!(
             "unknown assist reasoner mode {:?}; expected 'scripted'",
             other
         ))),
-        None => match key {
-            Some(key) => Ok(Box::new(LiveReasoner::new(key.to_string()))),
-            None => Err(ApiError::service_unavailable(
-                "no live reasoner configured: set MW_ANTHROPIC_API_KEY, or MW_ASSIST_REASONER=scripted for the deterministic test mode",
-            )),
-        },
     }
 }
 
@@ -525,6 +564,107 @@ fn select_reasoner_from(
 pub struct AssistRequest {
     pub request: String,
     pub branch: String,
+}
+
+/// What an assist request produced: the addressable proposal id, the review artifact a human
+/// reads, and the persisted proposal record. Nothing here commits: the artifact's candidate
+/// document is the SAME document a later acceptance applies.
+pub struct AssistOutcome {
+    pub id: String,
+    pub artifact: ReviewArtifact,
+    pub record: ProposalRecord,
+}
+
+/// The ONE assist sequence, shared by the JSON handler and the workbench panel so the two
+/// callers can never disagree about what a request did. Permission decisions live in each
+/// caller; this core does the work: load the branch's model, run the selected reasoner,
+/// build and persist the review artifact (a PROPOSAL, never a commit), and read it back.
+pub async fn assist_core(
+    store: &dyn Store,
+    project: &str,
+    branch: &str,
+    request: &str,
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
+) -> Result<AssistOutcome, ApiError> {
+    validate_name("branch name", branch)?;
+    if request.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "the assist request must not be empty",
+        ));
+    }
+    if store.project(project).map_err(map_store_error)?.is_none() {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
+    let tip = store
+        .branch_tip(project, branch)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", branch)))?;
+    let current = load_model(store, project, &tip).map_err(map_store_error)?;
+
+    let reasoner = select_reasoner()?;
+    let agent = reasoner.agent().to_string();
+    // A live reasoner blocks on a network call; run it off the async worker so one slow
+    // model answer cannot stall the request executor. The scripted reasoner returns
+    // immediately and pays only the cost of a move into the blocking pool. The current model
+    // is cloned for the task so the core keeps its copy for the artifact below.
+    let project_for_reasoner = project.to_string();
+    let request_for_reasoner = request.to_string();
+    let current_for_reasoner = current.clone();
+    let changes = tokio::task::spawn_blocking(move || {
+        reasoner.propose(
+            &project_for_reasoner,
+            &request_for_reasoner,
+            &current_for_reasoner,
+        )
+    })
+    .await
+    .map_err(|e| {
+        eprintln!("assist reasoner task failed: {}", e);
+        ApiError::internal("the reasoner could not run")
+    })??;
+    for change in &changes {
+        change.validate().map_err(ApiError::bad_request)?;
+    }
+
+    let artifact = build_review_artifact(&agent, request, &current, &changes);
+    let artifact_json = serde_json::to_string(&artifact).map_err(|e| {
+        eprintln!("review artifact could not be serialised: {}", e);
+        ApiError::internal("the review artifact could not be prepared")
+    })?;
+    let id = proposal_id(project, &agent, &artifact_json);
+    let audit = AuditEntry {
+        id: 0,
+        project: project.to_string(),
+        at: now_seconds(),
+        actor: actor.to_string(),
+        mechanism: mechanism.to_string(),
+        authorizer: authorizer.to_string(),
+        action: PROPOSAL_RECORD.to_string(),
+        subject: id.clone(),
+        detail: request.to_string(),
+    };
+    store
+        .record_proposal(
+            project,
+            &agent,
+            request,
+            None,
+            None,
+            &artifact_json,
+            Some(&audit),
+        )
+        .map_err(map_store_error)?;
+    let record = store
+        .proposal(project, &id)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::internal("the proposal could not be read after recording"))?;
+    Ok(AssistOutcome {
+        id,
+        artifact,
+        record,
+    })
 }
 
 /// POST /projects/:project/assist - run a reasoner and return its proposal as a review
@@ -544,92 +684,22 @@ pub async fn assist(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    validate_name("branch name", &body.branch)?;
-    if body.request.trim().is_empty() {
-        return Err(ApiError::bad_request(
-            "the assist request must not be empty",
-        ));
-    }
-    if state
-        .store
-        .project(&project)
-        .map_err(map_store_error)?
-        .is_none()
-    {
-        return Err(ApiError::not_found(format!("project {}", project)));
-    }
-    let tip = state
-        .store
-        .branch_tip(&project, &body.branch)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", body.branch)))?;
-    let current = load_model(state.store.as_ref(), &project, &tip).map_err(map_store_error)?;
-
-    let reasoner = select_reasoner()?;
-    let agent = reasoner.agent().to_string();
-    // A live reasoner blocks on a network call; run it off the async worker so one slow
-    // model answer cannot stall the request executor. The scripted reasoner returns
-    // immediately and pays only the cost of a move into the blocking pool. The current model
-    // is cloned for the task so the handler keeps its copy for the artifact below.
-    let project_for_reasoner = project.clone();
-    let request_for_reasoner = body.request.clone();
-    let current_for_reasoner = current.clone();
-    let changes = tokio::task::spawn_blocking(move || {
-        reasoner.propose(
-            &project_for_reasoner,
-            &request_for_reasoner,
-            &current_for_reasoner,
-        )
-    })
-    .await
-    .map_err(|e| {
-        eprintln!("assist reasoner task failed: {}", e);
-        ApiError::internal("the reasoner could not run")
-    })??;
-    for change in &changes {
-        change.validate().map_err(ApiError::bad_request)?;
-    }
-
-    let artifact = build_review_artifact(&agent, &body.request, &current, &changes);
-    let artifact_json = serde_json::to_string(&artifact).map_err(|e| {
-        eprintln!("review artifact could not be serialised: {}", e);
-        ApiError::internal("the review artifact could not be prepared")
-    })?;
-    let id = proposal_id(&project, &agent, &artifact_json);
-    let audit = AuditEntry {
-        id: 0,
-        project: project.clone(),
-        at: now_seconds(),
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
-        action: PROPOSAL_RECORD.to_string(),
-        subject: id.clone(),
-        detail: body.request.clone(),
-    };
-    state
-        .store
-        .record_proposal(
-            &project,
-            &agent,
-            &body.request,
-            None,
-            None,
-            &artifact_json,
-            Some(&audit),
-        )
-        .map_err(map_store_error)?;
-    let record = state
-        .store
-        .proposal(&project, &id)
-        .map_err(map_store_error)?
-        .ok_or_else(|| ApiError::internal("the proposal could not be read after recording"))?;
+    let outcome = assist_core(
+        state.store.as_ref(),
+        &project,
+        &body.branch,
+        &body.request,
+        &identity.subject,
+        state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
+    )
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({
-            "id": id,
-            "reviewArtifact": serde_json::to_value(&artifact).unwrap_or(Value::Null),
-            "proposal": proposal_json(&record),
+            "id": outcome.id,
+            "reviewArtifact": serde_json::to_value(&outcome.artifact).unwrap_or(Value::Null),
+            "proposal": proposal_json(&outcome.record),
         })),
     ))
 }
@@ -721,5 +791,58 @@ mod tests {
             "message: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn reasoner_status_reports_every_mode() {
+        assert_eq!(
+            reasoner_status_from(None, None),
+            ReasonerStatus::NotConfigured
+        );
+        assert_eq!(
+            reasoner_status_from(Some("sk-ant-key"), None),
+            ReasonerStatus::Live
+        );
+        assert_eq!(
+            reasoner_status_from(None, Some("scripted")),
+            ReasonerStatus::Scripted
+        );
+        assert_eq!(
+            reasoner_status_from(Some("k"), Some("bogus")),
+            ReasonerStatus::UnknownMode("bogus".to_string())
+        );
+    }
+
+    #[test]
+    fn reasoner_status_agrees_with_the_reasoner_selection() {
+        // The panel's status and the endpoint's selection must never disagree.
+        assert_eq!(
+            reasoner_status_from(None, None),
+            ReasonerStatus::NotConfigured
+        );
+        assert!(select_reasoner_from(None, None).is_err());
+
+        assert_eq!(reasoner_status_from(Some("k"), None), ReasonerStatus::Live);
+        assert_eq!(
+            select_reasoner_from(Some("k"), None).unwrap().agent(),
+            LIVE_AGENT
+        );
+
+        assert_eq!(
+            reasoner_status_from(None, Some("scripted")),
+            ReasonerStatus::Scripted
+        );
+        assert_eq!(
+            select_reasoner_from(None, Some("scripted"))
+                .unwrap()
+                .agent(),
+            SCRIPTED_AGENT
+        );
+
+        assert_eq!(
+            reasoner_status_from(None, Some("bogus")),
+            ReasonerStatus::UnknownMode("bogus".to_string())
+        );
+        assert!(select_reasoner_from(None, Some("bogus")).is_err());
     }
 }

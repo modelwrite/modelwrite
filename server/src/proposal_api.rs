@@ -255,7 +255,7 @@ pub async fn accept_proposal(
 /// and the human. The store's commit transaction is the authority that re-checks the proposal
 /// is undecided and recorded by the named agent; the check here is only the fast refusal.
 #[allow(clippy::too_many_arguments)]
-fn accept_proposal_core(
+pub(crate) fn accept_proposal_core(
     store: &dyn Store,
     project: &str,
     proposal_id: &str,

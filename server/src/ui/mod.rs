@@ -17,6 +17,7 @@ use axum::body::Body;
 use axum::http::{header, StatusCode};
 use axum::response::Response;
 
+pub mod assist;
 pub mod create;
 pub mod diagram;
 pub mod edit;
@@ -25,6 +26,7 @@ pub mod import;
 pub mod layout;
 pub mod model;
 pub mod pages;
+pub mod proposals;
 pub mod review;
 
 /// Percent-encode a value for use in a URL PATH SEGMENT or QUERY STRING.

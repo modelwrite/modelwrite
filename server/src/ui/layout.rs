@@ -117,6 +117,19 @@ main.mw-model-ide { max-width: none; }
 .mw-badge-uncovered { background: #f8d7da; color: #842029; }
 .mw-badge-unknown { background: #eee; color: #555; }
 g.mw-selected-node rect { stroke: #145ea8; stroke-width: 3px; }
+.assist-panel, .accept-proposal, .review-artifact, .provenance { margin-bottom: 2rem; }
+.assist-form label, .accept-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.assist-form textarea { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; width: 100%; max-width: 40rem; min-height: 4rem; }
+.accept-form input { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; }
+ul.proposals, ul.proposal-list, ul.accepted-items, ul.gaps { list-style: none; margin: 0; padding: 0; }
+ul.proposals li, ul.proposal-list li { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; background: #fff; }
+ul.proposals li h2 { margin-top: 0; }
+.proposal-action { font-weight: 600; }
+.proposal-subject { font-family: ui-monospace, monospace; margin-left: 0.5rem; }
+.proposal-rationale { margin: 0.25rem 0; }
+.confidence { color: #666; font-size: 0.85rem; }
+.low-confidence { background: #f8d7da; color: #842029; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+.decision { font-weight: 600; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {

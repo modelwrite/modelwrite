@@ -17,9 +17,11 @@ use graph::{requirement_coverage, CoverageReport};
 use okf::types::{Element, GraphEdge, GraphNode, OkfRoot, Requirement};
 
 use crate::api::{load_model, map_store_error, ApiState};
+use crate::assist::reasoner_status;
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::Commit;
+use crate::ui::assist::assist_panel_markup;
 use crate::ui::layout;
 
 /// The query parameters of the model page. An explicit commit hash wins; otherwise the
@@ -182,6 +184,11 @@ fn model_markup(
             p class="meta" {
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
             }
+        }
+        // The assist panel WRITES a proposal, so it is offered only to a caller who may
+        // write; a read-only reviewer is not invited into a form that will only be refused.
+        @if can_edit {
+            (assist_panel_markup(project, &commit.branch, &reasoner_status()))
         }
         (structure_section(root, project, &commit.branch, can_edit))
         (requirements_section(root, &ctx))
