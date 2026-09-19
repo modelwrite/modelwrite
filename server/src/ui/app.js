@@ -329,8 +329,16 @@
     if (node.kind) {
       row.appendChild(el('span', 'mw-kind-dot'));
     }
-    row.appendChild(el('span', 'mw-node-name', node.name || node.key));
-    if (node.kind) {
+    var nameEl = el('span', 'mw-node-name', node.name || node.key);
+    // The row truncates long names with an ellipsis; the full name stays available on hover.
+    nameEl.setAttribute('title', node.name || node.key);
+    row.appendChild(nameEl);
+    if (node.section === 'requirement') {
+      // A requirement's coverage state, as a text chip (never colour alone).
+      var cov = coverageBadge(node.coverage);
+      cov.className += ' mw-tree-cov';
+      row.appendChild(cov);
+    } else if (node.kind) {
       row.appendChild(el('span', 'mw-kind-badge', node.kind));
     }
 

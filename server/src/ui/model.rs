@@ -295,7 +295,11 @@ fn overview_summary(
             div class="overview-card" {
                 span class="ov-label" { "Coverage" }
                 div class="ov-value" { (covered) " / " (total) }
-                div class="ov-note" { (uncovered) " uncovered" }
+                div class="ov-note" {
+                    span class="covered" { (covered) " covered" }
+                    " · "
+                    span class="uncovered" { (uncovered) " uncovered" }
+                }
             }
             div class="overview-card" {
                 span class="ov-label" { "Elements" }
@@ -460,34 +464,52 @@ fn section_markup(
 ) -> Markup {
     let ctx = view_context(root);
     let can_edit = identity.may(Permission::Write);
-    let body = match section {
-        "structure" => html! {
-            h1 { "Structure" }
-            @if can_edit {
-                p class="meta" {
-                    a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+    // Structure and Requirements carry selectable elements, so they get the three-pane
+    // enhancement (tree + properties). Traceability is a read-only matrix: it uses the
+    // whole width instead of the reading-width cap.
+    let (body, main_class) = match section {
+        "structure" => (
+            html! {
+                h1 { "Structure" }
+                p class="meta" { "The containment tree of blocks, actors and use cases, plus the model's signals and interfaces." }
+                @if can_edit {
+                    p class="meta" {
+                        a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+                    }
                 }
-            }
-            (structure_section(root, project, &commit.branch, can_edit))
-            (state_activity_section(root, &ctx))
-        },
-        "requirements" => html! {
-            h1 { "Requirements" }
-            (requirements_section(root, &ctx))
-        },
-        "traceability" => html! {
-            h1 { "Traceability" }
-            (traceability_section(root, &ctx))
-        },
-        _ => html! { h1 { "Overview" } },
+                (structure_section(root, project, &commit.branch, can_edit))
+                (state_activity_section(root, &ctx))
+                script src="/ui/app.js" {}
+            },
+            "",
+        ),
+        "requirements" => (
+            html! {
+                h1 { "Requirements" }
+                p class="meta" { "Every requirement, its coverage verdict and the elements allocated to it." }
+                (requirements_section(root, &ctx))
+                script src="/ui/app.js" {}
+            },
+            "",
+        ),
+        "traceability" => (
+            html! {
+                h1 { "Traceability" }
+                p class="meta" { "The engine's coverage report and the requirement-to-element allocations." }
+                (traceability_section(root, &ctx))
+            },
+            "mw-wide",
+        ),
+        _ => (html! { h1 { "Overview" } }, ""),
     };
     let title = format!("modelwrite — {} — {}", project, section);
-    layout::shell(
+    layout::shell_with_main_class(
         &title,
         nav,
         Some(&identity.subject),
         identity.may(Permission::Administer),
         mechanism,
+        main_class,
         body,
     )
 }
@@ -803,6 +825,16 @@ fn coverage_status(ctx: &ViewContext, requirement: &Requirement) -> &'static str
     }
 }
 
+/// A coverage verdict as a text chip. The tint always comes with the word, so the state is
+/// never carried by colour alone.
+fn coverage_badge(status: &str) -> Markup {
+    match status {
+        "covered" => html! { span class="covered" { "covered" } },
+        "uncovered" => html! { span class="uncovered" { "uncovered" } },
+        _ => html! { span class="mw-badge-unknown" { "not reported" } },
+    }
+}
+
 fn requirements_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
     html! {
         section class="model-section" id="requirements" {
@@ -812,7 +844,7 @@ fn requirements_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
             } @else {
                 table class="requirements" {
                     thead {
-                        tr { th { "id" } th { "reqId" } th { "text" } th { "satisfied by" } }
+                        tr { th { "id" } th { "reqId" } th { "text" } th { "satisfied by" } th { "coverage" } }
                     }
                     tbody {
                         @for requirement in &root.requirements {
@@ -826,11 +858,14 @@ fn requirements_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
                                data-mw-reqid=(requirement.req_id)
                                data-mw-reqtext=(requirement.req_text)
                                data-mw-coverage=(coverage_status(ctx, requirement)) {
-                                td class="req-id" { (requirement.id) }
+                                td class="req-id" title=(requirement.id) { (requirement.id) }
                                 td class="req-num" { (requirement.req_id) }
                                 td class="req-text" { (requirement_text(requirement)) }
                                 td class="req-satisfied" {
                                     (allocation_list_markup(ctx.allocations.get(&requirement.id).map(|v| v.as_slice())))
+                                }
+                                td class="req-coverage" {
+                                    (coverage_badge(coverage_status(ctx, requirement)))
                                 }
                             }
                         }
@@ -878,7 +913,11 @@ fn traceability_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
             h2 { "Traceability" }
             @if measurable {
                 p class="coverage-summary" {
-                    (total) " requirements: " (covered) " covered, " (uncovered_ids.len()) " uncovered · "
+                    (total) " requirements: "
+                    span class="covered" { (covered) " covered" }
+                    ", "
+                    span class="uncovered" { (uncovered_ids.len()) " uncovered" }
+                    " · "
                     (satisfied) " satisfy, " (refined) " refine, " (verified) " verify, " (allocated) " allocate"
                 }
             } @else {
@@ -899,7 +938,7 @@ fn traceability_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
                     tbody {
                         @for requirement in &root.requirements {
                             tr class="trace-row" {
-                                td class="req-id" { (requirement.id) }
+                                td class="req-id" title=(requirement.id) { (requirement.id) }
                                 td class="req-num" { (requirement.req_id) }
                                 td class="req-text" { (requirement_text(requirement)) }
                                 td class="trace-allocations" {

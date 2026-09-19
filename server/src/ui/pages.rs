@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use maud::{html, Markup};
 
 use crate::api::{
-    create_branch_core, create_project_core, map_store_error, validate_name, ApiState,
+    create_branch_core, create_project_core, load_model, map_store_error, validate_name, ApiState,
 };
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
@@ -24,6 +24,8 @@ struct ProjectRow {
     name: String,
     branch_count: usize,
     latest: Option<Commit>,
+    blocks: Option<u64>,
+    requirements: Option<u64>,
 }
 
 struct BranchRow {
@@ -150,10 +152,14 @@ fn render_project_list(
             .map_err(map_store_error)?
             .len();
         let latest = latest_commit(state.store.as_ref(), &project.name)?;
+        let (blocks, requirements) =
+            model_size(state.store.as_ref(), &project.name, latest.as_ref());
         rows.push(ProjectRow {
             name: project.name,
             branch_count,
             latest,
+            blocks,
+            requirements,
         });
     }
     let nav = layout::Nav::load(state, identity, None)?;
@@ -175,6 +181,7 @@ fn project_list_page(
 ) -> Markup {
     let body = html! {
         h1 { "Projects" }
+        p class="meta" { "Every model is a project; open one to read its sections and gate history." }
         @if let Some(notice) = notice {
             section class="form-errors" {
                 h2 { "The project was not created" }
@@ -187,14 +194,23 @@ fn project_list_page(
             ul class="projects" {
                 @for row in rows {
                     li {
-                        a class="project-name" href={ "/ui/projects/" (crate::ui::urlencode(row.name.as_str())) } { (row.name.as_str()) }
-                        span class="meta" {
-                            (row.branch_count) " "
-                            @if row.branch_count == 1 { "branch" } @else { "branches" }
-                        }
-                        @if let Some(latest) = &row.latest {
-                            span class="message" { (latest.message.as_str()) }
-                            span class="meta" { (latest.author.as_str()) }
+                        a class="project-card" href={ "/ui/projects/" (crate::ui::urlencode(row.name.as_str())) } {
+                            span class="project-name" { (row.name.as_str()) }
+                            span class="project-meta" {
+                                (row.branch_count) " "
+                                @if row.branch_count == 1 { "branch" } @else { "branches" }
+                                @if let (Some(blocks), Some(requirements)) = (row.blocks, row.requirements) {
+                                    span class="dot" { "·" }
+                                    (blocks) " blocks"
+                                    span class="dot" { "·" }
+                                    (requirements) " requirements"
+                                }
+                            }
+                            @if let Some(latest) = &row.latest {
+                                span class="project-message" { (latest.message.as_str()) }
+                                span class="project-author" { "by " (latest.author.as_str()) }
+                            }
+                            span class="project-open" { "Open →" }
                         }
                     }
                 }
@@ -202,12 +218,13 @@ fn project_list_page(
         }
         (create_project_form(identity))
     };
-    layout::shell(
+    layout::shell_with_main_class(
         "modelwrite — projects",
         nav,
         Some(&identity.subject),
         identity.may(Permission::Administer),
         mechanism,
+        "mw-wide",
         body,
     )
 }
@@ -337,18 +354,9 @@ fn branch_list_page(
                 }
             }
         }
-        // Proposals are READ-only, so the link is offered to every caller who can reach the
-        // page: the list names the agent, the request and the decision, never a write.
-        h2 { "Proposals" }
-        p {
-            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/proposals" } { "View proposals" }
-        }
-        @if identity.may(Permission::Write) || identity.may(Permission::Review) {
-            h2 { "Gate" }
-            p {
-                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/gate" } { "View gate runs" }
-            }
-        }
+        // The Changes section holds ONLY its own subject: the version history, a compare of
+        // two versions, and creating a version. Proposals, Checks and Import each have their
+        // own section in the navigator, so their entries live there rather than duplicated here.
         // Comparing READS two commits, so it needs only read permission - the same permission
         // the compare route itself checks. Gating it behind write would hide a read-only
         // reviewer's most useful tool, and saying so would have been untrue.
@@ -364,16 +372,6 @@ fn branch_list_page(
                     input type="text" id="to" name="to" placeholder="branch or commit";
                 }
                 button type="submit" { "Compare" }
-            }
-        }
-        // Importing WRITES, so the link is offered only to a caller who may perform it. A
-        // read-only reviewer can still open the page by URL to read a loss report, but the
-        // person this page exists for is the one deciding what to give up, and that person
-        // can write.
-        @if identity.may(Permission::Write) {
-            h2 { "Import" }
-            p {
-                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/import" } { "Import a legacy model" }
             }
         }
         // Creating a branch WRITES and needs an existing commit to start from, so the form is
@@ -538,6 +536,23 @@ fn latest_commit(store: &dyn Store, project: &str) -> Result<Option<Commit>, Api
 
 fn created_at(commit: &Commit) -> i64 {
     commit.created_at.parse::<i64>().unwrap_or(0)
+}
+
+/// The model's declared size at the latest commit: blocks and requirements, read from the
+/// model's own summary. It is computed from the branch tip on every request and cached
+/// nowhere; a missing or unreadable model reports no size rather than failing the list.
+fn model_size(
+    store: &dyn Store,
+    project: &str,
+    latest: Option<&Commit>,
+) -> (Option<u64>, Option<u64>) {
+    let Some(commit) = latest else {
+        return (None, None);
+    };
+    match load_model(store, project, &commit.hash) {
+        Ok(root) => (Some(root.summary.blocks), Some(root.summary.requirements)),
+        Err(_) => (None, None),
+    }
 }
 
 fn short_hash(hash: &str) -> &str {

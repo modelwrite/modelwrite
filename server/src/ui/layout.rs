@@ -178,6 +178,9 @@ h4 { font-size: 12px; font-weight: 600; margin: 0 0 0.25rem; }
 .rail a:hover { background: var(--surface-1); color: var(--text); text-decoration: none; }
 
 main { flex: 1 1 auto; min-width: 0; padding: 1.5rem 2rem; max-width: 56rem; }
+/* A page that lays out a grid or a table across the whole width (the project
+   list, the traceability matrix) opts out of the reading-width cap. */
+main.mw-wide { max-width: none; }
 main.mw-model-ide { max-width: none; padding: 1.25rem 1.5rem; }
 
 .sign-in, .error {
@@ -203,7 +206,16 @@ ul.unresolved-edges, ul.failures, ul.isolated, ul.diff-list, ul.loss-list, ul.lo
   list-style: none; margin: 0; padding: 0;
 }
 
-ul.projects li, ul.branches li, ul.proposals li, ul.proposal-list li {
+/* The project list is a responsive card grid; the WHOLE card is one link, so
+   the obvious action (open the model) is a click anywhere on the card. */
+ul.projects {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: 0.75rem;
+}
+ul.projects li { margin: 0; padding: 0; border: none; background: none; }
+
+ul.branches li, ul.proposals li, ul.proposal-list li {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.75rem 1rem;
@@ -212,8 +224,35 @@ ul.projects li, ul.branches li, ul.proposals li, ul.proposal-list li {
 }
 ul.proposals li h2, ul.proposal-list li h2 { margin-top: 0; }
 
-a.project-name, a.branch-name { font-weight: 600; color: var(--text); }
-a.project-name:hover, a.branch-name:hover { color: var(--accent); text-decoration: none; }
+a.project-card {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  height: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+a.project-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  text-decoration: none;
+}
+a.project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.project-name { font-weight: 650; font-size: 15px; color: var(--text); }
+a.project-card:hover .project-name { color: var(--accent-strong); }
+.project-meta { color: var(--text-2); font-size: 12px; }
+.project-meta .dot { color: var(--text-3); margin: 0 0.3rem; }
+.project-message { color: var(--text); font-size: 13px; }
+.project-author { color: var(--text-3); font-size: 12px; }
+.project-open {
+  margin-top: 0.4rem;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  display: inline-flex; align-items: center; gap: 0.3rem;
+}
+
+a.branch-name { font-weight: 600; color: var(--text); }
+a.branch-name:hover { color: var(--accent); text-decoration: none; }
 .branch-name { font-weight: 600; }
 code.tip { color: var(--text-3); margin-left: 0.5rem; font-size: 12px; }
 .message { display: block; margin-top: 0.25rem; color: var(--text); }
@@ -308,6 +347,8 @@ button:disabled {
 .import-form input[type="text"], .import-form select, .import-form textarea,
 .merge-form input[type="text"], .compare-form input[type="text"] { max-width: 40rem; }
 .import-form textarea { min-height: 10rem; }
+/* A project or branch name is short; it does not need the full content width. */
+.create-form input[type="text"], .create-form select { max-width: 24rem; }
 
 .edit-form fieldset {
   border: 1px solid var(--border);
@@ -386,6 +427,9 @@ table.requirements, table.traceability {
   background: var(--surface);
   border: 1px solid var(--border-muted);
   border-radius: var(--radius);
+  /* Fixed layout: the text column gets the room it needs and the long opaque
+     id column is truncated rather than pushing the table past its container. */
+  table-layout: fixed;
 }
 table.requirements th, table.requirements td,
 table.traceability th, table.traceability td {
@@ -400,8 +444,16 @@ table.requirements th, table.traceability th {
   text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--text-2);
 }
+/* Column budget: id narrow and truncated (full id on hover), reqId narrow,
+   text widest; the remaining columns share what is left. */
+table.requirements th:nth-child(1), table.traceability th:nth-child(1) { width: 14%; }
+table.requirements th:nth-child(2), table.traceability th:nth-child(2) { width: 7%; }
+table.requirements th:nth-child(3), table.traceability th:nth-child(3) { width: 42%; }
+table.requirements th:nth-child(4), table.traceability th:nth-child(4) { width: 25%; }
+table.requirements th:nth-child(5), table.traceability th:nth-child(5) { width: 12%; }
 .req-id, .req-num { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
-.req-text { min-width: 16rem; }
+.req-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.req-text { overflow-wrap: anywhere; }
 .coverage-summary { color: var(--text-2); font-size: 13px; }
 .relation { color: var(--text-2); }
 li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
@@ -500,11 +552,17 @@ li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
   border-radius: var(--radius);
   position: sticky;
   top: calc(var(--header-h) + 1.25rem);
+  /* Sticky only sticks when the flex item is not stretched by the container:
+     align-items on .mw-workbench is flex-start, and this is belt-and-braces. */
+  align-self: flex-start;
   display: flex; flex-direction: column;
   overflow: hidden;
+  /* A fixed viewport height (not just a max-height) keeps BOTH panes pinned for
+     the whole scroll and leaves no dead column under a short properties panel. */
+  height: calc(100vh - var(--header-h) - 2.5rem);
 }
-.mw-tree-panel { flex: 0 0 16rem; max-height: calc(100vh - var(--header-h) - 2.5rem); }
-.mw-props-panel { flex: 0 0 18rem; max-height: calc(100vh - var(--header-h) - 2.5rem); }
+.mw-tree-panel { flex: 0 0 18rem; }
+.mw-props-panel { flex: 0 0 18rem; }
 .mw-content { flex: 1 1 auto; min-width: 0; }
 
 .mw-panel-head {
@@ -527,8 +585,9 @@ li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
 }
 .mw-tree ul {
   list-style: none;
-  margin: 0 0 0 0.85rem;
-  padding: 0 0 0 0.7rem;
+  /* Tighter indentation so deep nodes keep enough room for a name. */
+  margin: 0 0 0 0.7rem;
+  padding: 0 0 0 0.5rem;
   border-left: 1px solid var(--border-muted);
 }
 .mw-tree li { margin: 0; }
@@ -587,6 +646,9 @@ li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
   border-color: transparent;
   color: var(--on-accent);
 }
+/* A requirement's coverage state in the tree, shown as a text chip (never
+   colour alone) pushed to the row's right edge like the kind badge. */
+.mw-tree .mw-node .mw-tree-cov { margin-left: auto; flex: 0 0 auto; }
 
 .mw-tree .mw-group-label {
   display: flex; align-items: center; gap: 0.4rem;
@@ -713,14 +775,22 @@ li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
 }
 
 /* -- chrome: the context bar --------------------------------------------- */
+/* Muted and slim on purpose: it is CONTEXT ("Viewing X · version · commit"),
+   never an editable control, so it must not look like the white-bordered
+   form inputs below. */
 .context-bar {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   font-size: 12px; color: var(--text-2);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--surface-1);
+  border: 1px solid var(--border-muted);
   border-radius: var(--radius);
-  padding: 0.5rem 0.85rem;
+  padding: 0.35rem 0.75rem;
   margin-bottom: 1.25rem;
+}
+.context-bar .ctx-label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-3);
 }
 .context-bar .ctx-project { font-weight: 650; color: var(--text); }
 .context-bar .ctx-sep { color: var(--text-3); }
@@ -854,6 +924,20 @@ pub fn shell(
     mechanism: &str,
     body: Markup,
 ) -> Markup {
+    shell_with_main_class(title, nav, subject, can_administer, mechanism, "", body)
+}
+
+/// The same shell with a class on the content `<main>` element, for pages that lay out
+/// across the whole width (the project card grid, the traceability matrix).
+pub fn shell_with_main_class(
+    title: &str,
+    nav: &Nav,
+    subject: Option<&str>,
+    can_administer: bool,
+    mechanism: &str,
+    main_class: &str,
+    body: Markup,
+) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -899,7 +983,7 @@ pub fn shell(
                     @if nav.current.is_some() {
                         (left_nav(nav))
                     }
-                    main {
+                    main class=(main_class) {
                         @if nav.current.is_some() {
                             (context_bar(nav))
                         }
@@ -949,6 +1033,7 @@ fn left_nav(nav: &Nav) -> Markup {
 fn context_bar(nav: &Nav) -> Markup {
     html! {
         div class="context-bar" {
+            span class="ctx-label" { "Viewing" }
             @if let Some(current) = &nav.current {
                 span class="ctx-project" { (current) }
             }

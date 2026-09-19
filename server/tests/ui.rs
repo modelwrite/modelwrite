@@ -415,24 +415,36 @@ async fn the_model_page_renders_all_four_sections_of_the_corpus() {
     assert_eq!(count(&html, "class=\"state\""), 7, "7 states");
     assert_eq!(count(&html, "class=\"transition\""), 8, "8 transitions");
 
-    // The engine's coverage numbers, rendered verbatim rather than recomputed.
+    // The engine's coverage numbers, rendered verbatim rather than recomputed. The
+    // two totals are now shown as text chips (never colour alone), so the assertion
+    // checks the numbers with their chips rather than one unbroken string.
     assert!(
-        html.contains("25 requirements: 15 covered, 10 uncovered"),
-        "the coverage summary must come from the engine, got:\n{}",
-        html
+        html.contains("<span class=\"covered\">15 covered</span>"),
+        "the covered count must come from the engine"
+    );
+    assert!(
+        html.contains("<span class=\"uncovered\">10 uncovered</span>"),
+        "the uncovered count must come from the engine"
     );
     assert!(
         html.contains("20 satisfy, 3 refine, 1 verify, 0 allocate"),
         "the per-kind coverage counts must come from the engine"
     );
 
-    // Ten uncovered requirements are visibly marked, fifteen are marked covered.
+    // Every requirement is visibly marked with its coverage verdict in BOTH the
+    // requirements table and the traceability matrix (15 covered + 10 uncovered each),
+    // and the summary and overview cards repeat the two totals as chips: 15 + 15 + 1 + 1
+    // covered, 10 + 10 + 1 + 1 uncovered.
     assert_eq!(
         count(&html, "class=\"uncovered\""),
-        10,
-        "10 uncovered marked"
+        22,
+        "10 uncovered marked in each table plus two summary chips"
     );
-    assert_eq!(count(&html, "class=\"covered\""), 15, "15 covered marked");
+    assert_eq!(
+        count(&html, "class=\"covered\""),
+        32,
+        "15 covered marked in each table plus two summary chips"
+    );
     assert!(
         html.contains("System Level Requirements"),
         "an uncovered requirement must render"
@@ -2952,7 +2964,8 @@ async fn the_no_js_model_page_keeps_the_server_rendered_content() {
     assert_eq!(count(&html, "class=\"state\""), 7, "7 states");
     assert_eq!(count(&html, "class=\"transition\""), 8, "8 transitions");
     assert!(
-        html.contains("25 requirements: 15 covered, 10 uncovered"),
+        html.contains("<span class=\"covered\">15 covered</span>")
+            && html.contains("<span class=\"uncovered\">10 uncovered</span>"),
         "the engine coverage summary must be unchanged"
     );
     assert!(
