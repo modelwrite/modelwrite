@@ -1306,6 +1306,7 @@ impl Importer {
                 edges: graph_edges,
             }),
             provenance: None,
+            references: Vec::new(),
         };
 
         let loss = LossReport {

@@ -85,3 +85,39 @@ fn report_serializes_with_camel_case_keys() {
     assert!(keys.contains(&"changedAttributes"), "keys: {:?}", keys);
     assert!(!keys.contains(&"missing_elements"), "keys: {:?}", keys);
 }
+fn with_reference(revision: &str) -> OkfRoot {
+    let mut root = expected();
+    root.references.push(okf::types::SubsystemReference {
+        project: "radar".into(),
+        revision: revision.into(),
+        role: "radar".into(),
+    });
+    root
+}
+
+#[test]
+fn two_platforms_at_different_revisions_of_a_subsystem_diff_at_the_reference() {
+    // R2 in operation: the same subsystem at two different revisions is two different
+    // references, and the engine's own diff names the difference as a one-line change on
+    // the named reference - never a silent hash change.
+    let a = with_reference(&"a".repeat(64));
+    let b = with_reference(&"b".repeat(64));
+    let d = diff::diff(&a, &b);
+    assert!(!d.equal);
+    assert_eq!(d.changed_attributes, vec!["reference:radar".to_string()]);
+    assert!(d.missing_elements.is_empty());
+    assert!(d.extra_elements.is_empty());
+}
+
+#[test]
+fn a_reference_added_or_removed_is_an_extra_or_missing_element() {
+    let with = with_reference(&"a".repeat(64));
+    let without = expected();
+    let added = diff::diff(&without, &with);
+    assert_eq!(added.extra_elements, vec!["reference:radar".to_string()]);
+    let removed = diff::diff(&with, &without);
+    assert_eq!(
+        removed.missing_elements,
+        vec!["reference:radar".to_string()]
+    );
+}

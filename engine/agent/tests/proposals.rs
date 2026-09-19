@@ -259,6 +259,7 @@ fn a_document_material_renders_without_knowing_the_types() {
         activities: Vec::new(),
         graph: None,
         provenance: None,
+        references: Vec::new(),
     };
     let task = AgentTask {
         goal: "summarize the document".to_string(),

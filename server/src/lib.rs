@@ -133,6 +133,14 @@ pub fn app(state: AppState) -> Router {
             get(api::get_commit_record),
         )
         .route(
+            "/projects/:project/commits/:hash/references",
+            get(api::list_references),
+        )
+        .route(
+            "/projects/:project/commits/:hash/references/resolve",
+            get(api::resolve_references),
+        )
+        .route(
             "/projects/:project/commits/:hash/checks",
             get(gate_api::commit_checks),
         )

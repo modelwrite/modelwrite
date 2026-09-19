@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 
 use okf::types::{
-    Activity, Element, GraphEdge, GraphNode, OkfRoot, Requirement, StateMachine, Summary,
+    Activity, Element, GraphEdge, GraphNode, OkfRoot, Requirement, StateMachine,
+    SubsystemReference, Summary,
 };
 use serde::Serialize;
 
@@ -286,6 +287,18 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
         |r: &Requirement| r.id.clone(),
         &mut conflicts,
     );
+    // References are ordinary model content, so they merge like any other keyed list:
+    // the subsystem project is the key, and the revision and role are its content. One
+    // side re-pinning a subsystem is taken; two sides re-pinning the same subsystem to
+    // different revisions is a conflict, never a silent choice.
+    let references = merge_keyed(
+        "reference",
+        &base.references,
+        &ours.references,
+        &theirs.references,
+        |r: &SubsystemReference| r.project.clone(),
+        &mut conflicts,
+    );
 
     // Ordered structures merge all or nothing: see the rule list above.
     let state_machine: Option<StateMachine> = merge_unit(
@@ -367,6 +380,7 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
     merged.interfaces = interfaces;
     merged.signals = signals;
     merged.requirements = requirements;
+    merged.references = references;
     merged.state_machine = state_machine;
     merged.activities = activities;
     // A graph section is only emitted if some input had one: inventing an empty graph

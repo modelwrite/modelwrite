@@ -332,3 +332,36 @@ fn two_divergent_kind_changes_to_one_link_conflict() {
     assert_eq!(outcome.conflicts.len(), 1);
     assert_eq!(outcome.conflicts[0].kind, "bothModified");
 }
+fn model_with_ref(project_ref: &str, revision: &str) -> serde_json::Value {
+    let mut value = model("Block", false);
+    value["references"] = json!([
+        { "project": project_ref, "revision": revision, "role": "radar" }
+    ]);
+    value
+}
+
+#[test]
+fn a_reference_re_pinned_on_one_side_is_taken() {
+    let base = okf(model_with_ref("radar", "a1"));
+    let ours = okf(model_with_ref("radar", "a1"));
+    let theirs = okf(model_with_ref("radar", "b2"));
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(outcome.conflicts.is_empty(), "{:?}", outcome.conflicts);
+    let merged = outcome.merged.expect("clean merge");
+    assert_eq!(merged.references.len(), 1);
+    assert_eq!(merged.references[0].revision, "b2");
+}
+
+#[test]
+fn two_different_re_pins_of_one_reference_conflict() {
+    let base = okf(model_with_ref("radar", "a1"));
+    let ours = okf(model_with_ref("radar", "b2"));
+    let theirs = okf(model_with_ref("radar", "c3"));
+    let outcome = merge(&base, &ours, &theirs);
+    assert!(
+        outcome.merged.is_none(),
+        "two re-pins of one subsystem must conflict rather than silently pick one"
+    );
+    assert_eq!(outcome.conflicts.len(), 1);
+    assert_eq!(outcome.conflicts[0].subject, "reference:\"radar\"");
+}

@@ -79,6 +79,30 @@ pub fn validate(root: &OkfRoot) -> ValidationReport {
     if root.project.is_empty() {
         report.errors.push("project name is empty".to_string());
     }
+    for reference in &root.references {
+        let label = if reference.project.is_empty() {
+            "(unnamed project)".to_string()
+        } else {
+            reference.project.clone()
+        };
+        if reference.project.is_empty() {
+            report
+                .errors
+                .push("subsystem reference has an empty project".to_string());
+        }
+        if reference.revision.is_empty() {
+            report.errors.push(format!(
+                "subsystem reference to {} has an empty revision",
+                label
+            ));
+        }
+        if reference.role.is_empty() {
+            report.errors.push(format!(
+                "subsystem reference to {} has an empty role",
+                label
+            ));
+        }
+    }
     if root.graph.is_none() {
         report.errors.push("graph section is missing".to_string());
     }

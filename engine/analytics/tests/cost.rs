@@ -61,6 +61,7 @@ fn model(ids: &[&str]) -> OkfRoot {
         activities: Vec::new(),
         graph: None,
         provenance: None,
+        references: Vec::new(),
     }
 }
 

@@ -75,6 +75,7 @@ fn empty_okf(project: &str) -> OkfRoot {
             edges: Vec::new(),
         }),
         provenance: None,
+        references: Vec::new(),
     }
 }
 
