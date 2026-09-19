@@ -172,11 +172,14 @@ fn render_import_page(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let bindings = binding_registry::bindings();
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("import");
     Ok(import_page_markup(
         identity,
         state.auth.mechanism(),
         project,
         &bindings,
+        &nav,
     ))
 }
 
@@ -195,6 +198,17 @@ pub async fn submit_import(
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(nav) => nav,
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
     match perform_import(&state, &identity, &project, &form) {
         Ok(ImportResult::Committed {
             commit,
@@ -209,6 +223,7 @@ pub async fn submit_import(
                 &commit,
                 &artifact_hash,
                 &loss_report,
+                &nav,
             ),
         ),
         Ok(ImportResult::Blocking {
@@ -226,6 +241,7 @@ pub async fn submit_import(
                 &artifact_hash,
                 &loss_report,
                 &unaccepted,
+                &nav,
             ),
         ),
         Err(error) => layout::error_page(
@@ -328,6 +344,7 @@ fn import_page_markup(
     mechanism: &str,
     project: &str,
     bindings: &[BindingInfo],
+    nav: &layout::Nav,
 ) -> Markup {
     // The submit is offered only to a caller who may write: a reviewer who cannot write
     // must not be invited to fill a form that will only be refused on submit, exactly as
@@ -347,8 +364,9 @@ fn import_page_markup(
     let title = format!("modelwrite — {} — import", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -398,6 +416,7 @@ fn import_form_markup(project: &str, bindings: &[BindingInfo], can_import: bool)
 // ---------------------------------------------------------------------------
 // The outcome pages: retained, lost, and (when refused) the acceptance control.
 
+#[allow(clippy::too_many_arguments)]
 fn blocking_page(
     identity: &Identity,
     mechanism: &str,
@@ -406,6 +425,7 @@ fn blocking_page(
     artifact_hash: &str,
     loss_report: &LossReport,
     unaccepted: &[Mapping],
+    nav: &layout::Nav,
 ) -> Markup {
     let blocking = loss_report.blocking();
     let body = html! {
@@ -424,8 +444,9 @@ fn blocking_page(
     let title = format!("modelwrite — {} — import refused", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -438,6 +459,7 @@ fn committed_page(
     commit: &Commit,
     artifact_hash: &str,
     loss_report: &LossReport,
+    nav: &layout::Nav,
 ) -> Markup {
     let body = html! {
         h1 { "Import committed" }
@@ -454,8 +476,9 @@ fn committed_page(
     let title = format!("modelwrite — {} — import committed", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

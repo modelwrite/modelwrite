@@ -167,10 +167,13 @@ fn render_compare_page(
         }
     };
     let title = format!("modelwrite — {} — compare", project);
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("changes");
     Ok(layout::shell(
         &title,
-        Some(project),
+        &nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         state.auth.mechanism(),
         body,
     ))
@@ -349,6 +352,20 @@ pub async fn merge_form(
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(mut nav) => {
+            nav.section = Some("changes");
+            nav
+        }
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
     match perform_merge(&state, &identity, &project, &form) {
         Ok(result) => {
             let status = match &result.outcome {
@@ -357,7 +374,7 @@ pub async fn merge_form(
             };
             layout::html_response(
                 status,
-                merge_result_page(&identity, mechanism, &project, &result),
+                merge_result_page(&identity, mechanism, &project, &result, &nav),
             )
         }
         Err(error) => layout::error_page(
@@ -451,6 +468,7 @@ fn merge_result_page(
     mechanism: &str,
     project: &str,
     result: &MergeResult,
+    nav: &layout::Nav,
 ) -> Markup {
     let body = match &result.outcome {
         MergeOutcomeKind::Clean { commit } => html! {
@@ -501,8 +519,9 @@ fn merge_result_page(
     let title = format!("modelwrite — {} — merge", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

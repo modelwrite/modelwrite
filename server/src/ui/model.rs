@@ -20,7 +20,7 @@ use crate::api::{load_model, map_store_error, ApiState};
 use crate::assist::reasoner_status;
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
-use crate::store::Commit;
+use crate::store::{Commit, GateRun};
 use crate::ui::assist::assist_panel_markup;
 use crate::ui::layout;
 
@@ -56,14 +56,22 @@ pub async fn model_page(
     }
 }
 
-fn render_model_page(
+/// A project has either no model at all (nothing committed to any branch), or a model at
+/// the resolved commit. The empty case is a state to act on, not an error.
+#[allow(clippy::large_enum_variant)]
+enum LoadedView {
+    Empty,
+    Model { commit: Commit, root: OkfRoot },
+}
+
+/// The shared read path for every commit-scoped view: the SAME identity, Read-permission and
+/// project-scope decisions as the JSON handlers, then the commit and its parsed document.
+fn load_view(
     state: &ApiState,
     identity: &Identity,
     project: &str,
     query: &ModelQuery,
-) -> Result<Markup, ApiError> {
-    // The SAME identity, Read-permission and project-scope decisions as the JSON handlers:
-    // the workbench can never be a weaker path to the data.
+) -> Result<LoadedView, ApiError> {
     if !identity.may(Permission::Read) {
         return Err(ApiError::forbidden("read permission required"));
     }
@@ -90,12 +98,7 @@ fn render_model_page(
                 .list_branches(project)
                 .map_err(map_store_error)?;
             if branches.is_empty() {
-                return Ok(crate::ui::create::empty_model_page(
-                    identity,
-                    state.auth.mechanism(),
-                    project,
-                    &[],
-                ));
+                return Ok(LoadedView::Empty);
             }
             return Err(error);
         }
@@ -106,13 +109,58 @@ fn render_model_page(
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
     let root = load_model(state.store.as_ref(), project, &hash).map_err(map_store_error)?;
-    Ok(model_markup(
-        identity,
-        state.auth.mechanism(),
-        project,
-        &commit,
-        &root,
-    ))
+    Ok(LoadedView::Model { commit, root })
+}
+
+/// The overview: the model's counts, coverage, versions and last check, plus the links out to
+/// every section, above the full four-section view the three-pane workbench enhances.
+fn render_model_page(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    query: &ModelQuery,
+) -> Result<Markup, ApiError> {
+    let nav = layout::Nav::load(state, identity, Some(project))?;
+    match load_view(state, identity, project, query)? {
+        LoadedView::Empty => Ok(crate::ui::create::empty_model_page(
+            identity,
+            state.auth.mechanism(),
+            project,
+            &[],
+            &nav,
+        )),
+        LoadedView::Model { commit, root } => {
+            let mut nav = nav;
+            nav.section = Some("overview");
+            nav.branch = Some(commit.branch.clone());
+            nav.commit = Some(commit.hash.clone());
+            let branches = state
+                .store
+                .list_branches(project)
+                .map_err(map_store_error)?;
+            let latest_run = if identity.may(Permission::Write) || identity.may(Permission::Review)
+            {
+                state
+                    .store
+                    .gate_runs(project)
+                    .map_err(map_store_error)?
+                    .into_iter()
+                    .next()
+            } else {
+                None
+            };
+            Ok(model_markup(
+                identity,
+                state.auth.mechanism(),
+                project,
+                &commit,
+                &root,
+                &branches,
+                latest_run.as_ref(),
+                &nav,
+            ))
+        }
+    }
 }
 
 /// Resolve the commit to render: an explicit commit hash, else the named branch's tip
@@ -147,26 +195,38 @@ struct ViewContext {
     allocations: HashMap<String, Vec<Allocation>>,
 }
 
+/// Everything the sections need, computed once from the document.
+fn view_context(root: &OkfRoot) -> ViewContext {
+    let nodes = node_index(root);
+    let allocations = allocations(root, &nodes);
+    let coverage = root.graph.as_ref().map(|_| requirement_coverage(root));
+    ViewContext {
+        coverage,
+        nodes,
+        allocations,
+    }
+}
+
+/// The overview body: counts, coverage, versions and last check above the full four-section
+/// view, with a link out to every section.
+#[allow(clippy::too_many_arguments)]
 fn model_markup(
     identity: &Identity,
     mechanism: &str,
     project: &str,
     commit: &Commit,
     root: &OkfRoot,
+    branches: &[(String, String)],
+    latest_run: Option<&GateRun>,
+    nav: &layout::Nav,
 ) -> Markup {
-    let nodes = node_index(root);
-    let allocations = allocations(root, &nodes);
-    let coverage = root.graph.as_ref().map(|_| requirement_coverage(root));
-    let ctx = ViewContext {
-        coverage,
-        nodes,
-        allocations,
-    };
+    let ctx = view_context(root);
     // The edit link is offered only to a caller who may write, so a read-only reviewer is
     // not invited into a form that will only be refused on submit.
     let can_edit = identity.may(Permission::Write);
     let body = html! {
-        h1 { "Model" }
+        h1 { "Overview" }
+        (overview_summary(root, &ctx, branches, latest_run, nav))
         p class="meta" {
             "branch " (commit.branch) " · commit " code { (short_hash(&commit.hash)) }
             @if !commit.message.is_empty() {
@@ -199,8 +259,234 @@ fn model_markup(
     let title = format!("modelwrite — {}", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
+        mechanism,
+        body,
+    )
+}
+
+/// The overview cards plus the section links: what this model is, and where to go next.
+fn overview_summary(
+    root: &OkfRoot,
+    ctx: &ViewContext,
+    branches: &[(String, String)],
+    latest_run: Option<&GateRun>,
+    nav: &layout::Nav,
+) -> Markup {
+    let covered = ctx
+        .coverage
+        .as_ref()
+        .map(|report| report.covered)
+        .unwrap_or(0);
+    let total = ctx
+        .coverage
+        .as_ref()
+        .map(|report| report.total)
+        .unwrap_or(root.requirements.len());
+    let uncovered = ctx
+        .coverage
+        .as_ref()
+        .map(|report| report.uncovered.len())
+        .unwrap_or(root.requirements.len());
+    html! {
+        div class="overview-summary" {
+            div class="overview-card" {
+                span class="ov-label" { "Coverage" }
+                div class="ov-value" { (covered) " / " (total) }
+                div class="ov-note" { (uncovered) " uncovered" }
+            }
+            div class="overview-card" {
+                span class="ov-label" { "Elements" }
+                div class="ov-value" { (root.structure.len()) }
+                div class="ov-note" {
+                    (root.signals.len()) " signals · " (root.interfaces.len()) " interfaces"
+                }
+            }
+            div class="overview-card" {
+                span class="ov-label" { "Requirements" }
+                div class="ov-value" { (root.requirements.len()) }
+                div class="ov-note" { (root.activities.len()) " activities" }
+            }
+            div class="overview-card" {
+                span class="ov-label" { "Versions" }
+                div class="ov-value" { (branches.len()) }
+                div class="ov-note" {
+                    @for (name, tip) in branches {
+                        (name) " " code { (short_hash(tip)) } "; "
+                    }
+                }
+            }
+            @if let Some(run) = latest_run {
+                div class="overview-card" {
+                    span class="ov-label" { "Last check" }
+                    div class="ov-value" {
+                        @if run.passed {
+                            span class="covered" { "passed" }
+                        } @else {
+                            span class="uncovered" { "failed" }
+                        }
+                    }
+                    div class="ov-note" { code { (short_hash(&run.candidate_hash)) } }
+                }
+            }
+        }
+        nav class="section-links" aria-label="model sections" {
+            @for (key, label) in layout::SECTIONS.iter().copied() {
+                a.current[nav.section == Some(key)] href=(layout::section_href(nav, key)) { (label) }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The per-section addresses: each section of the overview at its own URL, reusing the same
+// section markup the overview renders rather than a second implementation.
+
+/// `GET /ui/projects/:project/structure` - the containment tree plus the state and activity
+/// views, at their own address rather than buried in one long page.
+pub async fn structure_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Query(query): Query<ModelQuery>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match render_section_page(&state, &identity, &project, &query, "structure") {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+/// `GET /ui/projects/:project/requirements` - the requirement table at its own address.
+pub async fn requirements_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Query(query): Query<ModelQuery>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match render_section_page(&state, &identity, &project, &query, "requirements") {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+/// `GET /ui/projects/:project/traceability` - the traceability matrix at its own address.
+pub async fn traceability_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Query(query): Query<ModelQuery>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match render_section_page(&state, &identity, &project, &query, "traceability") {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+/// The shared renderer for the three section pages.
+fn render_section_page(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    query: &ModelQuery,
+    section: &'static str,
+) -> Result<Markup, ApiError> {
+    let nav = layout::Nav::load(state, identity, Some(project))?;
+    match load_view(state, identity, project, query)? {
+        LoadedView::Empty => Ok(crate::ui::create::empty_model_page(
+            identity,
+            state.auth.mechanism(),
+            project,
+            &[],
+            &nav,
+        )),
+        LoadedView::Model { commit, root } => {
+            let mut nav = nav;
+            nav.section = Some(section);
+            nav.branch = Some(commit.branch.clone());
+            nav.commit = Some(commit.hash.clone());
+            Ok(section_markup(
+                identity,
+                state.auth.mechanism(),
+                project,
+                &commit,
+                &root,
+                section,
+                &nav,
+            ))
+        }
+    }
+}
+
+fn section_markup(
+    identity: &Identity,
+    mechanism: &str,
+    project: &str,
+    commit: &Commit,
+    root: &OkfRoot,
+    section: &'static str,
+    nav: &layout::Nav,
+) -> Markup {
+    let ctx = view_context(root);
+    let can_edit = identity.may(Permission::Write);
+    let body = match section {
+        "structure" => html! {
+            h1 { "Structure" }
+            @if can_edit {
+                p class="meta" {
+                    a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+                }
+            }
+            (structure_section(root, project, &commit.branch, can_edit))
+            (state_activity_section(root, &ctx))
+        },
+        "requirements" => html! {
+            h1 { "Requirements" }
+            (requirements_section(root, &ctx))
+        },
+        "traceability" => html! {
+            h1 { "Traceability" }
+            (traceability_section(root, &ctx))
+        },
+        _ => html! { h1 { "Overview" } },
+    };
+    let title = format!("modelwrite — {} — {}", project, section);
+    layout::shell(
+        &title,
+        nav,
+        Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

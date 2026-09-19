@@ -123,12 +123,17 @@ fn render_diagram_page(
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
     let root = load_model(state.store.as_ref(), project, &hash).map_err(map_store_error)?;
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("diagram");
+    nav.branch = Some(commit.branch.clone());
+    nav.commit = Some(commit.hash.clone());
     Ok(diagram_markup(
         identity,
         state.auth.mechanism(),
         project,
         &commit,
         &root,
+        &nav,
     ))
 }
 
@@ -138,6 +143,7 @@ fn diagram_markup(
     project: &str,
     commit: &Commit,
     root: &OkfRoot,
+    nav: &layout::Nav,
 ) -> Markup {
     let body = html! {
         h1 { "Diagram" }
@@ -149,7 +155,7 @@ fn diagram_markup(
             " · by " (commit.author)
         }
         p class="meta" {
-            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Back to the model" }
+            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Back to the overview" }
         }
         @if let Some(graph) = &root.graph {
             (PreEscaped(diagram_svg(graph)))
@@ -161,8 +167,9 @@ fn diagram_markup(
     let title = format!("modelwrite — {} — diagram", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

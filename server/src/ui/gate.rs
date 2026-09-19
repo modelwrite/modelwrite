@@ -63,11 +63,14 @@ fn render_gate_list(
     let mut runs = state.store.gate_runs(project).map_err(map_store_error)?;
     // The store returns runs in insertion order; the page lists the most recent first.
     runs.reverse();
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("checks");
     Ok(gate_list_markup(
         identity,
         state.auth.mechanism(),
         project,
         &runs,
+        &nav,
     ))
 }
 
@@ -76,9 +79,11 @@ fn gate_list_markup(
     mechanism: &str,
     project: &str,
     runs: &[GateRun],
+    nav: &layout::Nav,
 ) -> Markup {
     let body = html! {
-        h1 { "Gate runs" }
+        h1 { "Checks" }
+        p class="meta" { "Recorded gate runs, newest first." }
         @if runs.is_empty() {
             p { "No gate runs yet. A gate run through the API appears here." }
         } @else {
@@ -117,8 +122,9 @@ fn gate_list_markup(
     let title = format!("modelwrite — {} — gate", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -184,11 +190,14 @@ fn render_gate_detail(
         .ok_or_else(|| {
             ApiError::not_found(format!("gate run {} against {}", candidate, reference))
         })?;
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("checks");
     Ok(gate_detail_markup(
         identity,
         state.auth.mechanism(),
         project,
         &run,
+        &nav,
     ))
 }
 
@@ -197,6 +206,7 @@ fn gate_detail_markup(
     mechanism: &str,
     project: &str,
     run: &GateRun,
+    nav: &layout::Nav,
 ) -> Markup {
     // The recorded evidence is the AUTHORITY: the page renders what the gate reported,
     // never recomputes it, so the verdict, the names and the numbers can never disagree
@@ -340,8 +350,9 @@ fn gate_detail_markup(
     let title = format!("modelwrite — {} — gate", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

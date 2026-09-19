@@ -106,10 +106,23 @@ pub async fn create_model(
             commit.hash
         ))
         .into_response(),
-        Ok(CreateModelOutcome::Refused { errors }) => layout::html_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            empty_model_page(&identity, mechanism, &project, &errors),
-        ),
+        Ok(CreateModelOutcome::Refused { errors }) => {
+            let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+                Ok(nav) => nav,
+                Err(error) => {
+                    return layout::error_page(
+                        error.status,
+                        Some(&identity.subject),
+                        mechanism,
+                        &error.message,
+                    );
+                }
+            };
+            layout::html_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                empty_model_page(&identity, mechanism, &project, &errors, &nav),
+            )
+        }
         Err(error) => layout::error_page(
             error.status,
             Some(&identity.subject),
@@ -243,10 +256,11 @@ pub fn empty_model_page(
     mechanism: &str,
     project: &str,
     errors: &[String],
+    nav: &crate::ui::layout::Nav,
 ) -> Markup {
     let can_write = identity.may(Permission::Write);
     let body = html! {
-        h1 { "Model" }
+        h1 { "Overview" }
         p class="empty-state" {
             "This project has no model yet — start one or import a legacy model."
         }
@@ -269,8 +283,9 @@ pub fn empty_model_page(
     let title = format!("modelwrite — {}", project);
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -441,12 +456,16 @@ fn render_element_form(
         branch: branch.to_string(),
         message: String::new(),
     };
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("structure");
+    nav.branch = Some(branch.to_string());
     Ok(element_page(
         identity,
         state.auth.mechanism(),
         project,
         &input,
         &[],
+        &nav,
     ))
 }
 
@@ -471,10 +490,26 @@ pub async fn create_element(
             commit.hash
         ))
         .into_response(),
-        Ok(CreateElementOutcome::Refused { input, errors }) => layout::html_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            element_page(&identity, mechanism, &project, &input, &errors),
-        ),
+        Ok(CreateElementOutcome::Refused { input, errors }) => {
+            let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+                Ok(mut nav) => {
+                    nav.section = Some("structure");
+                    nav
+                }
+                Err(error) => {
+                    return layout::error_page(
+                        error.status,
+                        Some(&identity.subject),
+                        mechanism,
+                        &error.message,
+                    );
+                }
+            };
+            layout::html_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                element_page(&identity, mechanism, &project, &input, &errors, &nav),
+            )
+        }
         Err(error) => layout::error_page(
             error.status,
             Some(&identity.subject),
@@ -653,6 +688,7 @@ fn element_page(
     project: &str,
     input: &ElementInput,
     errors: &[String],
+    nav: &layout::Nav,
 ) -> Markup {
     let can_write = identity.may(Permission::Write);
     let title = format!("modelwrite — {} — add element", project);
@@ -685,8 +721,9 @@ fn element_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

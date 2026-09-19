@@ -73,13 +73,30 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/ui/projects/:project", get(ui::pages::project_page))
         .route(
+            "/ui/projects/:project/changes",
+            get(ui::pages::project_page),
+        )
+        .route(
             "/ui/projects/:project/branch",
             post(ui::pages::create_branch),
         )
         .route("/ui/projects/:project/model", get(ui::model::model_page))
+        .route("/ui/projects/:project/overview", get(ui::model::model_page))
+        .route(
+            "/ui/projects/:project/structure",
+            get(ui::model::structure_page),
+        )
+        .route(
+            "/ui/projects/:project/requirements",
+            get(ui::model::requirements_page),
+        )
+        .route(
+            "/ui/projects/:project/traceability",
+            get(ui::model::traceability_page),
+        )
         .route(
             "/ui/projects/:project/assist",
-            post(ui::assist::assist_form),
+            get(ui::assist::assist_page).post(ui::assist::assist_form),
         )
         .route(
             "/ui/projects/:project/proposals",
@@ -111,8 +128,13 @@ pub fn app(state: AppState) -> Router {
             get(ui::import::import_page).post(ui::import::submit_import),
         )
         .route("/ui/projects/:project/gate", get(ui::gate::gate_list))
+        .route("/ui/projects/:project/checks", get(ui::gate::gate_list))
         .route(
             "/ui/projects/:project/gate/:reference/:candidate",
+            get(ui::gate::gate_detail),
+        )
+        .route(
+            "/ui/projects/:project/checks/:reference/:candidate",
             get(ui::gate::gate_detail),
         )
         .route(

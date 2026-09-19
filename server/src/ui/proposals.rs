@@ -62,11 +62,14 @@ fn render_proposals_page(
         .store
         .list_proposals(project)
         .map_err(map_store_error)?;
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("proposals");
     Ok(proposals_page_markup(
         identity,
         state.auth.mechanism(),
         project,
         &records,
+        &nav,
     ))
 }
 
@@ -75,6 +78,7 @@ fn proposals_page_markup(
     mechanism: &str,
     project: &str,
     records: &[ProposalRecord],
+    nav: &layout::Nav,
 ) -> Markup {
     let title = format!("modelwrite — {} — proposals", project);
     let body = html! {
@@ -102,8 +106,9 @@ fn proposals_page_markup(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

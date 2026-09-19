@@ -14,9 +14,12 @@ use serde::Deserialize;
 
 use agent::{Confidence, Proposal, ProposedAction, ReviewArtifact};
 
-use crate::api::{validate_name, verify_actor, ApiState};
-use crate::assist::{assist_core, AssistOutcome, LiveBackend, ReasonerStatus, LIVE_AGENT};
+use crate::api::{map_store_error, validate_name, verify_actor, ApiState};
+use crate::assist::{
+    assist_core, reasoner_status, AssistOutcome, LiveBackend, ReasonerStatus, LIVE_AGENT,
+};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
+use crate::error::ApiError;
 use crate::proposal_api::accept_proposal_core;
 use crate::store::{Commit, CommitProvenance};
 use crate::ui::layout;
@@ -85,6 +88,96 @@ fn assist_form_markup(project: &str, branch: &str) -> Markup {
     }
 }
 
+/// `GET /ui/projects/:project/assist` - the assist panel as its own section page. It targets
+/// the default branch (the one the model page resolves to) and offers the panel to a writer; a
+/// viewer sees the status but never the request box.
+pub async fn assist_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    match render_assist_page(&state, &identity, &project) {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+fn render_assist_page(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+) -> Result<Markup, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    if state
+        .store
+        .project(project)
+        .map_err(map_store_error)?
+        .is_none()
+    {
+        return Err(ApiError::not_found(format!("project {}", project)));
+    }
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("assist");
+    nav.branch = Some("main".to_string());
+    let has_model = state
+        .store
+        .branch_tip(project, "main")
+        .map_err(map_store_error)?
+        .is_some();
+    Ok(assist_page_markup(
+        identity,
+        state.auth.mechanism(),
+        project,
+        has_model,
+        &nav,
+    ))
+}
+
+fn assist_page_markup(
+    identity: &Identity,
+    mechanism: &str,
+    project: &str,
+    has_model: bool,
+    nav: &layout::Nav,
+) -> Markup {
+    let can_write = identity.may(Permission::Write);
+    let body = html! {
+        h1 { "Assist" }
+        p { "Describe a change in words; the reasoner drafts a proposal for you to review before accepting." }
+        @if !has_model {
+            p class="empty-state" { "This project has no model yet — start one before asking for changes." }
+        } @else if can_write {
+            (assist_panel_markup(project, "main", &reasoner_status()))
+        } @else {
+            p { "Ask a writer to propose changes." }
+        }
+    };
+    let title = format!("modelwrite — {} — assist", project);
+    layout::shell(
+        &title,
+        nav,
+        Some(&identity.subject),
+        identity.may(Permission::Administer),
+        mechanism,
+        body,
+    )
+}
+
 #[derive(Deserialize)]
 pub struct AssistForm {
     pub request: String,
@@ -123,6 +216,21 @@ pub async fn assist_form(
             "project not in scope",
         );
     }
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(mut nav) => {
+            nav.section = Some("assist");
+            nav.branch = Some(form.branch.clone());
+            nav
+        }
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
     match assist_core(
         state.store.as_ref(),
         &project,
@@ -136,7 +244,7 @@ pub async fn assist_form(
     {
         Ok(outcome) => layout::html_response(
             StatusCode::OK,
-            assist_result_page(&identity, mechanism, &project, &form.branch, &outcome),
+            assist_result_page(&identity, mechanism, &project, &form.branch, &outcome, &nav),
         ),
         Err(error) => layout::error_page(
             error.status,
@@ -155,6 +263,7 @@ fn assist_result_page(
     project: &str,
     branch: &str,
     outcome: &AssistOutcome,
+    nav: &layout::Nav,
 ) -> Markup {
     let title = format!("modelwrite — {} — assist review", project);
     let body = html! {
@@ -175,8 +284,9 @@ fn assist_result_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -333,6 +443,21 @@ pub async fn accept_proposal_form(
             &error.message,
         );
     }
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(mut nav) => {
+            nav.section = Some("assist");
+            nav.branch = Some(form.branch.clone());
+            nav
+        }
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
     // The author is the verified identity, never a field the browser supplies.
     let author = identity.subject.clone();
     match accept_proposal_core(
@@ -350,7 +475,7 @@ pub async fn accept_proposal_form(
     ) {
         Ok(commit) => layout::html_response(
             StatusCode::CREATED,
-            accept_result_page(&identity, mechanism, &project, &commit),
+            accept_result_page(&identity, mechanism, &project, &commit, &nav),
         ),
         Err(error) => layout::error_page(
             error.status,
@@ -366,6 +491,7 @@ fn accept_result_page(
     mechanism: &str,
     project: &str,
     commit: &Commit,
+    nav: &layout::Nav,
 ) -> Markup {
     let parties = acceptance_parties(commit);
     let title = format!("modelwrite — {} — proposal accepted", project);
@@ -395,8 +521,9 @@ fn accept_result_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

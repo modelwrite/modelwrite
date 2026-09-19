@@ -156,11 +156,13 @@ fn render_project_list(
             latest,
         });
     }
+    let nav = layout::Nav::load(state, identity, None)?;
     Ok(project_list_page(
         identity,
         state.auth.mechanism(),
         &rows,
         notice,
+        &nav,
     ))
 }
 
@@ -169,6 +171,7 @@ fn project_list_page(
     mechanism: &str,
     rows: &[ProjectRow],
     notice: Option<&str>,
+    nav: &layout::Nav,
 ) -> Markup {
     let body = html! {
         h1 { "Projects" }
@@ -201,8 +204,9 @@ fn project_list_page(
     };
     layout::shell(
         "modelwrite — projects",
-        None,
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -280,12 +284,15 @@ fn render_project_page(
         let commit = state.store.commit(project, &tip).map_err(map_store_error)?;
         rows.push(BranchRow { name, tip, commit });
     }
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("changes");
     Ok(branch_list_page(
         identity,
         state.auth.mechanism(),
         project,
         &rows,
         notice,
+        &nav,
     ))
 }
 
@@ -295,10 +302,12 @@ fn branch_list_page(
     project: &str,
     rows: &[BranchRow],
     notice: Option<&str>,
+    nav: &layout::Nav,
 ) -> Markup {
     let title = format!("modelwrite — {}", project);
     let body = html! {
-        h1 { "Branches" }
+        h1 { "Changes" }
+        p class="meta" { "Every version is a branch; its identity is its tip commit." }
         @if let Some(notice) = notice {
             section class="form-errors" {
                 h2 { "The branch was not created" }
@@ -382,8 +391,9 @@ fn branch_list_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

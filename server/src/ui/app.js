@@ -137,12 +137,21 @@
     propsPanel.appendChild(propsHead);
     propsPanel.appendChild(propsBody);
 
+    // The context bar (project · version · commit) is page chrome, not model content, so it
+    // stays above the three panes rather than being swallowed into the scrollable content pane.
+    var contextBar = main.querySelector(':scope > .context-bar');
+    if (contextBar) {
+      contextBar.remove();
+    }
     while (main.firstChild) {
       content.appendChild(main.firstChild);
     }
     workbench.appendChild(treePanel);
     workbench.appendChild(content);
     workbench.appendChild(propsPanel);
+    if (contextBar) {
+      main.appendChild(contextBar);
+    }
     main.appendChild(workbench);
 
     var search = el('input', 'mw-search');

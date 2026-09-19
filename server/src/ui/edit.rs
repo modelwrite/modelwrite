@@ -178,6 +178,9 @@ fn render_edit_form(
         .store
         .holders_of(project, &[element_id.to_string()], now_seconds())
         .map_err(map_store_error)?;
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("structure");
+    nav.branch = Some(branch.to_string());
     Ok(edit_page(
         identity,
         state.auth.mechanism(),
@@ -186,6 +189,7 @@ fn render_edit_form(
         &input,
         &holders,
         &[],
+        &nav,
     ))
 }
 
@@ -204,17 +208,31 @@ pub async fn submit_edit(
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(mut nav) => {
+            nav.section = Some("structure");
+            nav
+        }
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
     match perform_edit(&state, &identity, &project, &element, &form) {
         Ok(EditOutcome::Committed { commit }) => layout::html_response(
             StatusCode::CREATED,
-            edit_success_page(&identity, mechanism, &project, &commit),
+            edit_success_page(&identity, mechanism, &project, &commit, &nav),
         ),
         Ok(EditOutcome::Invalid { input, errors }) => {
             let holders = current_holders(&state, &project, &element);
             layout::html_response(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 edit_page(
-                    &identity, mechanism, &project, &element, &input, &holders, &errors,
+                    &identity, mechanism, &project, &element, &input, &holders, &errors, &nav,
                 ),
             )
         }
@@ -230,6 +248,7 @@ pub async fn submit_edit(
                     &input,
                     &holders,
                     &[message],
+                    &nav,
                 ),
             )
         }
@@ -432,6 +451,7 @@ fn current_holders(state: &ApiState, project: &str, element_id: &str) -> Vec<Loc
 
 /// The edit form itself. When another holder has a live lease the submit button is disabled
 /// and the holder is named; when the result was invalid the validator's errors are listed.
+#[allow(clippy::too_many_arguments)]
 fn edit_page(
     identity: &Identity,
     mechanism: &str,
@@ -440,6 +460,7 @@ fn edit_page(
     input: &EditInput,
     holders: &[Lock],
     errors: &[String],
+    nav: &layout::Nav,
 ) -> Markup {
     let blocked: Vec<&Lock> = holders
         .iter()
@@ -500,8 +521,9 @@ fn edit_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )
@@ -524,6 +546,7 @@ fn edit_success_page(
     mechanism: &str,
     project: &str,
     commit: &Commit,
+    nav: &layout::Nav,
 ) -> Markup {
     let title = format!("modelwrite — {} — committed", project);
     let body = html! {
@@ -538,8 +561,9 @@ fn edit_success_page(
     };
     layout::shell(
         &title,
-        Some(project),
+        nav,
         Some(&identity.subject),
+        identity.may(Permission::Administer),
         mechanism,
         body,
     )

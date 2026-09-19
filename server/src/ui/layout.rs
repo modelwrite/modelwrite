@@ -12,6 +12,10 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
+use crate::api::{map_store_error, ApiState};
+use crate::auth::Identity;
+use crate::error::ApiError;
+
 const STYLE: &str = r#"
 /* =========================================================================
    modelwrite design system
@@ -638,6 +642,120 @@ li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
   border-radius: var(--radius-sm);
 }
 
+/* -- chrome: model switcher, identity chip, context bar ----------------- */
+/* The global bar's model switcher is a pure-HTML <details> disclosure, so it
+   works with JavaScript disabled exactly like the navigator links. */
+
+.site-header .switcher { position: relative; }
+.site-header .switcher summary {
+  list-style: none;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 13px; font-weight: 600; color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.28rem 0.65rem;
+  cursor: pointer;
+}
+.site-header .switcher summary::-webkit-details-marker { display: none; }
+.site-header .switcher summary::after { content: "\25be"; color: var(--text-3); }
+.site-header .switcher[open] summary { border-color: var(--accent); }
+.site-header .switcher .menu {
+  position: absolute; top: calc(100% + 0.35rem); left: 0; z-index: 40;
+  min-width: 15rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(31, 35, 40, 0.14);
+  padding: 0.35rem; margin: 0; list-style: none;
+}
+.site-header .switcher .menu a {
+  display: block; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm);
+  color: var(--text); font-size: 13px;
+}
+.site-header .switcher .menu a:hover { background: var(--surface-1); text-decoration: none; }
+.site-header .switcher .menu a.current {
+  background: var(--accent-tint); color: var(--accent-strong); font-weight: 650;
+}
+
+.site-header .new-model {
+  font-size: 12px; font-weight: 600; color: var(--on-accent);
+  background: var(--accent); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 0.28rem 0.7rem;
+}
+.site-header .new-model:hover { background: var(--accent-strong); color: var(--on-accent); text-decoration: none; }
+
+.site-header .chip {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  font-size: 12px; color: var(--text-2);
+  background: var(--surface-1); border: 1px solid var(--border-muted);
+  border-radius: 999px; padding: 0.28rem 0.75rem;
+  white-space: nowrap;
+}
+.site-header .chip::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pass);
+}
+
+/* -- chrome: the left navigator ------------------------------------------ */
+.rail .nav-group { margin-bottom: 1.1rem; }
+.rail .nav-group-title {
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0 0.7rem 0.35rem;
+}
+.rail a.current {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* -- chrome: the context bar --------------------------------------------- */
+.context-bar {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.85rem;
+  margin-bottom: 1.25rem;
+}
+.context-bar .ctx-project { font-weight: 650; color: var(--text); }
+.context-bar .ctx-sep { color: var(--text-3); }
+.context-bar code { color: var(--text-2); }
+.context-bar .ctx-actions { margin-left: auto; display: flex; gap: 0.5rem; }
+
+/* -- chrome: the overview summary and section links ---------------------- */
+.overview-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+.overview-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+}
+.overview-card .ov-label {
+  display: block; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3); margin-bottom: 0.2rem;
+}
+.overview-card .ov-value { font-size: 18px; font-weight: 650; color: var(--text); }
+.overview-card .ov-note { font-size: 12px; color: var(--text-2); }
+
+.section-links { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.25rem; }
+.section-links a {
+  font-size: 12px; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.25rem 0.7rem;
+}
+.section-links a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.section-links a.current { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
+
 /* -- diagram ------------------------------------------------------------- */
 
 svg .kind-header { fill: var(--text-2); }
@@ -649,10 +767,90 @@ pub fn html_response(status: StatusCode, markup: Markup) -> Response {
     (status, Html(markup.into_string())).into_response()
 }
 
+/// The sections of a model, in navigator order. The key is the route segment and the
+/// label is what the navigator shows; the current section is marked on every page inside a
+/// model.
+pub const SECTIONS: &[(&str, &str)] = &[
+    ("overview", "Overview"),
+    ("structure", "Structure"),
+    ("requirements", "Requirements"),
+    ("traceability", "Traceability"),
+    ("diagram", "Diagram"),
+    ("checks", "Checks"),
+    ("changes", "Changes"),
+    ("proposals", "Proposals"),
+    ("import", "Import"),
+    ("assist", "Assist"),
+];
+
+/// Everything the shell needs to render global navigation: the reachable models, the current
+/// one, the current section and (for a commit-scoped view) the branch and commit being shown.
+pub struct Nav {
+    pub projects: Vec<String>,
+    pub current: Option<String>,
+    pub section: Option<&'static str>,
+    pub branch: Option<String>,
+    pub commit: Option<String>,
+}
+
+impl Nav {
+    /// The models a caller may reach, filtered exactly as the JSON list handler filters them, so
+    /// the navigator can never disclose a project name the caller is not in scope for.
+    pub fn load(
+        state: &ApiState,
+        identity: &Identity,
+        current: Option<&str>,
+    ) -> Result<Nav, ApiError> {
+        let mut projects = Vec::new();
+        for project in state.store.list_projects().map_err(map_store_error)? {
+            if identity.may_reach(&project.name) {
+                projects.push(project.name);
+            }
+        }
+        projects.sort();
+        Ok(Nav {
+            projects,
+            current: current.map(str::to_string),
+            section: None,
+            branch: None,
+            commit: None,
+        })
+    }
+
+    /// The sign-in and error pages have no model context.
+    pub fn none() -> Nav {
+        Nav {
+            projects: Vec::new(),
+            current: None,
+            section: None,
+            branch: None,
+            commit: None,
+        }
+    }
+}
+
+/// The address of a section for the current model, preserving the branch/commit being viewed so
+/// moving between commit-scoped sections keeps the same version. Sections that are project-wide
+/// (checks, changes, proposals, import, assist) ignore the query, so carrying it is harmless.
+pub fn section_href(nav: &Nav, key: &str) -> String {
+    let project = nav.current.as_deref().unwrap_or("");
+    let mut url = format!("/ui/projects/{}/{}", crate::ui::urlencode(project), key);
+    if let Some(commit) = &nav.commit {
+        url.push_str(&format!("?commit={}", crate::ui::urlencode(commit)));
+    } else if let Some(branch) = &nav.branch {
+        url.push_str(&format!("?branch={}", crate::ui::urlencode(branch)));
+    }
+    url
+}
+
+/// The single page shell: the global bar, the left navigator (inside a model) and the content
+/// area with its context bar. Everything is server-rendered links - the switcher is a plain
+/// HTML \<details\> disclosure - so the workbench is fully usable with JavaScript disabled.
 pub fn shell(
     title: &str,
-    project: Option<&str>,
+    nav: &Nav,
     subject: Option<&str>,
+    can_administer: bool,
     mechanism: &str,
     body: Markup,
 ) -> Markup {
@@ -668,10 +866,28 @@ pub fn shell(
             body {
                 header class="site-header" {
                     a class="brand" href="/ui" { "modelwrite" }
-                    @if let Some(project) = project {
-                        span class="project" { (project) }
+                    @if !nav.projects.is_empty() {
+                        details class="switcher" {
+                            summary {
+                                @if let Some(current) = &nav.current { (current) }
+                                @else { "switch model" }
+                            }
+                            ul class="menu" {
+                                @for project in &nav.projects {
+                                    li {
+                                        a.current[nav.current.as_deref() == Some(project.as_str())]
+                                          href={ "/ui/projects/" (crate::ui::urlencode(project.as_str())) "/overview" } {
+                                            (project)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    span class="who" {
+                    @if can_administer {
+                        a class="new-model" href="/ui" { "New model" }
+                    }
+                    span class="chip" {
                         @if let Some(subject) = subject {
                             (subject) " via " (mechanism)
                         } @else {
@@ -680,16 +896,77 @@ pub fn shell(
                     }
                 }
                 div class="layout" {
-                    nav class="rail" aria-label="workbench" {
-                        ul {
-                            li { a href="/ui" { "Projects" } }
-                        }
+                    @if nav.current.is_some() {
+                        (left_nav(nav))
                     }
-                    main { (body) }
+                    main {
+                        @if nav.current.is_some() {
+                            (context_bar(nav))
+                        }
+                        (body)
+                    }
                 }
             }
         }
     }
+}
+
+/// The left navigator: the MODELS group (one click to switch model) and the SECTIONS group for
+/// the current model, the current section marked. Server-rendered links, never a JavaScript menu.
+fn left_nav(nav: &Nav) -> Markup {
+    html! {
+        nav class="rail" aria-label="workbench" {
+            div class="nav-group" {
+                div class="nav-group-title" { "Models" }
+                ul {
+                    @for project in &nav.projects {
+                        li {
+                            a.current[nav.current.as_deref() == Some(project.as_str())]
+                              href={ "/ui/projects/" (crate::ui::urlencode(project.as_str())) "/overview" } {
+                                (project)
+                            }
+                        }
+                    }
+                }
+            }
+            div class="nav-group" {
+                div class="nav-group-title" { "Sections" }
+                ul {
+                    @for (key, label) in SECTIONS.iter().copied() {
+                        li {
+                            a.current[nav.section == Some(key)] href=(section_href(nav, key)) { (label) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The context bar: which project, version (branch) and commit are being viewed. The version
+/// actions (new version, compare, make current) attach here in the following task; for now it
+/// only displays the context clearly.
+fn context_bar(nav: &Nav) -> Markup {
+    html! {
+        div class="context-bar" {
+            @if let Some(current) = &nav.current {
+                span class="ctx-project" { (current) }
+            }
+            @if let Some(branch) = &nav.branch {
+                span class="ctx-sep" { "·" }
+                span { "version " code { (branch) } }
+            }
+            @if let Some(commit) = &nav.commit {
+                span class="ctx-sep" { "·" }
+                span { "commit " code { (short_hash(commit)) } }
+            }
+            span class="ctx-actions" {}
+        }
+    }
+}
+
+fn short_hash(hash: &str) -> &str {
+    hash.get(..8).unwrap_or(hash)
 }
 
 pub fn sign_in_page(mechanism: &str, message: &str) -> Response {
@@ -703,7 +980,14 @@ pub fn sign_in_page(mechanism: &str, message: &str) -> Response {
     };
     html_response(
         StatusCode::UNAUTHORIZED,
-        shell("sign in — modelwrite", None, None, mechanism, body),
+        shell(
+            "sign in — modelwrite",
+            &Nav::none(),
+            None,
+            false,
+            mechanism,
+            body,
+        ),
     )
 }
 
@@ -721,6 +1005,13 @@ pub fn error_page(
     };
     html_response(
         status,
-        shell("error — modelwrite", None, subject, mechanism, body),
+        shell(
+            "error — modelwrite",
+            &Nav::none(),
+            subject,
+            false,
+            mechanism,
+            body,
+        ),
     )
 }
