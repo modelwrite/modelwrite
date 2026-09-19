@@ -105,6 +105,46 @@ jobs:
           cargo test --workspace --no-fail-fast
           cargo test -p mw-server --test postgres --no-fail-fast -- --include-ignored
 
+  browser:
+    # Exercises the workbench's three-pane enhancement (server/src/ui/app.js) in a
+    # real headless browser. The Rust tests assert the page's data-* attributes
+    # structurally, but a syntactically valid JS file can still do nothing: this job
+    # proves the enhancement's RUNTIME behaviour (the tree builds, clicking selects,
+    # the properties panel updates, search filters, keyboard navigation works, deep
+    # links highlight, the diagram carries the selection hook). Playwright and
+    # Chromium live only here, under e2e/, as devDependencies: they are never served
+    # by the product, never fetched at page load, and never enter the Docker image
+    # (deploy/Dockerfile copies only Cargo.toml, engine, server and cli).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: build mw-server
+        run: cargo build -p mw-server
+      - name: install Playwright and Chromium
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: run the browser tests
+        working-directory: e2e
+        run: npx playwright test
+      - name: upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   deploy:
     # Proves the parts a Docker-less machine cannot: the container image
     # actually builds, the Helm chart lints, and every plain YAML file in
