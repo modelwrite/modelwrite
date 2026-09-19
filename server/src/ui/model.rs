@@ -780,11 +780,11 @@ fn allocation_list_markup(list: Option<&[Allocation]>) -> Markup {
                     li class={ "allocation " (allocation.relation) } {
                         span class="relation" { (allocation.relation) ": " }
                         @if allocation.unresolved {
-                            span class="broken" { "unresolved " (allocation.element_id) }
+                            span class="broken" title=(allocation.element_id) { "unresolved link " (allocation.element_id) }
                         } @else if allocation.name.is_empty() {
-                            span { (allocation.element_id) }
+                            span title=(allocation.element_id) { (allocation.element_id) }
                         } @else {
-                            span { (allocation.name) }
+                            span title=(allocation.element_id) { (allocation.name) }
                         }
                     }
                 }
@@ -829,9 +829,15 @@ fn coverage_status(ctx: &ViewContext, requirement: &Requirement) -> &'static str
 /// never carried by colour alone.
 fn coverage_badge(status: &str) -> Markup {
     match status {
-        "covered" => html! { span class="covered" { "covered" } },
-        "uncovered" => html! { span class="uncovered" { "uncovered" } },
-        _ => html! { span class="mw-badge-unknown" { "not reported" } },
+        "covered" => {
+            html! { span class="covered" title="Requirement coverage: covered by at least one link" { "covered" } }
+        }
+        "uncovered" => {
+            html! { span class="uncovered" title="Requirement coverage: not covered by any link" { "uncovered" } }
+        }
+        _ => {
+            html! { span class="mw-badge-unknown" title="Requirement coverage: could not be reported" { "not reported" } }
+        }
     }
 }
 

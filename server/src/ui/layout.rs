@@ -457,6 +457,9 @@ table.requirements th:nth-child(5), table.traceability th:nth-child(5) { width: 
 .coverage-summary { color: var(--text-2); font-size: 13px; }
 .relation { color: var(--text-2); }
 li.allocation, li.activity-node { margin-bottom: 0.15rem; font-size: 12.5px; }
+/* A long allocation target (an opaque element id) wraps inside the column so it
+   never bleeds into the next one; the full value stays on hover via its title. */
+li.allocation { overflow-wrap: anywhere; }
 .none { font-style: normal; }
 
 .unresolved-edge {
