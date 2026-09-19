@@ -13,6 +13,10 @@
 //! maud, which HTML-escapes it by construction; the only way to emit markup is to wrap it
 //! in [maud::PreEscaped], which is used solely for the developer-written stylesheet.
 
+use axum::body::Body;
+use axum::http::{header, StatusCode};
+use axum::response::Response;
+
 pub mod create;
 pub mod diagram;
 pub mod edit;
@@ -41,4 +45,18 @@ pub fn urlencode(value: &str) -> String {
         }
     }
     out
+}
+
+/// The workbench's single static asset: the vanilla-JavaScript enhancement that turns the
+/// server-rendered model page into a three-pane IDE. There is deliberately no build step and
+/// no asset pipeline - the file is embedded at compile time and served by this router, so an
+/// air-gapped install gets it from the same binary as the page, and nothing is fetched at
+/// page load.
+pub async fn app_js() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from(include_str!("app.js")))
+        .expect("static response construction cannot fail")
 }

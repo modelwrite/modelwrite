@@ -75,6 +75,7 @@ pub fn app(state: AppState) -> Router {
             post(ui::pages::create_branch),
         )
         .route("/ui/projects/:project/model", get(ui::model::model_page))
+        .route("/ui/app.js", get(ui::app_js))
         .route(
             "/ui/projects/:project/model/new",
             post(ui::create::create_model),

@@ -957,9 +957,13 @@ async fn hostile_content_in_a_model_is_escaped_on_the_model_page() {
         html.contains("&lt;script&gt;"),
         "the hostile content must appear escaped"
     );
-    assert!(
-        !html.contains("<script"),
-        "no raw script tag may reach the model page"
+    // The page's own enhancement asset is the one legitimate script tag; hostile model
+    // content must never add a raw one of its own.
+    assert_eq!(
+        count(&html, "<script"),
+        1,
+        "exactly the enhancement asset may be a script tag, got:\n{}",
+        html
     );
 }
 /// The author role: can read and write, so it can both view and submit the edit form.
@@ -2845,5 +2849,245 @@ async fn the_full_flow_builds_a_model_with_a_block_a_requirement_and_a_branch() 
         project_html.contains("feature"),
         "the new branch must be listed, got:\n{}",
         project_html
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The model-page IDE enhancement: one static asset, progressive and additive. With
+// JavaScript disabled the page is the same server-rendered list; with it enabled the
+// asset builds the containment tree and properties panel from data the page already
+// carries, so the enhancement is never a second source of truth.
+
+#[tokio::test]
+async fn the_app_js_asset_is_served() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let response = router.oneshot(get("/ui/app.js")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .expect("the asset must declare its type")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.starts_with("text/javascript"),
+        "the asset must be served as JavaScript, got {}",
+        content_type
+    );
+    let body = body_text(response).await;
+    assert!(
+        body.contains("SPDX-License-Identifier: AGPL-3.0-or-later"),
+        "the asset must carry the AGPL header"
+    );
+    assert!(
+        body.contains("modelwrite"),
+        "the asset must be the workbench enhancement script"
+    );
+}
+
+#[tokio::test]
+async fn the_no_js_model_page_keeps_the_server_rendered_content() {
+    // The enhancement must be ADDITIVE. The script tag and data-* attributes are inert
+    // without the script, so a no-JS reader sees the same four sections, the same counts
+    // and the same engine coverage this page has always rendered.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    assert!(html.contains("<h2>Structure</h2>"), "structure section");
+    assert!(
+        html.contains("<h2>Requirements</h2>"),
+        "requirements section"
+    );
+    assert!(
+        html.contains("<h2>Traceability</h2>"),
+        "traceability section"
+    );
+    assert!(
+        html.contains("<h2>State and activity</h2>"),
+        "state and activity section"
+    );
+    assert_eq!(
+        count(&html, "<li class=\"element\""),
+        49,
+        "49 structure elements"
+    );
+    assert_eq!(count(&html, "<li class=\"signal\""), 9, "9 signals");
+    assert_eq!(
+        count(&html, "<tr class=\"requirement\""),
+        25,
+        "25 requirements"
+    );
+    assert_eq!(
+        count(&html, "<tr class=\"trace-row\""),
+        25,
+        "25 matrix rows"
+    );
+    assert_eq!(count(&html, "class=\"activity\""), 8, "8 activities");
+    assert_eq!(count(&html, "class=\"state\""), 7, "7 states");
+    assert_eq!(count(&html, "class=\"transition\""), 8, "8 transitions");
+    assert!(
+        html.contains("25 requirements: 15 covered, 10 uncovered"),
+        "the engine coverage summary must be unchanged"
+    );
+    assert!(
+        html.contains("Coffee Machine"),
+        "the root block must render"
+    );
+    assert!(
+        html.contains("Heater Initialization"),
+        "a covered requirement must render"
+    );
+}
+
+#[tokio::test]
+async fn the_model_page_embeds_the_data_the_enhancement_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    assert!(
+        html.contains("<script src=\"/ui/app.js\""),
+        "the page must load the single enhancement asset"
+    );
+
+    // Every selectable element carries its identity: 49 structure + 9 signals + 25
+    // requirements + 8 activities = 91.
+    assert_eq!(count(&html, "data-mw-id=\""), 91, "91 selectable elements");
+    assert!(
+        html.contains("data-mw-name=\"Coffee Machine\""),
+        "the root block's name must be readable"
+    );
+    assert!(
+        html.contains("data-mw-kind=\"block\""),
+        "a kind must be readable"
+    );
+
+    // The fields a properties panel shows, carried as data rather than recomputed.
+    assert!(
+        html.contains("data-mw-stereotypes=\""),
+        "stereotypes must be present"
+    );
+    assert!(
+        html.contains("data-mw-attributes=\""),
+        "attributes must be present"
+    );
+    assert!(
+        html.contains("data-mw-documentation=\""),
+        "documentation must be present"
+    );
+
+    // Requirements carry reqId, text and the ENGINE's coverage verdict (15 covered / 10
+    // uncovered, the same numbers the traceability section renders).
+    assert!(
+        html.contains("data-mw-reqid=\"1\""),
+        "a requirement's reqId must be readable"
+    );
+    assert!(
+        html.contains("data-mw-reqtext=\""),
+        "a requirement's text must be readable"
+    );
+    assert_eq!(
+        count(&html, "data-mw-coverage=\"covered\""),
+        15,
+        "15 covered"
+    );
+    assert_eq!(
+        count(&html, "data-mw-coverage=\"uncovered\""),
+        10,
+        "10 uncovered"
+    );
+}
+
+#[tokio::test]
+async fn the_diagram_carries_the_selection_hook_for_sync() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "import the exported model", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    let svg = extract_svg(&html);
+
+    // Every graph node is addressable, so selecting a tree node can highlight its node.
+    assert_eq!(
+        count(svg, "data-mw-id='"),
+        99,
+        "every graph node must carry its id"
+    );
+    assert!(
+        svg.contains("class='node' data-mw-id='"),
+        "the hook must sit on the node group"
+    );
+    // The diagram page loads the enhancement too, so ?select=<id> highlights on arrival.
+    assert!(
+        html.contains("<script src=\"/ui/app.js\""),
+        "the diagram page must load the enhancement asset"
     );
 }

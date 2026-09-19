@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use maud::{html, Markup};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use graph::{requirement_coverage, CoverageReport};
 use okf::types::{Element, GraphEdge, GraphNode, OkfRoot, Requirement};
@@ -187,6 +187,7 @@ fn model_markup(
         (requirements_section(root, &ctx))
         (traceability_section(root, &ctx))
         (state_activity_section(root, &ctx))
+        script src="/ui/app.js" {}
     };
     let title = format!("modelwrite — {}", project);
     layout::shell(
@@ -220,7 +221,13 @@ fn structure_section(root: &OkfRoot, project: &str, branch: &str, can_edit: bool
                 h3 { "Signals" }
                 ul class="signals" {
                     @for signal in &root.signals {
-                        li class="signal" {
+                        li class="signal"
+                           data-mw-id=(signal.id)
+                           data-mw-name=(signal.name)
+                           data-mw-kind=(signal.kind)
+                           data-mw-stereotypes=(json_attr(&signal.stereotypes))
+                           data-mw-attributes=(json_attr(&signal.attributes))
+                           data-mw-documentation=(signal.documentation) {
                             span class="element-name" { (signal.name) }
                             @if !signal.kind.is_empty() {
                                 span class="element-kind" { (signal.kind) }
@@ -236,7 +243,13 @@ fn structure_section(root: &OkfRoot, project: &str, branch: &str, can_edit: bool
                 h3 { "Interfaces" }
                 ul class="interfaces" {
                     @for interface in &root.interfaces {
-                        li class="interface" {
+                        li class="interface"
+                           data-mw-id=(interface.id)
+                           data-mw-name=(interface.name)
+                           data-mw-kind=(interface.kind)
+                           data-mw-stereotypes=(json_attr(&interface.stereotypes))
+                           data-mw-attributes=(json_attr(&interface.attributes))
+                           data-mw-documentation=(interface.documentation) {
                             span class="element-name" { (interface.name) }
                             @if !interface.kind.is_empty() {
                                 span class="element-kind" { (interface.kind) }
@@ -344,7 +357,13 @@ fn build_node<'a>(
 fn render_tree(nodes: &[TreeNode<'_>], project: &str, branch: &str, can_edit: bool) -> Markup {
     html! {
         @for node in nodes {
-            li class="element" {
+            li class="element"
+               data-mw-id=(node.element.id)
+               data-mw-name=(node.element.name)
+               data-mw-kind=(node.element.kind)
+               data-mw-stereotypes=(json_attr(&node.element.stereotypes))
+               data-mw-attributes=(json_attr(&node.element.attributes))
+               data-mw-documentation=(node.element.documentation) {
                 span class="element-name" { (node.element.name) }
                 @if !node.element.kind.is_empty() {
                     span class="element-kind" { (node.element.kind) }
@@ -372,6 +391,7 @@ fn render_tree(nodes: &[TreeNode<'_>], project: &str, branch: &str, can_edit: bo
 /// One edge that connects a requirement to the element allocated to it. The relation is the
 /// dependency label; an allocation whose endpoint is not a graph node is recorded as
 /// unresolved rather than dropped, so a broken satisfy link stays visible.
+#[derive(Serialize)]
 struct Allocation {
     relation: String,
     element_id: String,
@@ -471,6 +491,25 @@ fn requirement_text(requirement: &Requirement) -> String {
     }
 }
 
+/// Serialise a value to JSON for a `data-*` attribute. maud HTML-escapes the attribute
+/// value on the way out, so a quote, an angle bracket or a script-looking string in model
+/// data round-trips as inert data; the enhancement script reads it back with `dataset` and
+/// `JSON.parse` and renders it with `textContent`, never `innerHTML`.
+fn json_attr<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("attribute serialisation cannot fail")
+}
+
+/// The ENGINE's coverage verdict for one requirement, read from the report computed once in
+/// [model_markup]. The traceability section renders the same verdict from the same report;
+/// repeating it here as a data attribute never recomputes coverage.
+fn coverage_status(ctx: &ViewContext, requirement: &Requirement) -> &'static str {
+    match &ctx.coverage {
+        Some(report) if report.uncovered.iter().any(|id| id == &requirement.id) => "uncovered",
+        Some(_) => "covered",
+        None => "unknown",
+    }
+}
+
 fn requirements_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
     html! {
         section class="model-section" id="requirements" {
@@ -484,7 +523,16 @@ fn requirements_section(root: &OkfRoot, ctx: &ViewContext) -> Markup {
                     }
                     tbody {
                         @for requirement in &root.requirements {
-                            tr class="requirement" {
+                            tr class="requirement"
+                               data-mw-id=(requirement.id)
+                               data-mw-name=(requirement.name)
+                               data-mw-kind=(requirement.kind)
+                               data-mw-stereotypes=(json_attr(&requirement.stereotypes))
+                               data-mw-attributes=(json_attr(&requirement.attributes))
+                               data-mw-documentation=(requirement.documentation)
+                               data-mw-reqid=(requirement.req_id)
+                               data-mw-reqtext=(requirement.req_text)
+                               data-mw-coverage=(coverage_status(ctx, requirement)) {
                                 td class="req-id" { (requirement.id) }
                                 td class="req-num" { (requirement.req_id) }
                                 td class="req-text" { (requirement_text(requirement)) }
@@ -729,8 +777,11 @@ fn activities_markup(root: &OkfRoot) -> Markup {
         @if root.activities.is_empty() {
             p { "This model has no activities." }
         } @else {
-            @for activity in &root.activities {
-                div class="activity" {
+            @for (index, activity) in root.activities.iter().enumerate() {
+                div class="activity"
+                   data-mw-id=(format!("activity:{}", index))
+                   data-mw-name=(activity.name)
+                   data-mw-kind="activity" {
                     h4 class="activity-name" {
                         @if activity.name.is_empty() { "(unnamed activity)" } @else { (activity.name) }
                     }
