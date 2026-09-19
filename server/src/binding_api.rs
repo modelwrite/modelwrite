@@ -403,6 +403,7 @@ pub fn import_core(
             candidate: &root,
             bytes: &import_bytes,
             import: Some(&provenance),
+            acceptance: None,
             holder: input.holder.unwrap_or(""),
             now,
             tip: tip_hash.as_deref(),

@@ -46,6 +46,9 @@ base64 = "0.22"
 anyhow.workspace = true
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
 maud = "0.27.0"
+# A minimal blocking HTTP client for the live assist reasoner. No model provider is
+# embedded: the key and the endpoint come from the deployment's environment.
+ureq = { version = "2", features = ["json"] }
 postgres = { version = "0.19", optional = true }
 r2d2 = { version = "0.8", optional = true }
 r2d2_postgres = { version = "0.18", optional = true }

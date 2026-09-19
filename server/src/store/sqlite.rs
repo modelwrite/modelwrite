@@ -230,6 +230,52 @@ type ProposalRow = (
     String,
 );
 
+/// Parse a proposal row into its record, reporting a corrupt decision or accepted-items
+/// column as a storage error rather than silently substituting a default. Shared by
+/// [Store::proposal] and [Store::list_proposals] so the two reads cannot drift.
+fn proposal_from_row(row: ProposalRow) -> Result<ProposalRecord, StoreError> {
+    let (
+        id,
+        project,
+        agent,
+        task_goal,
+        artifact_hash,
+        binding,
+        review_artifact,
+        created_at,
+        decision,
+        decided_by,
+        accepted_items,
+        commit_hash,
+        decided_at,
+    ) = row;
+    let decision = decision
+        .as_deref()
+        .map(ProposalDecision::parse)
+        .transpose()?;
+    let accepted_items: Vec<String> = serde_json::from_str(&accepted_items).map_err(|e| {
+        StoreError::Backend(format!(
+            "corrupt accepted_items column for proposal {}: {}",
+            id, e
+        ))
+    })?;
+    Ok(ProposalRecord {
+        id,
+        project,
+        agent,
+        task_goal,
+        artifact_hash,
+        binding,
+        review_artifact,
+        created_at,
+        decision,
+        decided_by,
+        accepted_items,
+        commit_hash,
+        decided_at,
+    })
+}
+
 /// Parse the parents column, reporting corruption rather than hiding it: an empty list
 /// silently substituted here would change what commit_hash covers.
 fn parse_parents(hash: &str, raw: &str) -> Result<Vec<String>, StoreError> {
@@ -622,6 +668,159 @@ impl Store for SqliteStore {
                 }
             }
         }
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        Ok(Commit {
+            hash,
+            project: project.to_string(),
+            branch: branch.to_string(),
+            parents,
+            okf_hash: okf_hash.to_string(),
+            author: author.to_string(),
+            message: message.to_string(),
+            created_at,
+            provenance,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_accepted(
+        &self,
+        project: &str,
+        branch: &str,
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+        guard: Option<CommitGuard<'_>>,
+        audit: Option<&AuditEntry>,
+        acceptance: &super::AcceptanceProvenance,
+    ) -> Result<Commit, StoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let tx = connection
+            .unchecked_transaction()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // The lock check happens HERE, inside the transaction that writes the commit, exactly
+        // as commit_model does: a check performed earlier would leave a window for a lock to
+        // be taken and the guarded commit to land anyway.
+        if let Some(guard) = guard.as_ref() {
+            enforce_guard(&tx, project, guard)?;
+        }
+
+        let tip: Option<String> = (|| -> rusqlite::Result<Option<String>> {
+            let mut stmt =
+                tx.prepare("SELECT tip FROM branches WHERE project = ?1 AND name = ?2")?;
+            let mut rows = stmt.query(params![project, branch])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(row.get(0)?)),
+                None => Ok(None),
+            }
+        })()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if let Some(guard) = guard.as_ref() {
+            if guard.expected_tip != tip.as_deref() {
+                return Err(StoreError::Conflict(format!(
+                    "branch {} moved while the commit was being prepared; re-read and retry",
+                    branch
+                )));
+            }
+        }
+
+        let parents: Vec<String> = tip.into_iter().collect();
+        let created_at = now_epoch();
+        let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+        let parents_json =
+            serde_json::to_string(&parents).map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // Provenance is the acceptance itself: a model-change acceptance is labelled Accepted,
+        // naming the proposal, the agent and the human, written in this transaction so the
+        // commit can never disagree with how it was written.
+        let provenance = CommitProvenance::Accepted {
+            proposal_id: acceptance.proposal_id.clone(),
+            agent: acceptance.agent.clone(),
+            accepted_by: acceptance.accepted_by.clone(),
+            accepted_items: acceptance.accepted_items.clone(),
+        };
+        let provenance_col = provenance.column_value();
+
+        // The acceptance must substantiate its claim, checked HERE where the commit is
+        // written: the proposal it names must exist, be undecided, and have been recorded by
+        // the agent the provenance names. This is the rule as a property of the repository,
+        // not of one endpoint.
+        let recorded: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT agent, decision FROM proposals WHERE project = ?1 AND id = ?2",
+                params![project, acceptance.proposal_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let (recorded_agent, decision) = recorded.ok_or_else(|| {
+            StoreError::NotFound(format!(
+                "proposal {} for project {}",
+                acceptance.proposal_id, project
+            ))
+        })?;
+        if decision.is_some() {
+            return Err(StoreError::Conflict(format!(
+                "proposal {} has already been decided",
+                acceptance.proposal_id
+            )));
+        }
+        if recorded_agent != acceptance.agent {
+            return Err(StoreError::Conflict(format!(
+                "acceptance names agent {} but proposal {} was recorded by {}",
+                acceptance.agent, acceptance.proposal_id, recorded_agent
+            )));
+        }
+
+        // Plain INSERT, not OR IGNORE: a constraint failure must abort this transaction
+        // rather than move a branch tip to a hash that has no commit row.
+        tx.execute(
+            "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at, provenance) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![hash, project, branch, parents_json, okf_hash, author, message, created_at, provenance_col],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO branches (project, name, tip) VALUES (?1, ?2, ?3) ON CONFLICT(project, name) DO UPDATE SET tip = ?3",
+            params![project, branch, hash],
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if let Some(audit) = audit {
+            insert_audit(&tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+
+        // The acceptance rides the commit transaction: the proposal is marked accepted with
+        // the human who decided, the accepted items and the commit hash, inside the SAME
+        // transaction as the commit row. The decision IS NULL guard, not the read above, is
+        // the authority against a concurrent decision.
+        let accepted_json = serde_json::to_string(&acceptance.accepted_items)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let decided_at = now_epoch();
+        let updated = tx
+            .execute(
+                "UPDATE proposals SET decision = 'accepted', decided_by = ?1, accepted_items = ?2, commit_hash = ?3, decided_at = ?4 WHERE project = ?5 AND id = ?6 AND decision IS NULL",
+                params![
+                    acceptance.accepted_by,
+                    accepted_json,
+                    hash,
+                    decided_at,
+                    project,
+                    acceptance.proposal_id
+                ],
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if updated == 0 {
+            return Err(StoreError::Conflict(format!(
+                "proposal {} has already been decided",
+                acceptance.proposal_id
+            )));
+        }
+
         tx.commit()
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -1132,51 +1331,39 @@ impl Store for SqliteStore {
             }
         })?;
 
-        match row {
-            None => Ok(None),
-            Some((
-                id,
-                project,
-                agent,
-                task_goal,
-                artifact_hash,
-                binding,
-                review_artifact,
-                created_at,
-                decision,
-                decided_by,
-                accepted_items,
-                commit_hash,
-                decided_at,
-            )) => {
-                let decision = decision
-                    .as_deref()
-                    .map(ProposalDecision::parse)
-                    .transpose()?;
-                let accepted_items: Vec<String> =
-                    serde_json::from_str(&accepted_items).map_err(|e| {
-                        StoreError::Backend(format!(
-                            "corrupt accepted_items column for proposal {}: {}",
-                            id, e
-                        ))
-                    })?;
-                Ok(Some(ProposalRecord {
-                    id,
-                    project,
-                    agent,
-                    task_goal,
-                    artifact_hash,
-                    binding,
-                    review_artifact,
-                    created_at,
-                    decision,
-                    decided_by,
-                    accepted_items,
-                    commit_hash,
-                    decided_at,
-                }))
-            }
-        }
+        row.map(proposal_from_row).transpose()
+    }
+
+    fn list_proposals(&self, project: &str) -> Result<Vec<ProposalRecord>, StoreError> {
+        // Rows are collected first and parsed afterwards, so a corrupt decision or
+        // accepted-items column surfaces as a storage error rather than a query error. The
+        // order is insertion order (rowid), newest first, so a re-recorded proposal keeps its
+        // original position and a later proposal sorts above an earlier one.
+        let rows: Vec<ProposalRow> = self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, project, agent, task_goal, artifact_hash, binding, review_artifact, created_at, decision, decided_by, accepted_items, commit_hash, decided_at FROM proposals WHERE project = ?1 ORDER BY rowid DESC",
+            )?;
+            let rows = stmt.query_map(params![project], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                ))
+            })?;
+            rows.collect()
+        })?;
+
+        rows.into_iter().map(proposal_from_row).collect()
     }
 
     fn refuse_proposal(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pub mod analytics_api;
 pub mod api;
+pub mod assist;
 pub mod audit;
 pub mod audit_api;
 pub mod auth;
@@ -148,9 +149,10 @@ pub fn app(state: AppState) -> Router {
             "/projects/:project/import/:artifactHash/artifact",
             get(binding_api::get_artifact),
         )
+        .route("/projects/:project/assist", post(assist::assist))
         .route(
             "/projects/:project/proposals",
-            post(proposal_api::record_proposal),
+            post(proposal_api::record_proposal).get(proposal_api::list_proposals),
         )
         .route(
             "/projects/:project/proposals/:id",

@@ -673,6 +673,145 @@ impl Store for PostgresStore {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn commit_accepted(
+        &self,
+        project: &str,
+        branch: &str,
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+        guard: Option<CommitGuard<'_>>,
+        audit: Option<&AuditEntry>,
+        acceptance: &super::AcceptanceProvenance,
+    ) -> Result<Commit, StoreError> {
+        self.with_tx(|tx| {
+            if let Some(guard) = guard.as_ref() {
+                enforce_guard(tx, project, guard)?;
+            }
+
+            tx.execute(
+                "INSERT INTO branches (project, name, tip) VALUES ($1, $2, $3) ON CONFLICT (project, name) DO NOTHING",
+                &[&project, &branch, &""],
+            )
+            .map_err(backend)?;
+
+            let tip: Option<String> = tx
+                .query_opt(
+                    "SELECT tip FROM branches WHERE project = $1 AND name = $2 FOR UPDATE",
+                    &[&project, &branch],
+                )
+                .map_err(backend)?
+                .map(|row| row.get::<_, String>(0))
+                .filter(|tip| !tip.is_empty());
+
+            if let Some(guard) = guard.as_ref() {
+                if guard.expected_tip != tip.as_deref() {
+                    return Err(StoreError::Conflict(format!(
+                        "branch {} moved while the commit was being prepared; re-read and retry",
+                        branch
+                    )));
+                }
+            }
+
+            let parents: Vec<String> = tip.into_iter().collect();
+            let created_at = now_epoch();
+            let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+            let parents_json = serde_json::to_string(&parents).map_err(backend)?;
+
+            // Provenance is the acceptance itself, written in this transaction so the commit
+            // can never disagree with how it was written.
+            let provenance = CommitProvenance::Accepted {
+                proposal_id: acceptance.proposal_id.clone(),
+                agent: acceptance.agent.clone(),
+                accepted_by: acceptance.accepted_by.clone(),
+                accepted_items: acceptance.accepted_items.clone(),
+            };
+            let provenance_col = provenance.column_value();
+
+            // The acceptance must substantiate its claim, checked HERE where the commit is
+            // written: the proposal must exist, be undecided, and have been recorded by the
+            // agent the provenance names.
+            let recorded: Option<(String, Option<String>)> = tx
+                .query_opt(
+                    "SELECT agent, decision FROM proposals WHERE project = $1 AND id = $2",
+                    &[&project, &acceptance.proposal_id],
+                )
+                .map_err(backend)?
+                .map(|row| (row.get(0), row.get(1)));
+            let (recorded_agent, decision) = recorded.ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "proposal {} for project {}",
+                    acceptance.proposal_id, project
+                ))
+            })?;
+            if decision.is_some() {
+                return Err(StoreError::Conflict(format!(
+                    "proposal {} has already been decided",
+                    acceptance.proposal_id
+                )));
+            }
+            if recorded_agent != acceptance.agent {
+                return Err(StoreError::Conflict(format!(
+                    "acceptance names agent {} but proposal {} was recorded by {}",
+                    acceptance.agent, acceptance.proposal_id, recorded_agent
+                )));
+            }
+
+            tx.execute(
+                "INSERT INTO commits (hash, project, branch, parents, okf_hash, author, message, created_at, provenance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                &[&hash, &project, &branch, &parents_json, &okf_hash, &author, &message, &created_at, &provenance_col],
+            )
+            .map_err(backend)?;
+            tx.execute(
+                "INSERT INTO branches (project, name, tip) VALUES ($1, $2, $3) ON CONFLICT (project, name) DO UPDATE SET tip = EXCLUDED.tip",
+                &[&project, &branch, &hash],
+            )
+            .map_err(backend)?;
+            if let Some(audit) = audit {
+                insert_audit(tx, audit)?;
+            }
+
+            // The acceptance rides the commit transaction: the proposal is marked accepted
+            // with the human who decided, the accepted items and the commit hash, inside the
+            // SAME transaction as the commit row. The decision IS NULL guard, not the read
+            // above, is the authority against a concurrent decision.
+            let accepted_json = serde_json::to_string(&acceptance.accepted_items).map_err(backend)?;
+            let decided_at = now_epoch();
+            let updated = tx
+                .execute(
+                    "UPDATE proposals SET decision = 'accepted', decided_by = $1, accepted_items = $2, commit_hash = $3, decided_at = $4 WHERE project = $5 AND id = $6 AND decision IS NULL",
+                    &[
+                        &acceptance.accepted_by,
+                        &accepted_json,
+                        &hash,
+                        &decided_at,
+                        &project,
+                        &acceptance.proposal_id,
+                    ],
+                )
+                .map_err(backend)?;
+            if updated == 0 {
+                return Err(StoreError::Conflict(format!(
+                    "proposal {} has already been decided",
+                    acceptance.proposal_id
+                )));
+            }
+
+            Ok(Commit {
+                hash,
+                project: project.to_string(),
+                branch: branch.to_string(),
+                parents,
+                okf_hash: okf_hash.to_string(),
+                author: author.to_string(),
+                message: message.to_string(),
+                created_at,
+                provenance,
+            })
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn commit_merge(
         &self,
         project: &str,
@@ -1169,6 +1308,50 @@ impl Store for PostgresStore {
                     }))
                 }
             }
+        })
+    }
+
+    fn list_proposals(&self, project: &str) -> Result<Vec<ProposalRecord>, StoreError> {
+        self.with_client(|client| {
+            let rows = client
+                .query(
+                    "SELECT id, project, agent, task_goal, artifact_hash, binding, review_artifact, created_at, decision, decided_by, accepted_items, commit_hash, decided_at FROM proposals WHERE project = $1 ORDER BY created_at DESC, id DESC",
+                    &[&project],
+                )
+                .map_err(backend)?;
+            rows.into_iter()
+                .map(|row| {
+                    let id: String = row.get(0);
+                    let decision: Option<String> = row.get(8);
+                    let decision = decision
+                        .as_deref()
+                        .map(ProposalDecision::parse)
+                        .transpose()?;
+                    let accepted_items: String = row.get(10);
+                    let accepted_items: Vec<String> =
+                        serde_json::from_str(&accepted_items).map_err(|e| {
+                            backend(format!(
+                                "corrupt accepted_items column for proposal {}: {}",
+                                id, e
+                            ))
+                        })?;
+                    Ok(ProposalRecord {
+                        id,
+                        project: row.get(1),
+                        agent: row.get(2),
+                        task_goal: row.get(3),
+                        artifact_hash: row.get(4),
+                        binding: row.get(5),
+                        review_artifact: row.get(6),
+                        created_at: row.get(7),
+                        decision,
+                        decided_by: row.get(9),
+                        accepted_items,
+                        commit_hash: row.get(11),
+                        decided_at: row.get(12),
+                    })
+                })
+                .collect()
         })
     }
 

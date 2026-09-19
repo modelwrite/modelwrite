@@ -13,8 +13,8 @@ use crate::audit::{
 use crate::auth::{AuthConfig, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{
-    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, ImportProvenance, Project, Store,
-    StoreError,
+    is_lock_refusal, now_epoch, AcceptanceProvenance, AuditEntry, Commit, CommitGuard,
+    ImportProvenance, Project, Store, StoreError,
 };
 
 #[derive(Clone)]
@@ -395,6 +395,12 @@ pub struct CommitCore<'a> {
     pub candidate: &'a okf::types::OkfRoot,
     pub bytes: &'a [u8],
     pub import: Option<&'a ImportProvenance>,
+    /// Some when this commit is a human's acceptance of an agent's MODEL-CHANGE proposal.
+    /// Mutually exclusive with `import`: a commit is either an import (with its retained
+    /// artifact and binding) or an acceptance of a model change (with its proposal), never
+    /// both. The commit's provenance is then [CommitProvenance::Accepted], and the proposal
+    /// record is updated inside the same store transaction as the commit row.
+    pub acceptance: Option<&'a AcceptanceProvenance>,
     /// The guard's holder: the identity that may change the touched elements. An empty
     /// string means the caller holds no lease, so any live lease on a touched element
     /// refuses the commit. The editor passes its verified subject because it acquired a
@@ -441,14 +447,17 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
         subject: input.branch.to_string(),
         detail: input.message.to_string(),
     };
-    commit_refusal_guard_attributed(
-        store,
-        input.project,
-        input.branch,
-        input.actor,
-        input.mechanism,
-        input.authorizer,
-        store.commit_model(
+    // The store write is selected from the ONE provenance input: an import commits through
+    // commit_model (whose transaction substantiates the import), an acceptance of a model
+    // change commits through commit_accepted (whose transaction substantiates the proposal),
+    // and an ordinary commit commits through commit_model with no import. The two are
+    // mutually exclusive by construction; a caller that supplies both is a bug, refused here
+    // rather than silently labelled.
+    let commit_result = match (input.import, input.acceptance) {
+        (Some(_), Some(_)) => Err(StoreError::Backend(
+            "a commit cannot be both an import and a model-change acceptance".to_string(),
+        )),
+        (Some(import), None) => store.commit_model(
             input.project,
             input.branch,
             &okf_hash,
@@ -456,8 +465,37 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
             input.message,
             Some(guard),
             Some(&audit),
-            input.import,
+            Some(import),
         ),
+        (None, Some(acceptance)) => store.commit_accepted(
+            input.project,
+            input.branch,
+            &okf_hash,
+            input.author,
+            input.message,
+            Some(guard),
+            Some(&audit),
+            acceptance,
+        ),
+        (None, None) => store.commit_model(
+            input.project,
+            input.branch,
+            &okf_hash,
+            input.author,
+            input.message,
+            Some(guard),
+            Some(&audit),
+            None,
+        ),
+    };
+    commit_refusal_guard_attributed(
+        store,
+        input.project,
+        input.branch,
+        input.actor,
+        input.mechanism,
+        input.authorizer,
+        commit_result,
     )
     .map_err(CommitFailure::Store)
 }
@@ -638,6 +676,7 @@ pub async fn create_commit(
             candidate: &root,
             bytes: &bytes,
             import: None,
+            acceptance: None,
             holder: body.holder.as_deref().unwrap_or(""),
             now,
             tip: tip_hash.as_deref(),
