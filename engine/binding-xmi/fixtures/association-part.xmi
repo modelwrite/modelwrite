@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001">
+  <uml:Model xmi:id="model-ap" name="Association Part Model">
+    <packagedElement xmi:type="uml:Class" xmi:id="block-whole" name="Whole">
+      <Block xmi:id="app-whole" base_Class="block-whole"/>
+      <!-- A PartProperty: owned by Whole, typed by Part, composite, linked to assoc-1. -->
+      <ownedAttribute xmi:type="uml:Property" xmi:id="prop-child" name="child" type="block-part" aggregation="composite" association="assoc-1"/>
+      <!-- A proxy port: owned by Whole, typed by the InterfaceBlock Iface. -->
+      <ownedAttribute xmi:type="uml:Port" xmi:id="port-p" name="p" type="block-iface" aggregation="composite"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Class" xmi:id="block-part" name="Part">
+      <Block xmi:id="app-part" base_Class="block-part"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Class" xmi:id="block-iface" name="Iface">
+      <InterfaceBlock xmi:id="app-iface" base_Class="block-iface"/>
+    </packagedElement>
+    <!-- memberEnd[0] = prop-child (typed by Part), memberEnd[1] = ownedEnd (typed by
+         Whole). The association edge must point Part -> Whole. -->
+    <packagedElement xmi:type="uml:Association" xmi:id="assoc-1">
+      <memberEnd xmi:idref="prop-child"/>
+      <memberEnd xmi:idref="prop-end"/>
+      <ownedEnd xmi:type="uml:Property" xmi:id="prop-end" type="block-whole" association="assoc-1"/>
+    </packagedElement>
+  </uml:Model>
+  <PartProperty xmi:id="app-child" base_Property="prop-child"/>
+  <ProxyPort xmi:id="app-port" base_Port="port-p"/>
+</xmi:XMI>

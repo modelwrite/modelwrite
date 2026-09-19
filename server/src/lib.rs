@@ -57,6 +57,14 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/version", get(version))
+        // A person given the trial's address types the BARE hostname, not /ui.
+        // Serving 404 there made the deployment look broken when it was working,
+        // which is a failure of the front door rather than of the service. The
+        // root sends a visitor to the workbench; every real route is unchanged.
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::temporary("/ui") }),
+        )
         .route("/ui", get(ui::pages::project_list))
         .route("/ui/projects/:project", get(ui::pages::project_page))
         .route("/ui/projects/:project/model", get(ui::model::model_page))

@@ -202,7 +202,7 @@ also accept an optional `strictCoverage` boolean, named in the manifest rather t
 ### Repository tools (opt-in, read-and-propose only)
 
 Repository mode is enabled only when BOTH `MW_MCP_SERVICE_URL` (the running service's base URL,
-plain `http`) and `MW_MCP_TOKEN` (the bearer token to present) are set. With neither set, the
+`http://` or `https://`) and `MW_MCP_TOKEN` (the bearer token to present) are set. With neither set, the
 repository tools are listed but answer "not configured", and the server makes no network call.
 Every repository tool issues a read (`GET`) route or the single propose route; no tool issues a
 write route, and a `403` from the service is surfaced as a clear tool error, never a crash and
@@ -229,7 +229,9 @@ job: it persists a proposal (the `review` permission) for a human to accept or r
 
 Point your agent at modelwrite by configuring the MCP server with two environment variables:
 
-- **MW_MCP_SERVICE_URL** — the running service's base URL, e.g. http://127.0.0.1:8080 (plain HTTP)
+- **MW_MCP_SERVICE_URL** — the running service's base URL, e.g. http://127.0.0.1:8080 for a local
+  service or https://trial.modelwrite.org for a deployed one. `https://` URLs are fully
+  certificate-verified (rustls + bundled webpki roots); there is no way to disable that.
 - **MW_MCP_TOKEN** — the bearer token to present — an agent token (the service grants it viewer/reviewer)
 
 With neither set, `mw-mcp` is a pure document processor and makes no network call. A typical

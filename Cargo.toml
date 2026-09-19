@@ -19,6 +19,10 @@ petgraph = "0.6"
 # declared 1.75 floor. The msrv CI job builds the engine layer at 1.75 to keep
 # the claim verified.
 indexmap = "=2.11.4"
+# zeroize is rustls's transitive dependency. 1.9.0 raised its edition to 2024
+# (rustc 1.85), which would break the engine layer's 1.75 floor now that mw-mcp
+# speaks TLS over rustls. Pinned to the last edition-2021 release (MSRV 1.60).
+zeroize = "=1.8.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

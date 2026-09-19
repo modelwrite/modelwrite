@@ -84,12 +84,33 @@ fn a_real_magicdraw_sysml_export_imports_with_every_loss_named() {
     let allocate = graph.edges.iter().filter(|e| e.label == "Allocate").count();
     assert_eq!(satisfy, 20, "all 20 Satisfy links carried");
     assert_eq!(allocate, 3, "all 3 Allocate links carried");
+    let dependencies = graph
+        .edges
+        .iter()
+        .filter(|e| e.kind == "dependency")
+        .count();
     assert_eq!(
-        graph.edges.len(),
-        28,
+        dependencies, 28,
         "20 Satisfy + 3 Allocate + 4 Refine + 1 Verify"
     );
-    assert_eq!(graph.nodes.len(), 59, "34 blocks + 25 requirements");
+    // Items 2-3: associations, parts (PartProperty + ports) and references are now
+    // carried as graph edges. 28 associations (block<->block; the 5 Actor/UseCase
+    // associations stay named losses), 34 part edges (28 PartProperty + 6 ports)
+    // and 5 reference edges.
+    let associations = graph
+        .edges
+        .iter()
+        .filter(|e| e.kind == "association")
+        .count();
+    let parts = graph.edges.iter().filter(|e| e.kind == "part").count();
+    let references = graph.edges.iter().filter(|e| e.kind == "reference").count();
+    assert_eq!(associations, 28, "28 block<->block associations carried");
+    assert_eq!(parts, 34, "28 PartProperty + 6 port part edges carried");
+    assert_eq!(references, 5, "5 ReferenceProperty reference edges carried");
+    assert_eq!(graph.edges.len(), 28 + 28 + 34 + 5);
+    // 34 blocks + 6 interface blocks + 1 constraint block + 25 requirements.
+    assert_eq!(root.summary.blocks, 41);
+    assert_eq!(graph.nodes.len(), 66, "41 blocks + 25 requirements");
 
     // Every requirement is a graph node, so a traceability edge resolves both
     // endpoints (OKF spec: every element is a node).
@@ -130,5 +151,82 @@ fn a_real_magicdraw_sysml_export_imports_with_every_loss_named() {
     // The requirement class is carried, not left as an unmapped non-block class.
     assert!(!content_losses.iter().any(|m| {
         m.subject == "uml:Class _2026x_1_12a70364_1789522470210_613186_5619 (Heater Initialization)"
+    }));
+
+    // --- Items 2-3: ports, associations and parts are carried, with the golden
+    // corpus edge direction. A block id is resolved by name so the assertions read
+    // in model terms, not MagicDraw id soup.
+    let block_id = |name: &str| -> String {
+        root.structure
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("block {name} present"))
+            .id
+            .clone()
+    };
+    let coffee_machine = block_id("Coffee Machine");
+    let water_system = block_id("Water System");
+
+    // A composition (PartProperty) edge points from the owning block to the part's
+    // type: Coffee Machine --part--> Water System. (The association edge below is
+    // the SAME relationship read in the opposite direction.)
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| { e.kind == "part" && e.source == coffee_machine && e.target == water_system }));
+
+    // A port is carried as a composite attribute of its owning block, typed by its
+    // InterfaceBlock, AND as a part edge to the port type.
+    let coffee_machine_el = root
+        .structure
+        .iter()
+        .find(|e| e.id == coffee_machine)
+        .unwrap();
+    let waterin = coffee_machine_el
+        .attributes
+        .iter()
+        .find(|a| a.name == "Waterin")
+        .expect("the Waterin proxy port is carried as an attribute");
+    assert_eq!(waterin.attr_type, "Water Flow Port");
+    assert_eq!(waterin.aggregation, "composite");
+    let water_flow_port = block_id("Water Flow Port");
+    assert!(graph.edges.iter().any(|e| {
+        e.kind == "part" && e.source == coffee_machine && e.target == water_flow_port
+    }));
+
+    // An InterfaceBlock class is carried as a block carrying its own stereotype, so
+    // the port's type resolves to a real node.
+    let port_block = root
+        .structure
+        .iter()
+        .find(|e| e.id == water_flow_port)
+        .unwrap();
+    assert_eq!(port_block.kind, "block");
+    assert_eq!(port_block.stereotypes, vec!["InterfaceBlock".to_string()]);
+
+    // A ReferenceProperty edge points from the owning block to the referenced type.
+    let coffee_machine_production = block_id("Coffee Machine Production");
+    assert!(graph.edges.iter().any(|e| {
+        e.kind == "reference" && e.source == coffee_machine && e.target == coffee_machine_production
+    }));
+
+    // The association edge DIRECTION is the golden corpus convention: source = type
+    // of the first memberEnd (the part), target = type of the second memberEnd (the
+    // ownedEnd, the owning block). So Water System --association--> Coffee Machine,
+    // the exact opposite of the part edge. Getting this backwards yields zero
+    // requirement coverage on any downstream comparison, so it is pinned.
+    assert!(graph.edges.iter().any(|e| {
+        e.kind == "association" && e.source == water_system && e.target == coffee_machine
+    }));
+    assert!(!graph.edges.iter().any(|e| {
+        e.kind == "association" && e.source == coffee_machine && e.target == water_system
+    }));
+
+    // An Actor/UseCase association is NOT silently dropped: its ends are outside the
+    // carried subset, so it remains a NAMED loss.
+    assert!(content_losses.iter().any(|m| {
+        m.verdict == MappingVerdict::Unmappable
+            && m.subject.starts_with("uml:Association")
+            && m.note.contains("outside the carried subset")
     }));
 }

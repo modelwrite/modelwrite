@@ -21,6 +21,15 @@ mw-okf = { path = "../okf", version = "0.1.0" }
 mw-graph = { path = "../graph", version = "0.1.0" }
 mw-gate = { path = "../gate", version = "0.1.0" }
 serde_json.workspace = true
+# Pinned via the workspace so the resolver never picks zeroize 1.9.0 (edition 2024,
+# rustc 1.85), which rustls transitively depends on and which would break the engine's
+# 1.75 floor.
+zeroize.workspace = true
+# TLS for https:// service URLs. rustls over the pure-Rust ring provider with bundled
+# webpki roots keeps the engine's declared 1.75 floor reachable (rustls 0.23 declares 1.71,
+# ring 0.17 declares 1.66) and needs no OpenSSL. Certificate verification is always on.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"
 
 [dev-dependencies]
 mw-test-support = { path = "../test-support", version = "0.1.0" }
