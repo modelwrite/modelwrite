@@ -7,12 +7,15 @@
 //! accept or refuse. Nothing here commits: the only path from a proposal to a model change is
 //! a human with Write accepting it through the shared commit core.
 //!
-//! The reasoning is a trait ([ModelReasoner]) with two implementations: a SCRIPTED reasoner
-//! (deterministic, no network, for tests) and a LIVE reasoner behind configuration (reads an
-//! Anthropic API key from MW_ANTHROPIC_API_KEY - env only, never logged, never in a request,
-//! never committed). If the key is absent the endpoint reports "no live reasoner configured"
-//! and points at the scripted mode. No model provider is embedded: the key arrives from the
-//! deployment's environment.
+//! The reasoning is a trait ([ModelReasoner]) with three implementations: a SCRIPTED reasoner
+//! (deterministic, no network, for tests) and TWO live reasoners behind configuration - an
+//! OpenAI-compatible chat-completions endpoint the organisation runs itself
+//! (MW_ASSIST_BASE_URL + MW_ASSIST_MODEL, with an optional MW_ASSIST_API_KEY bearer) and the
+//! Anthropic Messages API (MW_ANTHROPIC_API_KEY). Both read their credentials from the
+//! environment ONLY - never logged, never in a request, never committed. The local fleet wins
+//! when both are set; if neither is set the endpoint reports "no live reasoner configured"
+//! and points at the scripted mode. No model provider is embedded: the endpoints and keys
+//! arrive from the deployment's environment.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -264,6 +267,62 @@ impl ModelReasoner for LiveReasoner {
     }
 }
 
+/// A live reasoner behind the organisation's OWN model fleet: an OpenAI-compatible
+/// chat-completions endpoint (MW_ASSIST_BASE_URL, with the model named by MW_ASSIST_MODEL and
+/// an optional MW_ASSIST_API_KEY bearer). It asks the SAME strict-JSON prompt and validates
+/// the answer the SAME way as the Anthropic path - a malformed answer is REFUSED, naming
+/// what was malformed, rather than trusted.
+pub struct OpenAiReasoner {
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+}
+
+impl OpenAiReasoner {
+    pub fn new(
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+        api_key: Option<String>,
+    ) -> Self {
+        OpenAiReasoner {
+            base_url: base_url.into(),
+            model: model.into(),
+            api_key,
+        }
+    }
+}
+
+impl ModelReasoner for OpenAiReasoner {
+    fn agent(&self) -> &str {
+        LIVE_AGENT
+    }
+
+    fn propose(
+        &self,
+        project: &str,
+        request: &str,
+        current: &OkfRoot,
+    ) -> Result<Vec<ModelChange>, ApiError> {
+        if request.trim().is_empty() {
+            return Err(ApiError::bad_request(
+                "the assist request must not be empty",
+            ));
+        }
+        let system = system_prompt();
+        let user = user_prompt(project, request, current)?;
+        let raw = call_openai(
+            &self.base_url,
+            &self.model,
+            self.api_key.as_deref(),
+            &system,
+            &user,
+        )?;
+        // The answer may still arrive wrapped in prose or a markdown fence despite
+        // response_format; locate the JSON object defensively, then validate it strictly.
+        parse_and_validate(&extract_json_object(&raw))
+    }
+}
+
 /// The strict contract the live model is asked to honour. Every demand is spelled out so a
 /// violation is the model's answer being malformed, never a silent surprise.
 fn system_prompt() -> String {
@@ -332,6 +391,79 @@ fn call_anthropic(key: &str, model: &str, system: &str, user: &str) -> Result<St
         .and_then(|t| t.as_str())
         .ok_or_else(|| ApiError::bad_request("the live reasoner answer had no text content"))?;
     Ok(text.to_string())
+}
+
+/// Call an OpenAI-compatible chat-completions endpoint and return the assistant's text. The
+/// optional bearer key travels only as a header on this request; it is never logged or
+/// returned. The endpoint is the organisation's own fleet, so no provider is embedded: the
+/// base URL, model and key come from the deployment's environment.
+fn call_openai(
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    system: &str,
+    user: &str,
+) -> Result<String, ApiError> {
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let request = ureq::post(&endpoint).set("content-type", "application/json");
+    let request = match api_key.filter(|k| !k.is_empty()) {
+        Some(key) => request.set("authorization", &format!("Bearer {}", key)),
+        None => request,
+    };
+    let response = request
+        .send_json(json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"}
+        }))
+        .map_err(|e| {
+            // ureq's error Display names the transport or HTTP status, never the key.
+            ApiError::service_unavailable(format!("the live reasoner request failed: {}", e))
+        })?;
+    let body: Value = response.into_json().map_err(|e| {
+        ApiError::service_unavailable(format!("the live reasoner answered non-JSON: {}", e))
+    })?;
+    let text = body
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| ApiError::bad_request("the live reasoner answer had no content"))?;
+    Ok(text.to_string())
+}
+
+/// Locate the JSON object in the model's answer, tolerating a markdown fence or a little
+/// surrounding prose. The STRICT validation still happens downstream in [parse_and_validate];
+/// this only finds the object to hand it there, never loosens it. When no object can be
+/// located the raw text is returned so [parse_and_validate] refuses it with the parse error
+/// naming what was malformed.
+fn extract_json_object(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if serde_json::from_str::<Value>(trimmed).is_ok() {
+        return trimmed.to_string();
+    }
+    let un_fenced = trimmed
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    if let Some(start) = un_fenced.find('{') {
+        if let Some(end) = un_fenced.rfind('}') {
+            if end >= start {
+                let candidate = &un_fenced[start..=end];
+                if serde_json::from_str::<Value>(candidate).is_ok() {
+                    return candidate.to_string();
+                }
+            }
+        }
+    }
+    trimmed.to_string()
 }
 
 /// Parse the live model's answer into concrete changes, validating it against the proposal
@@ -487,12 +619,22 @@ pub fn build_review_artifact(
     }
 }
 
+/// Which live backend answers a request: the organisation's OWN OpenAI-compatible fleet
+/// (local) or Anthropic's Messages API. Local wins when both are configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveBackend {
+    /// An OpenAI-compatible chat-completions endpoint (MW_ASSIST_BASE_URL).
+    OpenAi,
+    /// The Anthropic Messages API (MW_ANTHROPIC_API_KEY).
+    Anthropic,
+}
+
 /// The reasoner the next assist request will use, for the panel's status line. Mirrors
 /// [select_reasoner_from] exactly: the two must never disagree about what a request will do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReasonerStatus {
-    /// A live reasoner is configured (MW_ANTHROPIC_API_KEY set).
-    Live,
+    /// A live reasoner is configured; [LiveBackend] names which one.
+    Live(LiveBackend),
     /// The deterministic scripted reasoner is forced (MW_ASSIST_REASONER=scripted).
     Scripted,
     /// No live reasoner and no scripted override: the panel must say so plainly.
@@ -501,57 +643,82 @@ pub enum ReasonerStatus {
     UnknownMode(String),
 }
 
+/// Read an environment variable, treating a blank value as unset.
+fn env_nonempty(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
 /// Read the reasoner status from the process environment WITHOUT running a reasoner. The
 /// assist panel calls this to say what a request WOULD do before the caller submits, so a
-/// deployment without a key is told up front rather than only after a 503.
+/// deployment without a backend is told up front rather than only after a 503.
 pub fn reasoner_status() -> ReasonerStatus {
-    let key = std::env::var("MW_ANTHROPIC_API_KEY")
-        .ok()
-        .filter(|k| !k.trim().is_empty());
-    let mode = std::env::var("MW_ASSIST_REASONER")
-        .ok()
-        .filter(|m| !m.trim().is_empty());
-    reasoner_status_from(key.as_deref(), mode.as_deref())
+    let base_url = env_nonempty("MW_ASSIST_BASE_URL");
+    let key = env_nonempty("MW_ANTHROPIC_API_KEY");
+    let mode = env_nonempty("MW_ASSIST_REASONER");
+    reasoner_status_from(base_url.as_deref(), key.as_deref(), mode.as_deref())
 }
 
 /// The pure status decision, factored out of [reasoner_status] so a unit test can exercise
 /// every branch without touching the process environment. [select_reasoner_from] delegates to
-/// this so the status and the actual selection cannot drift apart.
-fn reasoner_status_from(key: Option<&str>, mode: Option<&str>) -> ReasonerStatus {
+/// this so the status and the actual selection cannot drift apart. The local fleet wins: a
+/// base URL is checked before an Anthropic key.
+fn reasoner_status_from(
+    base_url: Option<&str>,
+    key: Option<&str>,
+    mode: Option<&str>,
+) -> ReasonerStatus {
     match mode {
         Some("scripted") => ReasonerStatus::Scripted,
         Some(other) => ReasonerStatus::UnknownMode(other.to_string()),
-        None => match key {
-            Some(_) => ReasonerStatus::Live,
-            None => ReasonerStatus::NotConfigured,
+        None => match base_url {
+            Some(_) => ReasonerStatus::Live(LiveBackend::OpenAi),
+            None => match key {
+                Some(_) => ReasonerStatus::Live(LiveBackend::Anthropic),
+                None => ReasonerStatus::NotConfigured,
+            },
         },
     }
 }
 
 /// Select the reasoner from the environment, so a test can force the deterministic script and
-/// a deployment can supply a key. The key is read from the environment ONLY - never from a
-/// request, never logged, never committed.
+/// a deployment can supply a backend. Every credential is read from the environment ONLY -
+/// never from a request, never logged, never committed.
 fn select_reasoner() -> Result<Box<dyn ModelReasoner>, ApiError> {
-    let key = std::env::var("MW_ANTHROPIC_API_KEY")
-        .ok()
-        .filter(|k| !k.trim().is_empty());
-    let mode = std::env::var("MW_ASSIST_REASONER")
-        .ok()
-        .filter(|m| !m.trim().is_empty());
-    select_reasoner_from(key.as_deref(), mode.as_deref())
+    let base_url = env_nonempty("MW_ASSIST_BASE_URL");
+    let model = env_nonempty("MW_ASSIST_MODEL");
+    let api_key = env_nonempty("MW_ASSIST_API_KEY");
+    let key = env_nonempty("MW_ANTHROPIC_API_KEY");
+    let mode = env_nonempty("MW_ASSIST_REASONER");
+    select_reasoner_from(
+        base_url.as_deref(),
+        model.as_deref(),
+        api_key.as_deref(),
+        key.as_deref(),
+        mode.as_deref(),
+    )
 }
 
 /// The pure selection decision, factored out of [select_reasoner] so a unit test can exercise
 /// every branch without touching the process environment.
 fn select_reasoner_from(
+    base_url: Option<&str>,
+    model: Option<&str>,
+    api_key: Option<&str>,
     key: Option<&str>,
     mode: Option<&str>,
 ) -> Result<Box<dyn ModelReasoner>, ApiError> {
-    match reasoner_status_from(key, mode) {
+    match reasoner_status_from(base_url, key, mode) {
         ReasonerStatus::Scripted => Ok(Box::new(ScriptedReasoner::example())),
-        ReasonerStatus::Live => Ok(Box::new(LiveReasoner::new(key.unwrap_or("").to_string()))),
+        ReasonerStatus::Live(LiveBackend::OpenAi) => Ok(Box::new(OpenAiReasoner::new(
+            base_url.unwrap_or("").to_string(),
+            model.unwrap_or("").to_string(),
+            api_key.map(|k| k.to_string()),
+        ))),
+        ReasonerStatus::Live(LiveBackend::Anthropic) => {
+            Ok(Box::new(LiveReasoner::new(key.unwrap_or("").to_string())))
+        }
         ReasonerStatus::NotConfigured => Err(ApiError::service_unavailable(
-            "no live reasoner configured: set MW_ANTHROPIC_API_KEY, or MW_ASSIST_REASONER=scripted for the deterministic test mode",
+            "no live reasoner configured: set MW_ASSIST_BASE_URL (with MW_ASSIST_MODEL) or MW_ANTHROPIC_API_KEY, or MW_ASSIST_REASONER=scripted for the deterministic test mode",
         )),
         ReasonerStatus::UnknownMode(other) => Err(ApiError::bad_request(format!(
             "unknown assist reasoner mode {:?}; expected 'scripted'",
@@ -710,7 +877,7 @@ mod tests {
 
     #[test]
     fn no_key_and_no_mode_reports_no_live_reasoner() {
-        let err = select_reasoner_from(None, None)
+        let err = select_reasoner_from(None, None, None, None, None)
             .err()
             .expect("no key means no live reasoner");
         assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
@@ -722,21 +889,35 @@ mod tests {
     }
 
     #[test]
-    fn a_key_selects_the_live_reasoner() {
-        let reasoner = select_reasoner_from(Some("sk-ant-key"), None).expect("a key selects live");
+    fn a_base_url_selects_the_local_fleet_reasoner() {
+        let reasoner = select_reasoner_from(
+            Some("http://idc-1:8012/v1"),
+            Some("qwen3.8-27b-fp8"),
+            None,
+            None,
+            None,
+        )
+        .expect("a base URL selects the local fleet");
+        assert_eq!(reasoner.agent(), LIVE_AGENT);
+    }
+
+    #[test]
+    fn an_anthropic_key_selects_the_live_reasoner() {
+        let reasoner = select_reasoner_from(None, None, None, Some("sk-ant-key"), None)
+            .expect("a key selects live");
         assert_eq!(reasoner.agent(), LIVE_AGENT);
     }
 
     #[test]
     fn scripted_mode_selects_the_scripted_reasoner_without_a_key() {
-        let reasoner =
-            select_reasoner_from(None, Some("scripted")).expect("scripted mode needs no key");
+        let reasoner = select_reasoner_from(None, None, None, None, Some("scripted"))
+            .expect("scripted mode needs no key");
         assert_eq!(reasoner.agent(), SCRIPTED_AGENT);
     }
 
     #[test]
     fn an_unknown_mode_is_refused() {
-        let err = select_reasoner_from(Some("k"), Some("bogus"))
+        let err = select_reasoner_from(None, None, None, Some("k"), Some("bogus"))
             .err()
             .expect("unknown mode");
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -794,22 +975,53 @@ mod tests {
     }
 
     #[test]
+    fn extract_json_object_finds_the_object_behind_prose_or_a_fence() {
+        // A clean object passes through untouched.
+        let clean = r#"{"changes":[]}"#;
+        assert_eq!(extract_json_object(clean), clean);
+
+        // A markdown fence is stripped.
+        let fenced = "```json\n{\"changes\":[]}\n```";
+        assert_eq!(extract_json_object(fenced), "{\"changes\":[]}");
+
+        // Prose around a JSON object is tolerated.
+        let prose = "Sure: {\"changes\":[]} done.";
+        assert_eq!(extract_json_object(prose), "{\"changes\":[]}");
+
+        // No object anywhere: the raw text is returned for the strict parser to refuse.
+        let none = "no json here at all";
+        assert_eq!(extract_json_object(none), none);
+    }
+
+    #[test]
     fn reasoner_status_reports_every_mode() {
         assert_eq!(
-            reasoner_status_from(None, None),
+            reasoner_status_from(None, None, None),
             ReasonerStatus::NotConfigured
         );
         assert_eq!(
-            reasoner_status_from(Some("sk-ant-key"), None),
-            ReasonerStatus::Live
+            reasoner_status_from(None, Some("sk-ant-key"), None),
+            ReasonerStatus::Live(LiveBackend::Anthropic)
         );
         assert_eq!(
-            reasoner_status_from(None, Some("scripted")),
+            reasoner_status_from(Some("http://idc-1:8012/v1"), None, None),
+            ReasonerStatus::Live(LiveBackend::OpenAi)
+        );
+        assert_eq!(
+            reasoner_status_from(None, None, Some("scripted")),
             ReasonerStatus::Scripted
         );
         assert_eq!(
-            reasoner_status_from(Some("k"), Some("bogus")),
+            reasoner_status_from(None, Some("k"), Some("bogus")),
             ReasonerStatus::UnknownMode("bogus".to_string())
+        );
+    }
+
+    #[test]
+    fn the_local_fleet_wins_when_both_backends_are_set() {
+        assert_eq!(
+            reasoner_status_from(Some("http://idc-1:8012/v1"), Some("sk-ant-key"), None),
+            ReasonerStatus::Live(LiveBackend::OpenAi)
         );
     }
 
@@ -817,32 +1029,54 @@ mod tests {
     fn reasoner_status_agrees_with_the_reasoner_selection() {
         // The panel's status and the endpoint's selection must never disagree.
         assert_eq!(
-            reasoner_status_from(None, None),
+            reasoner_status_from(None, None, None),
             ReasonerStatus::NotConfigured
         );
-        assert!(select_reasoner_from(None, None).is_err());
+        assert!(select_reasoner_from(None, None, None, None, None).is_err());
 
-        assert_eq!(reasoner_status_from(Some("k"), None), ReasonerStatus::Live);
         assert_eq!(
-            select_reasoner_from(Some("k"), None).unwrap().agent(),
+            reasoner_status_from(None, Some("k"), None),
+            ReasonerStatus::Live(LiveBackend::Anthropic)
+        );
+        assert_eq!(
+            select_reasoner_from(None, None, None, Some("k"), None)
+                .unwrap()
+                .agent(),
             LIVE_AGENT
         );
 
         assert_eq!(
-            reasoner_status_from(None, Some("scripted")),
+            reasoner_status_from(Some("http://idc-1:8012/v1"), None, None),
+            ReasonerStatus::Live(LiveBackend::OpenAi)
+        );
+        assert_eq!(
+            select_reasoner_from(
+                Some("http://idc-1:8012/v1"),
+                Some("qwen3.8-27b-fp8"),
+                None,
+                None,
+                None
+            )
+            .unwrap()
+            .agent(),
+            LIVE_AGENT
+        );
+
+        assert_eq!(
+            reasoner_status_from(None, None, Some("scripted")),
             ReasonerStatus::Scripted
         );
         assert_eq!(
-            select_reasoner_from(None, Some("scripted"))
+            select_reasoner_from(None, None, None, None, Some("scripted"))
                 .unwrap()
                 .agent(),
             SCRIPTED_AGENT
         );
 
         assert_eq!(
-            reasoner_status_from(None, Some("bogus")),
+            reasoner_status_from(None, None, Some("bogus")),
             ReasonerStatus::UnknownMode("bogus".to_string())
         );
-        assert!(select_reasoner_from(None, Some("bogus")).is_err());
+        assert!(select_reasoner_from(None, None, None, None, Some("bogus")).is_err());
     }
 }

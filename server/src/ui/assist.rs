@@ -15,7 +15,7 @@ use serde::Deserialize;
 use agent::{Confidence, Proposal, ProposedAction, ReviewArtifact};
 
 use crate::api::{validate_name, verify_actor, ApiState};
-use crate::assist::{assist_core, AssistOutcome, ReasonerStatus, LIVE_AGENT};
+use crate::assist::{assist_core, AssistOutcome, LiveBackend, ReasonerStatus, LIVE_AGENT};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::proposal_api::accept_proposal_core;
 use crate::store::{Commit, CommitProvenance};
@@ -30,26 +30,31 @@ pub fn assist_panel_markup(project: &str, branch: &str, status: &ReasonerStatus)
         section class="assist-panel" id="assist" {
             h2 { "Assist" }
             (reasoner_status_markup(status))
-            @if matches!(status, ReasonerStatus::Live | ReasonerStatus::Scripted) {
+            @if matches!(status, ReasonerStatus::Live(_) | ReasonerStatus::Scripted) {
                 (assist_form_markup(project, branch))
             }
         }
     }
 }
 
-/// The one-line status: live, scripted, or (plainly) not configured with a pointer at the
-/// deterministic scripted mode.
+/// The one-line status: which live backend (the local fleet or Anthropic), scripted, or
+/// (plainly) not configured with a pointer at the deterministic scripted mode. The local
+/// fleet is named first because it wins when both are configured.
 fn reasoner_status_markup(status: &ReasonerStatus) -> Markup {
     match status {
-        ReasonerStatus::Live => html! {
-            p class="meta" { "Live reasoner configured (" (LIVE_AGENT) ")." }
+        ReasonerStatus::Live(LiveBackend::OpenAi) => html! {
+            p class="meta" { "Live reasoner configured: local OpenAI-compatible model (" (LIVE_AGENT) ")." }
+        },
+        ReasonerStatus::Live(LiveBackend::Anthropic) => html! {
+            p class="meta" { "Live reasoner configured: Anthropic (" (LIVE_AGENT) ")." }
         },
         ReasonerStatus::Scripted => html! {
             p class="meta" { "Running the scripted reasoner (deterministic test mode)." }
         },
         ReasonerStatus::NotConfigured => html! {
             p class="meta" {
-                "No live reasoner configured: set " code { "MW_ANTHROPIC_API_KEY" }
+                "No live reasoner configured: set " code { "MW_ASSIST_BASE_URL" }
+                " (with " code { "MW_ASSIST_MODEL" } ") or " code { "MW_ANTHROPIC_API_KEY" }
                 ", or " code { "MW_ASSIST_REASONER=scripted" } " for the deterministic test mode."
             }
         },
