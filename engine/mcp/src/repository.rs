@@ -17,14 +17,18 @@
 //! retry.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use serde_json::{json, Value};
 
-/// Environment variable holding the running modelwrite service's base URL (e.g.
-/// http://127.0.0.1:8080). Repository mode is enabled only when this AND [TOKEN_VAR] are
-/// both set and non-empty.
+/// Environment variable holding the running modelwrite service's base URL, e.g.
+/// http://127.0.0.1:8080 for a local service or https://trial.modelwrite.org for a deployed
+/// one behind TLS. Repository mode is enabled only when this AND [TOKEN_VAR] are both set
+/// and non-empty.
 pub const SERVICE_URL_VAR: &str = "MW_MCP_SERVICE_URL";
 /// Environment variable holding the bearer token to present to the service. It should be an
 /// agent token (viewer/reviewer roles): an agent proposes and a human commits.
@@ -135,13 +139,31 @@ pub trait Transport {
     ) -> Result<HttpResponse, String>;
 }
 
-/// The real transport: a plain-HTTP/1.1 client over std::net::TcpStream. It exists so
-/// repository mode needs no HTTP crate and therefore no toolchain newer than the engine's
-/// declared 1.75 floor. The modelwrite service speaks plain HTTP (no TLS), so a TLS client
-/// would be dead weight here.
+/// The URL scheme the repository client may speak.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scheme {
+    Http,
+    Https,
+}
+
+/// The parts of a parsed service URL: scheme, host, port and path.
+struct UrlParts {
+    scheme: Scheme,
+    host: String,
+    port: u16,
+    path: String,
+}
+
+/// The real transport: a hand-written HTTP/1.1 client over std::net::TcpStream, upgraded to
+/// TLS by the pure-Rust rustls stack (ring provider, bundled webpki roots) for https:// URLs.
+/// It needs no HTTP crate and no OpenSSL, so the engine's declared 1.75 floor stays reachable.
+/// Certificate verification is ALWAYS on and there is no knob anywhere to disable it: a peer
+/// that does not chain to a trusted root fails the handshake with a clear error, never a
+/// silent downgrade and never a retry.
 pub struct TcpTransport {
     connect_timeout: Duration,
     read_timeout: Duration,
+    tls: Arc<ClientConfig>,
 }
 
 impl Default for TcpTransport {
@@ -149,7 +171,78 @@ impl Default for TcpTransport {
         TcpTransport {
             connect_timeout: Duration::from_secs(5),
             read_timeout: Duration::from_secs(30),
+            tls: Arc::new(tls_client_config(bundled_roots())),
         }
+    }
+}
+
+impl TcpTransport {
+    /// Build a transport whose TLS trust anchors are the given roots. This is the hook for a
+    /// private CA and the test seam for a loopback TLS listener: the roots are ADDED to
+    /// verification, never a replacement for it, so a peer must still chain to one of them.
+    /// It is NOT a way to disable verification - there is none.
+    pub fn with_roots(roots: RootCertStore) -> TcpTransport {
+        TcpTransport {
+            connect_timeout: Duration::from_secs(5),
+            read_timeout: Duration::from_secs(30),
+            tls: Arc::new(tls_client_config(roots)),
+        }
+    }
+
+    /// Resolve the host and connect to the first address that accepts, applying the read and
+    /// write timeouts. A hostname (trial.modelwrite.org) resolves through the system resolver
+    /// exactly as an IP literal does, so a TLS deployment behind a reverse proxy is reachable.
+    fn connect(&self, parts: &UrlParts) -> Result<TcpStream, String> {
+        let addrs = (parts.host.as_str(), parts.port)
+            .to_socket_addrs()
+            .map_err(|e| format!("cannot resolve the service host {}: {}", parts.host, e))?;
+        let mut last: Option<std::io::Error> = None;
+        for addr in addrs {
+            match TcpStream::connect_timeout(&addr, self.connect_timeout) {
+                Ok(stream) => return self.with_timeouts(stream, &parts.host),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(format!(
+            "cannot reach the modelwrite service at {}:{}: {}",
+            parts.host,
+            parts.port,
+            last.map(|e| e.to_string())
+                .unwrap_or_else(|| "no addresses resolved".to_string())
+        ))
+    }
+
+    fn with_timeouts(&self, stream: TcpStream, host: &str) -> Result<TcpStream, String> {
+        stream
+            .set_read_timeout(Some(self.read_timeout))
+            .map_err(|e| format!("cannot configure the read timeout to {}: {}", host, e))?;
+        stream
+            .set_write_timeout(Some(self.read_timeout))
+            .map_err(|e| format!("cannot configure the write timeout to {}: {}", host, e))?;
+        Ok(stream)
+    }
+
+    /// Wrap a connected TCP stream in a TLS session and complete the handshake, so a
+    /// certificate or protocol failure is surfaced here - named - before any HTTP byte is
+    /// sent. With verification always on, this is where an unknown CA, a name mismatch, an
+    /// expired certificate or a protocol error fails.
+    fn tls_connect(
+        &self,
+        stream: TcpStream,
+        parts: &UrlParts,
+    ) -> Result<StreamOwned<ClientConnection, TcpStream>, String> {
+        let name = ServerName::try_from(parts.host.as_str())
+            .map_err(|e| format!("invalid TLS server name {}: {}", parts.host, e))?
+            .to_owned();
+        let conn = ClientConnection::new(self.tls.clone(), name)
+            .map_err(|e| format!("cannot start a TLS session with {}: {}", parts.host, e))?;
+        let mut tls = StreamOwned::new(conn, stream);
+        while tls.conn.is_handshaking() {
+            tls.conn
+                .complete_io(&mut tls.sock)
+                .map_err(|e| format!("TLS handshake with {} failed: {}", parts.host, e))?;
+        }
+        Ok(tls)
     }
 }
 
@@ -161,73 +254,136 @@ impl Transport for TcpTransport {
         authorization: Option<&str>,
         body: Option<&str>,
     ) -> Result<HttpResponse, String> {
-        let (host, port, path) = parse_http_url(url)?;
-        let addr = format!("{}:{}", host, port);
-        let addr: std::net::SocketAddr = addr
-            .parse()
-            .map_err(|e| format!("invalid service address {}: {}", addr, e))?;
-        let mut stream = TcpStream::connect_timeout(&addr, self.connect_timeout)
-            .map_err(|e| format!("cannot reach the modelwrite service at {}: {}", url, e))?;
-        stream
-            .set_read_timeout(Some(self.read_timeout))
-            .map_err(|e| format!("cannot configure the read timeout: {}", e))?;
-        stream
-            .set_write_timeout(Some(self.read_timeout))
-            .map_err(|e| format!("cannot configure the write timeout: {}", e))?;
-
-        let mut request = format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json\r\n",
-            method, path, host
-        );
-        if let Some(auth) = authorization {
-            request.push_str(&format!("Authorization: {}\r\n", auth));
-        }
-        if let Some(b) = body {
-            request.push_str("Content-Type: application/json\r\n");
-            request.push_str(&format!("Content-Length: {}\r\n", b.len()));
-        }
-        request.push_str("\r\n");
-        if let Some(b) = body {
-            request.push_str(b);
-        }
-
-        stream
-            .write_all(request.as_bytes())
-            .map_err(|e| format!("cannot send the request to {}: {}", url, e))?;
-        let mut response = Vec::new();
-        stream
-            .read_to_end(&mut response)
-            .map_err(|e| format!("cannot read the response from {}: {}", url, e))?;
+        let parts = parse_url(url)?;
+        let request = build_request(method, &parts, authorization, body);
+        let response = match parts.scheme {
+            Scheme::Http => {
+                let mut stream = self.connect(&parts)?;
+                stream
+                    .write_all(request.as_bytes())
+                    .map_err(|e| format!("cannot send the request to {}: {}", url, e))?;
+                let mut bytes = Vec::new();
+                stream
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| format!("cannot read the response from {}: {}", url, e))?;
+                bytes
+            }
+            Scheme::Https => {
+                let stream = self.connect(&parts)?;
+                let mut tls = self.tls_connect(stream, &parts)?;
+                tls.write_all(request.as_bytes())
+                    .map_err(|e| format!("cannot send the request to {}: {}", url, e))?;
+                let mut bytes = Vec::new();
+                tls.read_to_end(&mut bytes)
+                    .map_err(|e| format!("cannot read the response from {}: {}", url, e))?;
+                bytes
+            }
+        };
         parse_http_response(&response)
     }
 }
 
-/// Split an http://host[:port]/path URL into its parts. HTTPS is refused: the service speaks
-/// plain HTTP and this client implements no TLS, so a scheme that requires TLS must fail
-/// loudly rather than silently send the bearer token to a TLS port in the clear.
-fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
-    let rest = url.strip_prefix("http://").ok_or_else(|| {
-        format!(
-            "the service URL must be plain http:// (no TLS), got {}",
+/// Assemble the raw HTTP/1.1 request line and headers for the given URL parts. The request
+/// body (when present) is the propose payload and carries an explicit Content-Length.
+fn build_request(
+    method: &str,
+    parts: &UrlParts,
+    authorization: Option<&str>,
+    body: Option<&str>,
+) -> String {
+    let mut request = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json\r\n",
+        method, parts.path, parts.host
+    );
+    if let Some(auth) = authorization {
+        request.push_str(&format!("Authorization: {}\r\n", auth));
+    }
+    if let Some(b) = body {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    request.push_str("\r\n");
+    if let Some(b) = body {
+        request.push_str(b);
+    }
+    request
+}
+
+/// The bundled public trust anchors (Mozilla's root program, shipped in webpki-roots).
+fn bundled_roots() -> RootCertStore {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    roots
+}
+
+/// Build a client config over the pure-Rust ring provider with the given trust anchors.
+fn tls_client_config(roots: RootCertStore) -> ClientConfig {
+    ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth()
+}
+
+/// Split a service URL into its scheme, host, port and path. Both http:// (a local service,
+/// default port 80) and https:// (any TLS deployment, default port 443) are accepted; a
+/// scheme that is neither is refused loudly rather than guessed at.
+fn parse_url(url: &str) -> Result<UrlParts, String> {
+    let (scheme, rest) = if let Some(r) = url.strip_prefix("https://") {
+        (Scheme::Https, r)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (Scheme::Http, r)
+    } else {
+        return Err(format!(
+            "the service URL must be http:// or https://, got {}",
             url
-        )
-    })?;
+        ));
+    };
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) if !h.is_empty() => (
-            h.to_string(),
-            p.parse::<u16>()
-                .map_err(|e| format!("invalid port in {}: {}", url, e))?,
-        ),
-        _ => (authority.to_string(), 80),
+    let default_port = match scheme {
+        Scheme::Http => 80,
+        Scheme::Https => 443,
     };
+    let (host, port) = split_authority(authority, default_port, url)?;
     if host.is_empty() {
         return Err(format!("invalid service URL {}", url));
     }
-    Ok((host, port, path.to_string()))
+    Ok(UrlParts {
+        scheme,
+        host,
+        port,
+        path: path.to_string(),
+    })
+}
+
+/// Split the authority (host[:port]) of a URL into its host and port. An IPv6 literal keeps
+/// its brackets removed and its port parsed after the closing bracket; a bare host gets the
+/// scheme's default port.
+fn split_authority(authority: &str, default_port: u16, url: &str) -> Result<(String, u16), String> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let end = rest
+            .find(']')
+            .ok_or_else(|| format!("invalid service URL {}", url))?;
+        let host = rest[..end].to_string();
+        let after = &rest[end + 1..];
+        let port = match after.strip_prefix(':') {
+            Some(p) => p
+                .parse::<u16>()
+                .map_err(|e| format!("invalid port in {}: {}", url, e))?,
+            None if after.is_empty() => default_port,
+            None => return Err(format!("invalid service URL {}", url)),
+        };
+        return Ok((host, port));
+    }
+    match authority.rsplit_once(':') {
+        Some((h, p)) if !h.is_empty() => Ok((
+            h.to_string(),
+            p.parse::<u16>()
+                .map_err(|e| format!("invalid port in {}: {}", url, e))?,
+        )),
+        _ => Ok((authority.to_string(), default_port)),
+    }
 }
 
 /// Parse a buffered HTTP/1.1 response (status line, headers, body). The body length comes
@@ -676,16 +832,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_http_url_refuses_https_and_parses_port_and_path() {
-        let (host, port, path) = parse_http_url("http://127.0.0.1:8080/projects/coffee").unwrap();
-        assert_eq!(host, "127.0.0.1");
-        assert_eq!(port, 8080);
-        assert_eq!(path, "/projects/coffee");
+    fn parse_url_parses_http_and_https_ports_and_paths() {
+        let parts = parse_url("http://127.0.0.1:8080/projects/coffee").unwrap();
+        assert_eq!(parts.scheme, Scheme::Http);
+        assert_eq!(parts.host, "127.0.0.1");
+        assert_eq!(parts.port, 8080);
+        assert_eq!(parts.path, "/projects/coffee");
 
-        let (_, port, _) = parse_http_url("http://example.com").unwrap();
-        assert_eq!(port, 80);
+        let parts = parse_url("http://example.com").unwrap();
+        assert_eq!(parts.scheme, Scheme::Http);
+        assert_eq!(parts.port, 80);
 
-        assert!(parse_http_url("https://example.com").is_err());
+        // https is a first-class scheme now, with the TLS default port.
+        let parts = parse_url("https://example.com").unwrap();
+        assert_eq!(parts.scheme, Scheme::Https);
+        assert_eq!(parts.port, 443);
+        assert_eq!(parts.path, "/");
+
+        let parts = parse_url("https://example.com:8443/projects").unwrap();
+        assert_eq!(parts.scheme, Scheme::Https);
+        assert_eq!(parts.port, 8443);
+        assert_eq!(parts.path, "/projects");
+
+        assert!(parse_url("ftp://example.com").is_err());
+        assert!(parse_url("not a url").is_err());
     }
 
     #[test]
