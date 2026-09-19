@@ -1397,6 +1397,14 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
         name_to_id.insert(r.name.as_str(), r.id.as_str());
     }
 
+    // Part/reference edges are reconstructed during block emission: each one
+    // becomes a PartProperty/ReferenceProperty stereotype application on the
+    // source block's attribute typed by the target. These maps count how many of
+    // each (source, target) pair remain to be reconstructed, so export refuses
+    // rather than silently drop an edge it cannot rebuild.
+    let mut part_edges: HashMap<(String, String), usize> = HashMap::new();
+    let mut reference_edges: HashMap<(String, String), usize> = HashMap::new();
+
     if let Some(graph) = &root.graph {
         // The graph must mirror the structure blocks followed by the requirements,
         // exactly and in order, or export would silently lose or reorder them.
@@ -1447,18 +1455,53 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 )));
             }
         }
+        // Edge endpoints must resolve to carried nodes, and part/reference
+        // edges must be reconstructible from a block attribute - export refuses
+        // rather than silently dropping an edge it cannot rebuild.
+        let node_ids: HashSet<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();
+        let block_ids: HashSet<&str> = root.structure.iter().map(|el| el.id.as_str()).collect();
         for e in &graph.edges {
-            if e.kind != "dependency" {
-                return Err(BindingError::Export(format!(
-                    "cannot export edge {} -> {} of kind '{}': only dependency edges are in the subset",
-                    e.source, e.target, e.kind
-                )));
-            }
-            if !model::DEPENDENCY_STEREOTYPES.contains(&e.label.as_str()) {
-                return Err(BindingError::Export(format!(
-                    "cannot export dependency edge with label '{}': not a Satisfy/Allocate/Refine/Verify stereotype",
-                    e.label
-                )));
+            match e.kind.as_str() {
+                "dependency" => {
+                    if !model::DEPENDENCY_STEREOTYPES.contains(&e.label.as_str()) {
+                        return Err(BindingError::Export(format!(
+                            "cannot export dependency edge with label '{}': not a Satisfy/Allocate/Refine/Verify stereotype",
+                            e.label
+                        )));
+                    }
+                }
+                "association" => {
+                    if !node_ids.contains(e.source.as_str())
+                        || !node_ids.contains(e.target.as_str())
+                    {
+                        return Err(BindingError::Export(format!(
+                            "cannot export association edge {} -> {}: an endpoint is not a carried block or requirement",
+                            e.source, e.target
+                        )));
+                    }
+                }
+                "part" | "reference" => {
+                    if !block_ids.contains(e.source.as_str())
+                        || !node_ids.contains(e.target.as_str())
+                    {
+                        return Err(BindingError::Export(format!(
+                            "cannot export {} edge {} -> {}: source must be a block and target a carried element",
+                            e.kind, e.source, e.target
+                        )));
+                    }
+                    let key = (e.source.clone(), e.target.clone());
+                    if e.kind == "part" {
+                        *part_edges.entry(key).or_insert(0) += 1;
+                    } else {
+                        *reference_edges.entry(key).or_insert(0) += 1;
+                    }
+                }
+                other => {
+                    return Err(BindingError::Export(format!(
+                        "cannot export edge {} -> {} of kind '{}': outside the subset",
+                        e.source, e.target, other
+                    )));
+                }
             }
         }
     }
@@ -1488,10 +1531,10 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 .get(a.attr_type.as_str())
                 .copied()
                 .unwrap_or(a.attr_type.as_str());
+            let prop_id = format!("{}-attr-{}", el.id, i);
             out.push_str(&format!(
-                "      <ownedAttribute xmi:type=\"uml:Property\" xmi:id=\"{}-attr-{}\" name=\"{}\" type=\"{}\" aggregation=\"{}\"",
-                escape(&el.id),
-                i,
+                "      <ownedAttribute xmi:type=\"uml:Property\" xmi:id=\"{}\" name=\"{}\" type=\"{}\" aggregation=\"{}\"",
+                escape(&prop_id),
                 escape(&a.name),
                 escape(type_ref),
                 escape(&a.aggregation)
@@ -1500,6 +1543,32 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 out.push_str(&format!(" default=\"{}\"", escape(&a.default)));
             }
             out.push_str("/>\n");
+            // Reconstruct a part/reference edge by marking this attribute with the
+            // matching stereotype. The OKF Attribute carries no stereotype, so the
+            // edge is the only source of truth for which attribute is a part or a
+            // reference; matching on (owner, resolved type) rebuilds it exactly.
+            let key = (el.id.clone(), type_ref.to_string());
+            if let Some(n) = part_edges.get_mut(&key) {
+                if *n > 0 {
+                    *n -= 1;
+                    out.push_str(&format!(
+                        "      <{} xmi:id=\"{}-app\" base_Property=\"{}\"/>\n",
+                        model::PART_STEREOTYPE,
+                        escape(&prop_id),
+                        escape(&prop_id)
+                    ));
+                }
+            } else if let Some(n) = reference_edges.get_mut(&key) {
+                if *n > 0 {
+                    *n -= 1;
+                    out.push_str(&format!(
+                        "      <{} xmi:id=\"{}-app\" base_Property=\"{}\"/>\n",
+                        model::REFERENCE_STEREOTYPE,
+                        escape(&prop_id),
+                        escape(&prop_id)
+                    ));
+                }
+            }
         }
         if !el.documentation.is_empty() {
             out.push_str(&format!(
@@ -1509,6 +1578,15 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
             ));
         }
         out.push_str("    </packagedElement>\n");
+    }
+    // Every part/reference edge must now have been rebuilt as a stereotype
+    // application on a matching attribute; a remainder means the edge's target
+    // has no attribute to carry it, which export refuses rather than drops.
+    if part_edges.values().any(|&n| n > 0) || reference_edges.values().any(|&n| n > 0) {
+        return Err(BindingError::Export(
+            "cannot reconstruct a part/reference edge: no block attribute is typed by its target"
+                .to_string(),
+        ));
     }
     for r in &root.requirements {
         out.push_str(&format!(
@@ -1556,16 +1634,54 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
     }
     if let Some(graph) = &root.graph {
         for (i, e) in graph.edges.iter().enumerate() {
-            out.push_str(&format!(
-                "    <packagedElement xmi:type=\"uml:Dependency\" xmi:id=\"dep-{i}\" client=\"{}\" supplier=\"{}\">\n",
-                escape(&e.source),
-                escape(&e.target)
-            ));
-            out.push_str(&format!(
-                "      <{} base_Dependency=\"dep-{i}\"/>\n",
-                escape(&e.label)
-            ));
-            out.push_str("    </packagedElement>\n");
+            match e.kind.as_str() {
+                "dependency" => {
+                    out.push_str(&format!(
+                        "    <packagedElement xmi:type=\"uml:Dependency\" xmi:id=\"dep-{i}\" client=\"{}\" supplier=\"{}\">\n",
+                        escape(&e.source),
+                        escape(&e.target)
+                    ));
+                    out.push_str(&format!(
+                        "      <{} base_Dependency=\"dep-{i}\"/>\n",
+                        escape(&e.label)
+                    ));
+                    out.push_str("    </packagedElement>\n");
+                }
+                "association" => {
+                    // A self-contained association: the two member ends are carried
+                    // as ownedEnd properties typed by the edge's endpoints, so the
+                    // re-import rebuilds source = type of end 0, target = type of
+                    // end 1 (the golden corpus direction).
+                    out.push_str(&format!(
+                        "    <packagedElement xmi:type=\"uml:Association\" xmi:id=\"assoc-{i}\">\n"
+                    ));
+                    out.push_str(&format!(
+                        "      <memberEnd xmi:idref=\"assoc-{i}-end-0\"/>\n"
+                    ));
+                    out.push_str(&format!(
+                        "      <memberEnd xmi:idref=\"assoc-{i}-end-1\"/>\n"
+                    ));
+                    out.push_str(&format!(
+                        "      <ownedEnd xmi:type=\"uml:Property\" xmi:id=\"assoc-{i}-end-0\" type=\"{}\"/>\n",
+                        escape(&e.source)
+                    ));
+                    out.push_str(&format!(
+                        "      <ownedEnd xmi:type=\"uml:Property\" xmi:id=\"assoc-{i}-end-1\" type=\"{}\"/>\n",
+                        escape(&e.target)
+                    ));
+                    out.push_str("    </packagedElement>\n");
+                }
+                "part" | "reference" => {
+                    // Already emitted as a PartProperty/ReferenceProperty stereotype
+                    // application on the source block's attribute.
+                }
+                other => {
+                    return Err(BindingError::Export(format!(
+                        "cannot export edge {} -> {} of kind '{}': outside the subset",
+                        e.source, e.target, other
+                    )));
+                }
+            }
         }
     }
     out.push_str("  </uml:Model>\n");

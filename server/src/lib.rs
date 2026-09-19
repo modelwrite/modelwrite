@@ -7,6 +7,7 @@ pub mod audit_api;
 pub mod auth;
 pub mod binding_api;
 pub mod binding_registry;
+pub mod composition;
 pub mod error;
 pub mod gate_api;
 pub mod locks_api;

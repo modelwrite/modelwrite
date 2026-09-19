@@ -677,3 +677,39 @@ fn ports_associations_and_parts_carry_with_the_golden_corpus_direction() {
         .iter()
         .all(|m| m.verdict != MappingVerdict::Unmappable));
 }
+
+// --- GAP 1: export carries the association/part/reference edges it imports ---
+
+#[test]
+fn association_part_and_port_edges_round_trip_through_export() {
+    let (root, _) = import("association-part.xmi");
+    let bytes = XmiBinding::new()
+        .export(&root)
+        .expect("export must succeed");
+    let (round_tripped, _) = XmiBinding::new()
+        .import(&bytes)
+        .expect("re-import must succeed");
+    // The association, part and port edges the import carries must survive the
+    // OKF -> XMI -> OKF journey verbatim, or the binding fails its own premise.
+    assert_eq!(round_tripped, root);
+}
+
+#[test]
+fn export_refuses_a_part_edge_with_no_matching_attribute() {
+    // A part edge whose source block has no attribute typed by its target cannot
+    // be reconstructed on export, so it must be refused rather than silently
+    // dropped (the same rule as the other out-of-subset refusals). block-motor
+    // has no attributes, so this edge has nothing to carry it.
+    let (mut root, _) = import("coffee-grinder.xmi");
+    let graph = root.graph.as_mut().unwrap();
+    graph.edges.push(GraphEdge {
+        source: "block-motor".to_string(),
+        target: "block-grinder".to_string(),
+        kind: "part".to_string(),
+        label: String::new(),
+    });
+    match XmiBinding::new().export(&root) {
+        Err(BindingError::Export(msg)) => assert!(msg.contains("reconstruct")),
+        other => panic!("expected Export refusal, got {:?}", other.map(|_| ())),
+    }
+}

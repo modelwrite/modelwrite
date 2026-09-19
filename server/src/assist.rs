@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use agent::{AgentTask, Confidence, Material, Proposal, ProposedAction, ReviewArtifact};
 use okf::types::{Element, GraphNode, OkfRoot, Requirement};
 
-use crate::api::{load_model, map_store_error, validate_name, ApiState};
+use crate::api::{load_model, map_store_error, validate_element_name, validate_name, ApiState};
 use crate::audit::PROPOSAL_RECORD;
 use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
@@ -80,7 +80,7 @@ impl ModelChange {
     }
 
     /// Whether this change is structurally valid: its action changes the model, and it carries
-    /// exactly the payload that action needs with a non-empty id.
+    /// exactly the payload that action needs with a non-empty id in the existing id shape.
     fn validate(&self) -> Result<(), String> {
         match &self.action {
             ProposedAction::EditElement => {
@@ -91,11 +91,7 @@ impl ModelChange {
                 if self.requirement.is_some() {
                     return Err("EditElement change also carries a requirement".to_string());
                 }
-                if element.id.trim().is_empty() {
-                    return Err(
-                        "EditElement change carries an element with an empty id".to_string()
-                    );
-                }
+                validate_proposed_id(&element.id)?;
             }
             ProposedAction::DraftText => {
                 let requirement = self
@@ -105,11 +101,7 @@ impl ModelChange {
                 if self.element.is_some() {
                     return Err("DraftText change also carries an element".to_string());
                 }
-                if requirement.id.trim().is_empty() {
-                    return Err(
-                        "DraftText change carries a requirement with an empty id".to_string()
-                    );
-                }
+                validate_proposed_id(&requirement.id)?;
             }
             other => {
                 return Err(format!(
@@ -120,6 +112,38 @@ impl ModelChange {
         }
         Ok(())
     }
+}
+
+/// The id-shape rules a proposed id must satisfy. Non-empty is checked after trimming (an id
+/// of only whitespace is empty), then the existing element-id shape rules from the create/edit
+/// path apply. Style is deliberately NOT enforced here: an opaque id is still a valid id, so
+/// the prompt makes the readable kebab-case form the default rather than this refusing a valid
+/// answer over taste.
+fn validate_proposed_id(id: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("a proposed element or requirement has an empty id".to_string());
+    }
+    validate_element_name(id).map_err(|e| e.message)
+}
+
+/// Validate a whole proposal: every change must be structurally valid AND the ids it carries
+/// must be unique within the proposal, so two changes cannot silently overwrite each other
+/// when the candidate document is applied.
+fn validate_changes(changes: &[ModelChange]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for change in changes {
+        change.validate()?;
+        // validate() already guarantees a non-empty id for every model-changing action, so
+        // subject() is exactly the id to uniqueness-check.
+        let id = change.subject();
+        if !seen.insert(id.clone()) {
+            return Err(format!(
+                "the proposal repeats the id {}; ids must be unique within the document",
+                id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Turns a natural-language request into concrete model changes. A trait so the contract is
@@ -329,14 +353,14 @@ fn system_prompt() -> String {
     r#"You are a model editor for the modelwrite platform. Answer with JSON ONLY - no prose, no markdown fences, no commentary. Your answer must be a JSON object of exactly this shape:
 
 {"changes": [
-  {"action": "EditElement", "element": {"id": "...", "name": "...", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "..."}, "requirement": null, "rationale": "...", "confidence": "High"}
+  {"action": "EditElement", "element": {"id": "heater-block", "name": "...", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "..."}, "requirement": null, "rationale": "...", "confidence": "High"}
 ]}
 
 Rules, all mandatory:
 - action is exactly "EditElement" (add or change an element) or "DraftText" (add or change a requirement). An EditElement change carries "element" and a null "requirement"; a DraftText change carries "requirement" and a null "element".
 - confidence is exactly "High", "Medium" or "Low".
 - Only add or modify elements in the project named in the current model. Never invent requirements, elements or constraints that the request does not ask for.
-- Give every new element or requirement an id that does not already exist in the current model. A requirement must have a non-empty reqId.
+- Give every new element or requirement a SHORT, HUMAN-READABLE id in kebab-case, for example "heater-block" or "heat-requirement". A reader should not have to decode a timestamp to find an element you added, so never invent an opaque id in the corpus's internal scheme. Each id must be UNIQUE within the document: it must not repeat an id already in the current model nor an id in another change you propose. A requirement must have a non-empty reqId.
 - If you cannot honour the request with a model change, return {"changes": []}.
 Return only the JSON object."#
         .to_string()
@@ -485,9 +509,7 @@ fn parse_and_validate(raw: &str) -> Result<Vec<ModelChange>, ApiError> {
             e
         ))
     })?;
-    for change in &changes {
-        change.validate().map_err(ApiError::bad_request)?;
-    }
+    validate_changes(&changes).map_err(ApiError::bad_request)?;
     Ok(changes)
 }
 
@@ -791,9 +813,7 @@ pub async fn assist_core(
         eprintln!("assist reasoner task failed: {}", e);
         ApiError::internal("the reasoner could not run")
     })??;
-    for change in &changes {
-        change.validate().map_err(ApiError::bad_request)?;
-    }
+    validate_changes(&changes).map_err(ApiError::bad_request)?;
 
     let artifact = build_review_artifact(&agent, request, &current, &changes);
     let artifact_json = serde_json::to_string(&artifact).map_err(|e| {
@@ -953,6 +973,57 @@ mod tests {
         .validate()
         .expect_err("a non-model-changing action must be refused");
         assert!(err.contains("not a model change"), "err: {}", err);
+    }
+
+    #[test]
+    fn the_prompt_demands_short_human_readable_unique_ids() {
+        let prompt = system_prompt();
+        for needle in [
+            "kebab-case",
+            "heater-block",
+            "heat-requirement",
+            "HUMAN-READABLE",
+            "UNIQUE",
+        ] {
+            assert!(
+                prompt.contains(needle),
+                "the prompt must demand {}, but it does not: {}",
+                needle,
+                prompt
+            );
+        }
+    }
+
+    #[test]
+    fn a_proposal_repeating_an_id_is_refused() {
+        let element = |id: &str| {
+            format!(
+                r#"{{"action":"EditElement","element":{{"id":"{}","name":"","kind":"block","stereotypes":[],"attributes":[],"documentation":""}},"requirement":null,"rationale":"","confidence":"High"}}"#,
+                id
+            )
+        };
+
+        // Two changes carrying the same id would silently overwrite each other when applied;
+        // the proposal must be refused for repeating it.
+        let repeated = format!(
+            r#"{{"changes":[{},{}]}}"#,
+            element("heater-block"),
+            element("heater-block")
+        );
+        let err = parse_and_validate(&repeated).expect_err("a repeated id must be refused");
+        assert!(
+            err.message.contains("unique"),
+            "the refusal must name uniqueness, got: {}",
+            err.message
+        );
+
+        // Distinct, human-readable ids are accepted.
+        let ok = format!(
+            r#"{{"changes":[{},{{"action":"DraftText","requirement":{{"id":"heat-requirement","name":"","kind":"requirement","stereotypes":[],"attributes":[],"documentation":"","reqId":"REQ-HEAT","reqText":"heat"}},"element":null,"rationale":"","confidence":"High"}}]}}"#,
+            element("heater-block")
+        );
+        let changes = parse_and_validate(&ok).expect("distinct ids are accepted");
+        assert_eq!(changes.len(), 2);
     }
 
     #[test]

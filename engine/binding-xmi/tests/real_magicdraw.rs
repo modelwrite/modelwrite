@@ -17,7 +17,7 @@
 //! or a clean error, every departure named, never a panic - and PRINTS what a
 //! real migration would actually get. The number is the finding.
 
-use binding::{Binding, MappingVerdict};
+use binding::{round_trip, Binding, MappingVerdict};
 use binding_xmi::XmiBinding;
 
 fn real_model() -> Vec<u8> {
@@ -229,4 +229,26 @@ fn a_real_magicdraw_sysml_export_imports_with_every_loss_named() {
             && m.subject.starts_with("uml:Association")
             && m.note.contains("outside the carried subset")
     }));
+}
+
+#[test]
+fn the_real_magicdraw_model_round_trips_through_the_harness() {
+    // GAP 1: an imported-then-exported real model must retain the association,
+    // part and reference edges the import carries. The engine's own diff - not
+    // the binding's claim - is the arbiter of what survives the OKF -> XMI -> OKF
+    // journey.
+    let bytes = real_model();
+    let binding = XmiBinding::new();
+    let (root, _) = binding.import(&bytes).expect("import must succeed");
+    let source = serde_json::to_vec(&root).expect("source must serialize");
+    let outcome = round_trip(&binding, &source).expect("round trip must succeed");
+    assert!(
+        outcome.diff.equal,
+        "engine diff over the real model:\n  missing elements: {:?}\n  extra elements: {:?}\n  missing edges: {:?}\n  extra edges: {:?}\n  changed attributes: {:?}",
+        outcome.diff.missing_elements,
+        outcome.diff.extra_elements,
+        outcome.diff.missing_edges,
+        outcome.diff.extra_edges,
+        outcome.diff.changed_attributes
+    );
 }

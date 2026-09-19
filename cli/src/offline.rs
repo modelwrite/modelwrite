@@ -425,7 +425,20 @@ fn gate(
     let reference_model = load_model(store, project, reference).map_err(map)?;
     let candidate_model = load_model(store, project, candidate).map_err(map)?;
 
-    let outcome = gate::run(&reference_model, &candidate_model, false);
+    let mut outcome = gate::run(&reference_model, &candidate_model, false);
+
+    // The compositional gate (S1) runs on top of the single-model gate, exactly as the
+    // server's gate endpoint does. The offline store answers resolution and was-gated
+    // across projects, so the offline verdict and evidence match the server's byte for
+    // byte - composition is not a server-only nicety.
+    let composition = server::composition::check(store, &candidate_model).map_err(map)?;
+    outcome.failures.extend(composition.failures);
+    outcome.passed = outcome.failures.is_empty();
+    outcome.evidence["composition"] = composition.evidence;
+    outcome.evidence["passed"] = json!(outcome.passed);
+    outcome.evidence["failures"] =
+        serde_json::to_value(&outcome.failures).expect("failures serialize");
+
     let branch = store
         .commit(project, candidate)
         .map_err(map)?

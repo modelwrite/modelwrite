@@ -106,7 +106,7 @@ async fn a_platform_model_reference_resolves_and_is_listed() {
     let body = json_body(listed).await;
     assert_eq!(
         body["references"],
-        serde_json::json!([{ "project": "radar", "revision": radar_hash, "role": "radar" }]),
+        serde_json::json!([{ "project": "radar", "revision": radar_hash, "role": "radar", "bounds": [] }]),
     );
 
     // And the reference resolves: the named project exists and the revision is a commit of it.
@@ -194,6 +194,20 @@ async fn the_single_model_gate_is_unchanged_by_references() {
     let router = server::app(state(dir.path()));
     create_project(&router, "radar").await;
     let radar_hash = commit(&router, "radar", model("radar")).await;
+
+    // S1: the compositional gate refuses to bless an integration of an un-gated subsystem
+    // revision. Gate radar against itself first so the ship reference resolves AND its
+    // revision carries a passing gate record; the single-model gate below then still sees
+    // references as ordinary content, exactly as S0 asserted.
+    let radar_gate = router
+        .clone()
+        .oneshot(post(
+            "/projects/radar/gate",
+            serde_json::json!({ "reference": radar_hash, "candidate": radar_hash }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(radar_gate.status(), StatusCode::OK);
 
     create_project(&router, "ship").await;
     let mut platform = model("ship");
