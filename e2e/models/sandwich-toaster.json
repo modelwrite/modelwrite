@@ -1,0 +1,476 @@
+{
+    "okf":  "1.0",
+    "project":  "sandwich-toaster",
+    "exportedAt":  "",
+    "summary":  {
+                    "blocks":  8,
+                    "requirements":  5,
+                    "signals":  2,
+                    "activities":  1
+                },
+    "structure":  [
+                      {
+                          "id":  "sandwich-toaster",
+                          "name":  "Sandwich Toaster",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "upperPlate",
+                                                 "type":  "Heating Plate",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "lowerPlate",
+                                                 "type":  "Heating Plate",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "latch",
+                                                 "type":  "Latch",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "powerInlet",
+                                                 "type":  "Mains Inlet",
+                                                 "aggregation":  "none",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "A clamshell toaster that seals and cuts a filled sandwich into two triangles."
+                      },
+                      {
+                          "id":  "upper-plate",
+                          "name":  "Upper Heating Plate",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "element",
+                                                 "type":  "Heating Element",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "Hinged plate carrying the upper heating element."
+                      },
+                      {
+                          "id":  "lower-plate",
+                          "name":  "Lower Heating Plate",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "element",
+                                                 "type":  "Heating Element",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "Fixed plate carrying the lower heating element."
+                      },
+                      {
+                          "id":  "heating-element",
+                          "name":  "Heating Element",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "ratedPower",
+                                                 "type":  "Real",
+                                                 "aggregation":  "none",
+                                                 "default":  "900"
+                                             }
+                                         ],
+                          "documentation":  "Resistive element bringing the plates to cooking temperature."
+                      },
+                      {
+                          "id":  "hinge",
+                          "name":  "Hinge",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Allows the upper plate to open and close and sets the plate gap."
+                      },
+                      {
+                          "id":  "latch",
+                          "name":  "Latch",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Holds the plates closed while cooking."
+                      },
+                      {
+                          "id":  "thermal-cutout",
+                          "name":  "Thermal Cut-out",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "One-shot thermal fuse protecting against a stuck thermostat."
+                      },
+                      {
+                          "id":  "indicator-lamp",
+                          "name":  "Indicator Lamp",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Shows that the toaster is powered and up to temperature."
+                      }
+                  ],
+    "interfaces":  [
+                       {
+                           "id":  "mains-inlet",
+                           "name":  "Mains Inlet",
+                           "kind":  "interface",
+                           "stereotypes":  [
+                                               "InterfaceBlock"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "230 V AC inlet."
+                       }
+                   ],
+    "signals":  [
+                    {
+                        "id":  "sig-power-on",
+                        "name":  "PowerOn",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  ""
+                    },
+                    {
+                        "id":  "sig-at-temperature",
+                        "name":  "AtTemperature",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  ""
+                    }
+                ],
+    "requirements":  [
+                         {
+                             "id":  "req-cook-temperature",
+                             "name":  "Cooking Temperature",
+                             "kind":  "requirement",
+                             "reqId":  "ST-1",
+                             "reqText":  "The toaster shall bring both plates to 180 C within 180 seconds of switch-on.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-seal-and-cut",
+                             "name":  "Seal and Cut",
+                             "kind":  "requirement",
+                             "reqId":  "ST-2",
+                             "reqText":  "The toaster shall seal the sandwich around its perimeter and cut it into two triangular halves in a single closing action.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-thermal-safety",
+                             "name":  "Thermal Safety",
+                             "kind":  "requirement",
+                             "reqId":  "ST-3",
+                             "reqText":  "The toaster shall remove power from the heating elements if the plate temperature exceeds 240 C.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-non-stick",
+                             "name":  "Release",
+                             "kind":  "requirement",
+                             "reqId":  "ST-4",
+                             "reqText":  "The plates shall release the sandwich without tearing the bread after a 5 minute cook.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-standby",
+                             "name":  "Standby",
+                             "kind":  "requirement",
+                             "reqId":  "ST-5",
+                             "reqText":  "The toaster shall enter a low-power standby state after 10 minutes without operation.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         }
+                     ],
+    "stateMachine":  {
+                         "regions":  [
+
+                                     ],
+                         "name":  "sandwich-toaster-states"
+                     },
+    "activities":  [
+                       {
+                           "id":  "act-toast",
+                           "name":  "Toast Sandwich",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "Close, cook, open, release."
+                       }
+                   ],
+    "graph":  {
+                  "nodes":  [
+                                {
+                                    "id":  "sandwich-toaster",
+                                    "kind":  "block",
+                                    "name":  "Sandwich Toaster",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "upper-plate",
+                                    "kind":  "block",
+                                    "name":  "Upper Heating Plate",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "lower-plate",
+                                    "kind":  "block",
+                                    "name":  "Lower Heating Plate",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "heating-element",
+                                    "kind":  "block",
+                                    "name":  "Heating Element",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "hinge",
+                                    "kind":  "block",
+                                    "name":  "Hinge",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "latch",
+                                    "kind":  "block",
+                                    "name":  "Latch",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "thermal-cutout",
+                                    "kind":  "block",
+                                    "name":  "Thermal Cut-out",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "indicator-lamp",
+                                    "kind":  "block",
+                                    "name":  "Indicator Lamp",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-cook-temperature",
+                                    "kind":  "requirement",
+                                    "name":  "Cooking Temperature",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-seal-and-cut",
+                                    "kind":  "requirement",
+                                    "name":  "Seal and Cut",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-thermal-safety",
+                                    "kind":  "requirement",
+                                    "name":  "Thermal Safety",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-non-stick",
+                                    "kind":  "requirement",
+                                    "name":  "Release",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-standby",
+                                    "kind":  "requirement",
+                                    "name":  "Standby",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                }
+                            ],
+                  "edges":  [
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "upper-plate",
+                                    "kind":  "part",
+                                    "label":  "upperPlate"
+                                },
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "lower-plate",
+                                    "kind":  "part",
+                                    "label":  "lowerPlate"
+                                },
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "hinge",
+                                    "kind":  "part",
+                                    "label":  "hinge"
+                                },
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "latch",
+                                    "kind":  "part",
+                                    "label":  "latch"
+                                },
+                                {
+                                    "source":  "upper-plate",
+                                    "target":  "heating-element",
+                                    "kind":  "part",
+                                    "label":  "element"
+                                },
+                                {
+                                    "source":  "lower-plate",
+                                    "target":  "heating-element",
+                                    "kind":  "part",
+                                    "label":  "element"
+                                },
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "thermal-cutout",
+                                    "kind":  "part",
+                                    "label":  "cutout"
+                                },
+                                {
+                                    "source":  "sandwich-toaster",
+                                    "target":  "indicator-lamp",
+                                    "kind":  "part",
+                                    "label":  "lamp"
+                                },
+                                {
+                                    "source":  "upper-plate",
+                                    "target":  "lower-plate",
+                                    "kind":  "association",
+                                    "label":  "clamshell"
+                                },
+                                {
+                                    "source":  "heating-element",
+                                    "target":  "req-cook-temperature",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "lower-plate",
+                                    "target":  "req-seal-and-cut",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "thermal-cutout",
+                                    "target":  "req-thermal-safety",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "upper-plate",
+                                    "target":  "req-non-stick",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "indicator-lamp",
+                                    "target":  "req-standby",
+                                    "kind":  "dependency",
+                                    "label":  "Refine"
+                                }
+                            ]
+              },
+    "references":  [
+
+                   ]
+}

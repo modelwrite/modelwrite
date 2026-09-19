@@ -1,0 +1,564 @@
+{
+    "okf":  "1.0",
+    "project":  "purchasing-terminal",
+    "exportedAt":  "",
+    "summary":  {
+                    "blocks":  9,
+                    "requirements":  6,
+                    "signals":  3,
+                    "activities":  2
+                },
+    "structure":  [
+                      {
+                          "id":  "purchasing-terminal",
+                          "name":  "Purchasing Terminal",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "eftpos",
+                                                 "type":  "EFTPOS Machine",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "display",
+                                                 "type":  "Display",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "printer",
+                                                 "type":  "Receipt Printer",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "mainsInlet",
+                                                 "type":  "Mains Inlet",
+                                                 "aggregation":  "none",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "A self-service terminal that prices goods and takes payment through an attached EFTPOS machine."
+                      },
+                      {
+                          "id":  "eftpos",
+                          "name":  "EFTPOS Machine",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block",
+                                              "InterfaceBlock"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "cardReader",
+                                                 "type":  "Card Reader",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "keypad",
+                                                 "type":  "Keypad",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "comms",
+                                                 "type":  "Comms Module",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             },
+                                             {
+                                                 "name":  "secureElement",
+                                                 "type":  "Secure Element",
+                                                 "aggregation":  "none",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "Payment device handling card presentment, PIN entry and acquirer messaging."
+                      },
+                      {
+                          "id":  "card-reader",
+                          "name":  "Card Reader",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Contactless, chip and magstripe card interface."
+                      },
+                      {
+                          "id":  "keypad",
+                          "name":  "PIN Keypad",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Encrypted PIN entry keypad."
+                      },
+                      {
+                          "id":  "secure-element",
+                          "name":  "Secure Element",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Tamper-responsive store for keys and the payment application."
+                      },
+                      {
+                          "id":  "comms-module",
+                          "name":  "Comms Module",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Carries acquirer traffic over the store network."
+                      },
+                      {
+                          "id":  "display",
+                          "name":  "Display",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Customer-facing basket and payment prompts."
+                      },
+                      {
+                          "id":  "receipt-printer",
+                          "name":  "Receipt Printer",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Thermal printer producing the customer receipt."
+                      },
+                      {
+                          "id":  "power-supply",
+                          "name":  "Power Supply",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Mains to low-voltage conversion for the terminal and the EFTPOS machine."
+                      }
+                  ],
+    "interfaces":  [
+                       {
+                           "id":  "if-acquirer",
+                           "name":  "Acquirer Link",
+                           "kind":  "interface",
+                           "stereotypes":  [
+                                               "InterfaceBlock"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "Payment network link."
+                       }
+                   ],
+    "signals":  [
+                    {
+                        "id":  "sig-card-presented",
+                        "name":  "CardPresented",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  ""
+                    },
+                    {
+                        "id":  "sig-payment-approved",
+                        "name":  "PaymentApproved",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  ""
+                    },
+                    {
+                        "id":  "sig-payment-declined",
+                        "name":  "PaymentDeclined",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  ""
+                    }
+                ],
+    "requirements":  [
+                         {
+                             "id":  "req-pci",
+                             "name":  "Card Data Protection",
+                             "kind":  "requirement",
+                             "reqId":  "PT-1",
+                             "reqText":  "The terminal shall not store card primary account numbers outside the secure element, and shall render stored keys unusable on tamper detection.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-contactless-time",
+                             "name":  "Contactless Time",
+                             "kind":  "requirement",
+                             "reqId":  "PT-2",
+                             "reqText":  "The terminal shall complete a contactless payment of 100 or less within 2 seconds of card presentation.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-receipt",
+                             "name":  "Receipt",
+                             "kind":  "requirement",
+                             "reqId":  "PT-3",
+                             "reqText":  "The terminal shall print a receipt showing the basket, the amount tendered and the approval code for every approved payment.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-offline",
+                             "name":  "Offline Floor Limit",
+                             "kind":  "requirement",
+                             "reqId":  "PT-4",
+                             "reqText":  "When the acquirer link is unavailable the terminal shall store transactions up to a configured floor limit and forward them when the link returns.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-pin-privacy",
+                             "name":  "PIN Privacy",
+                             "kind":  "requirement",
+                             "reqId":  "PT-5",
+                             "reqText":  "The keypad shall encrypt the PIN within the secure element and never expose it to the terminal application.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-audit",
+                             "name":  "Transaction Log",
+                             "kind":  "requirement",
+                             "reqId":  "PT-6",
+                             "reqText":  "The terminal shall keep an append-only transaction log sufficient to reconcile a shift.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         }
+                     ],
+    "stateMachine":  {
+                         "regions":  [
+
+                                     ],
+                         "name":  "purchasing-terminal-states"
+                     },
+    "activities":  [
+                       {
+                           "id":  "act-scan",
+                           "name":  "Scan Basket",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "Price the customer\u0027s goods."
+                       },
+                       {
+                           "id":  "act-take-payment",
+                           "name":  "Take Payment",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "Present the amount and take payment."
+                       }
+                   ],
+    "graph":  {
+                  "nodes":  [
+                                {
+                                    "id":  "purchasing-terminal",
+                                    "kind":  "block",
+                                    "name":  "Purchasing Terminal",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "eftpos",
+                                    "kind":  "block",
+                                    "name":  "EFTPOS Machine",
+                                    "stereotypes":  [
+                                                        "Block",
+                                                        "InterfaceBlock"
+                                                    ]
+                                },
+                                {
+                                    "id":  "card-reader",
+                                    "kind":  "block",
+                                    "name":  "Card Reader",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "keypad",
+                                    "kind":  "block",
+                                    "name":  "PIN Keypad",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "secure-element",
+                                    "kind":  "block",
+                                    "name":  "Secure Element",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "comms-module",
+                                    "kind":  "block",
+                                    "name":  "Comms Module",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "display",
+                                    "kind":  "block",
+                                    "name":  "Display",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "receipt-printer",
+                                    "kind":  "block",
+                                    "name":  "Receipt Printer",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "power-supply",
+                                    "kind":  "block",
+                                    "name":  "Power Supply",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-pci",
+                                    "kind":  "requirement",
+                                    "name":  "Card Data Protection",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-contactless-time",
+                                    "kind":  "requirement",
+                                    "name":  "Contactless Time",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-receipt",
+                                    "kind":  "requirement",
+                                    "name":  "Receipt",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-offline",
+                                    "kind":  "requirement",
+                                    "name":  "Offline Floor Limit",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-pin-privacy",
+                                    "kind":  "requirement",
+                                    "name":  "PIN Privacy",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-audit",
+                                    "kind":  "requirement",
+                                    "name":  "Transaction Log",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                }
+                            ],
+                  "edges":  [
+                                {
+                                    "source":  "purchasing-terminal",
+                                    "target":  "eftpos",
+                                    "kind":  "part",
+                                    "label":  "eftpos"
+                                },
+                                {
+                                    "source":  "purchasing-terminal",
+                                    "target":  "display",
+                                    "kind":  "part",
+                                    "label":  "display"
+                                },
+                                {
+                                    "source":  "purchasing-terminal",
+                                    "target":  "receipt-printer",
+                                    "kind":  "part",
+                                    "label":  "printer"
+                                },
+                                {
+                                    "source":  "purchasing-terminal",
+                                    "target":  "power-supply",
+                                    "kind":  "part",
+                                    "label":  "power"
+                                },
+                                {
+                                    "source":  "eftpos",
+                                    "target":  "card-reader",
+                                    "kind":  "part",
+                                    "label":  "cardReader"
+                                },
+                                {
+                                    "source":  "eftpos",
+                                    "target":  "keypad",
+                                    "kind":  "part",
+                                    "label":  "keypad"
+                                },
+                                {
+                                    "source":  "eftpos",
+                                    "target":  "comms-module",
+                                    "kind":  "part",
+                                    "label":  "comms"
+                                },
+                                {
+                                    "source":  "eftpos",
+                                    "target":  "secure-element",
+                                    "kind":  "part",
+                                    "label":  "secureElement"
+                                },
+                                {
+                                    "source":  "keypad",
+                                    "target":  "secure-element",
+                                    "kind":  "association",
+                                    "label":  "pinPath"
+                                },
+                                {
+                                    "source":  "eftpos",
+                                    "target":  "purchasing-terminal",
+                                    "kind":  "association",
+                                    "label":  "paysFor"
+                                },
+                                {
+                                    "source":  "secure-element",
+                                    "target":  "req-pci",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "card-reader",
+                                    "target":  "req-contactless-time",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "receipt-printer",
+                                    "target":  "req-receipt",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "comms-module",
+                                    "target":  "req-offline",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "keypad",
+                                    "target":  "req-pin-privacy",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "purchasing-terminal",
+                                    "target":  "req-audit",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                }
+                            ]
+              },
+    "references":  [
+
+                   ]
+}
