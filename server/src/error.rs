@@ -65,6 +65,16 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    /// The service cannot honour the request because a capability is not configured - for
+    /// example, the live assistant has no API key. The request itself is well formed; the
+    /// deployment is missing the configuration the capability needs.
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {

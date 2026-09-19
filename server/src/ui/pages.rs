@@ -328,6 +328,12 @@ fn branch_list_page(
                 }
             }
         }
+        // Proposals are READ-only, so the link is offered to every caller who can reach the
+        // page: the list names the agent, the request and the decision, never a write.
+        h2 { "Proposals" }
+        p {
+            a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/proposals" } { "View proposals" }
+        }
         @if identity.may(Permission::Write) || identity.may(Permission::Review) {
             h2 { "Gate" }
             p {

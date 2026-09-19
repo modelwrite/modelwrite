@@ -22,13 +22,17 @@ use serde_json::{json, Value};
 use agent::losses::entry_identity;
 
 use crate::api::{
-    commit_json, map_store_error, resolve_author, validate_name, verify_actor, ApiState,
+    commit_core, commit_json, load_model, map_store_error, resolve_author, validate_name,
+    verify_actor, ApiState, CommitCore, CommitFailure,
 };
 use crate::audit::{PROPOSAL_RECORD, PROPOSAL_REFUSED};
 use crate::auth::{Identity, Permission};
 use crate::binding_api::{import_core, ImportCore, ImportOutcome};
 use crate::error::ApiError;
-use crate::store::{now_seconds, AuditEntry, Commit, ProposalAcceptance, ProposalRecord, Store};
+use crate::store::{
+    now_seconds, AcceptanceProvenance, AuditEntry, Commit, ProposalAcceptance, ProposalRecord,
+    Store,
+};
 
 /// The proposal record as the JSON a reader sees. The review artifact is returned as the
 /// object the agent produced (not a nested JSON string), and the decision names the human
@@ -164,6 +168,29 @@ pub async fn get_proposal(
     Ok(Json(proposal_json(&record)))
 }
 
+/// GET /projects/:project/proposals - the project's proposals, newest first, each carrying its
+/// decision (when decided) so the proposals page can render the agent, the deciding human and
+/// the decision without a second fetch.
+pub async fn list_proposals(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path(project): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let records = state
+        .store
+        .list_proposals(&project)
+        .map_err(map_store_error)?;
+    Ok(Json(Value::Array(
+        records.iter().map(proposal_json).collect(),
+    )))
+}
+
 #[derive(Deserialize)]
 pub struct AcceptProposal {
     #[serde(default, rename = "acceptedItems")]
@@ -197,11 +224,6 @@ pub async fn accept_proposal(
     let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &body.branch)?;
-    if body.accepted_items.is_empty() {
-        return Err(ApiError::bad_request(
-            "at least one accepted item is required",
-        ));
-    }
 
     let commit = accept_proposal_core(
         state.store.as_ref(),
@@ -233,7 +255,7 @@ pub async fn accept_proposal(
 /// and the human. The store's commit transaction is the authority that re-checks the proposal
 /// is undecided and recorded by the named agent; the check here is only the fast refusal.
 #[allow(clippy::too_many_arguments)]
-fn accept_proposal_core(
+pub(crate) fn accept_proposal_core(
     store: &dyn Store,
     project: &str,
     proposal_id: &str,
@@ -256,54 +278,208 @@ fn accept_proposal_core(
             proposal_id
         )));
     }
-    let artifact_hash = record.artifact_hash.as_deref().ok_or_else(|| {
-        ApiError::bad_request(
-            "the proposal is not a loss report and cannot be accepted as an import",
-        )
-    })?;
-    let binding = record.binding.as_deref().ok_or_else(|| {
-        ApiError::bad_request("the proposal has no binding and cannot be accepted as an import")
-    })?;
-    let artifact = store
-        .blob(artifact_hash)
-        .map_err(map_store_error)?
-        .ok_or_else(|| {
-            ApiError::not_found(format!(
-                "retained artifact {} for proposal {}",
-                artifact_hash, proposal_id
-            ))
+    if record.binding.is_some() {
+        // A loss-report proposal is accepted by re-running its import. The proposal's binding
+        // selector is the discriminator: a loss report always carries one, a model-change
+        // proposal never does.
+        if accepted_items.is_empty() {
+            return Err(ApiError::bad_request(
+                "at least one accepted item is required",
+            ));
+        }
+        let artifact_hash = record.artifact_hash.as_deref().ok_or_else(|| {
+            ApiError::bad_request(
+                "the proposal is not a loss report and cannot be accepted as an import",
+            )
         })?;
-    let acceptance = ProposalAcceptance {
-        proposal_id: proposal_id.to_string(),
+        let binding = record.binding.as_deref().ok_or_else(|| {
+            ApiError::bad_request("the proposal has no binding and cannot be accepted as an import")
+        })?;
+        let artifact = store
+            .blob(artifact_hash)
+            .map_err(map_store_error)?
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "retained artifact {} for proposal {}",
+                    artifact_hash, proposal_id
+                ))
+            })?;
+        let acceptance = ProposalAcceptance {
+            proposal_id: proposal_id.to_string(),
+            agent: record.agent.clone(),
+            accepted_by: actor.to_string(),
+        };
+        return match import_core(
+            store,
+            project,
+            &ImportCore {
+                binding,
+                branch,
+                author,
+                message,
+                artifact: &artifact,
+                accept_losses: accepted_items,
+                holder,
+                actor,
+                mechanism,
+                authorizer,
+                acceptance: Some(acceptance),
+            },
+        )? {
+            ImportOutcome::Committed { commit, .. } => Ok(*commit),
+            ImportOutcome::Blocking { unaccepted, .. } => {
+                let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
+                Err(ApiError::unprocessable(
+                    "the acceptance is incomplete: blocking losses not accepted",
+                    subjects,
+                ))
+            }
+        };
+    }
+
+    // A model-change proposal is accepted by committing its candidate document through the
+    // shared commit core, with Accepted provenance naming both parties.
+    accept_model_change_core(
+        store,
+        &record,
+        project,
+        actor,
+        mechanism,
+        authorizer,
+        author,
+        branch,
+        message,
+        holder,
+        accepted_items,
+    )
+}
+
+/// The subjects of a model-change proposal's model-changing proposals, read from the SAME
+/// review artifact JSON the human read. These are the accepted-item identities the provenance
+/// records.
+fn model_change_subjects(artifact: &Value) -> Vec<String> {
+    artifact
+        .get("proposals")
+        .and_then(|p| p.as_array())
+        .map(|proposals| {
+            proposals
+                .iter()
+                .filter(|p| {
+                    matches!(
+                        p.get("action").and_then(|a| a.as_str()),
+                        Some("EditElement") | Some("DraftText")
+                    )
+                })
+                .filter_map(|p| p.get("subject").and_then(|s| s.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Accept a model-change proposal: extract the candidate document from the proposal's own
+/// review artifact (the SAME document the human read), and commit it through the shared commit
+/// core with [CommitProvenance::Accepted]. The candidate passes the SAME validator every
+/// commit passes, so a proposal that would produce an invalid document is refused with the
+/// validator's own errors, exactly as the editor shows them.
+#[allow(clippy::too_many_arguments)]
+fn accept_model_change_core(
+    store: &dyn Store,
+    record: &ProposalRecord,
+    project: &str,
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
+    author: &str,
+    branch: &str,
+    message: &str,
+    holder: Option<&str>,
+    accepted_items: &[String],
+) -> Result<Commit, ApiError> {
+    let artifact: Value = serde_json::from_str(&record.review_artifact).map_err(|e| {
+        ApiError::bad_request(format!(
+            "the proposal's review artifact is not readable: {}",
+            e
+        ))
+    })?;
+    let document = artifact
+        .get("task")
+        .and_then(|t| t.get("material"))
+        .and_then(|m| m.get("Document"))
+        .cloned()
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "the proposal carries no candidate document and cannot be accepted as a model change",
+            )
+        })?;
+    let candidate: okf::types::OkfRoot = serde_json::from_value(document).map_err(|e| {
+        ApiError::bad_request(format!(
+            "the proposal's candidate document is malformed: {}",
+            e
+        ))
+    })?;
+
+    // The accepted items are the model-changing subjects. An empty list accepts every one;
+    // a non-empty list must name exactly the full set, so the provenance never claims less
+    // than the commit applies.
+    let subjects = model_change_subjects(&artifact);
+    let accepted: Vec<String> = if accepted_items.is_empty() {
+        subjects.clone()
+    } else {
+        let mut proposed = subjects.clone();
+        proposed.sort();
+        let mut named = accepted_items.to_vec();
+        named.sort();
+        named.dedup();
+        if proposed != named {
+            return Err(ApiError::bad_request(
+                "acceptedItems must name every proposed change (or be empty to accept all)",
+            ));
+        }
+        accepted_items.to_vec()
+    };
+
+    let bytes = serde_json::to_vec(&candidate).map_err(|e| {
+        eprintln!("candidate model could not be serialised: {}", e);
+        ApiError::internal("the candidate model could not be prepared")
+    })?;
+    let now = now_seconds();
+    let tip = store
+        .branch_tip(project, branch)
+        .map_err(map_store_error)?
+        .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", branch)))?;
+    let reference = load_model(store, project, &tip).map_err(map_store_error)?;
+    let provenance = AcceptanceProvenance {
+        proposal_id: record.id.clone(),
         agent: record.agent.clone(),
         accepted_by: actor.to_string(),
+        accepted_items: accepted,
     };
-    match import_core(
+    commit_core(
         store,
-        project,
-        &ImportCore {
-            binding,
+        &CommitCore {
+            project,
             branch,
             author,
             message,
-            artifact: &artifact,
-            accept_losses: accepted_items,
-            holder,
             actor,
             mechanism,
             authorizer,
-            acceptance: Some(acceptance),
+            candidate: &candidate,
+            bytes: &bytes,
+            import: None,
+            acceptance: Some(&provenance),
+            holder: holder.unwrap_or(""),
+            now,
+            tip: Some(&tip),
+            reference: Some(&reference),
         },
-    )? {
-        ImportOutcome::Committed { commit, .. } => Ok(*commit),
-        ImportOutcome::Blocking { unaccepted, .. } => {
-            let subjects: Vec<String> = unaccepted.iter().map(entry_identity).collect();
-            Err(ApiError::unprocessable(
-                "the acceptance is incomplete: blocking losses not accepted",
-                subjects,
-            ))
+    )
+    .map_err(|failure| match failure {
+        CommitFailure::Invalid { errors } => {
+            ApiError::unprocessable("the model failed validation", errors)
         }
-    }
+        CommitFailure::Store(error) => map_store_error(error),
+    })
 }
 
 #[derive(Deserialize)]

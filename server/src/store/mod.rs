@@ -162,6 +162,21 @@ pub struct ProposalAcceptance {
     pub accepted_by: String,
 }
 
+/// The provenance a commit carries when a human accepts an agent's MODEL-CHANGE proposal:
+/// the proposal id, the agent that proposed, the human that accepted, and the accepted
+/// items (the identities of the proposed changes). Unlike an import acceptance, there is no
+/// retained source artifact, binding or loss report to substantiate: the candidate document
+/// is the proposal's own material, and it is validated by the shared commit core rather than
+/// by a binding. Written INSIDE the same transaction as the commit row, so an acceptance can
+/// never outlive or precede the commit it describes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcceptanceProvenance {
+    pub proposal_id: String,
+    pub agent: String,
+    pub accepted_by: String,
+    pub accepted_items: Vec<String>,
+}
+
 /// How a recorded proposal was decided. A proposal starts undecided (a NULL decision
 /// column); accepting or refusing it records one of these. An undecided proposal is
 /// addressable and actable; a decided one is a decision that can never be undone, because
@@ -482,6 +497,27 @@ pub trait Store: Send + Sync {
         import: Option<&ImportProvenance>,
     ) -> Result<Commit, StoreError>;
 
+    /// Commit a model-change acceptance: a commit whose provenance is
+    /// [CommitProvenance::Accepted], naming the proposal, the agent that proposed it and the
+    /// human that accepted it, plus the accepted items. There is no import to substantiate:
+    /// the candidate document was validated by the shared commit core before this call, and
+    /// the acceptance is substantiated HERE - the proposal must exist, be undecided, and have
+    /// been recorded by the named agent - inside the same transaction that writes the commit
+    /// row and marks the proposal accepted. Mirrors [commit_model]'s sequence (guard, tip,
+    /// parents, hash, commit row, branch tip, audit row) without the import checks.
+    #[allow(clippy::too_many_arguments)]
+    fn commit_accepted(
+        &self,
+        project: &str,
+        branch: &str,
+        okf_hash: &str,
+        author: &str,
+        message: &str,
+        guard: Option<CommitGuard<'_>>,
+        audit: Option<&AuditEntry>,
+        acceptance: &AcceptanceProvenance,
+    ) -> Result<Commit, StoreError>;
+
     /// Write a commit with EXPLICIT parents and move the branch tip, in one transaction.
     /// A merge commit has two parents, so the parent list cannot be derived from the tip.
     /// The optional guard is checked inside that transaction, exactly as `commit_model`
@@ -577,6 +613,11 @@ pub trait Store: Send + Sync {
 
     /// The proposal record for this id in this project, if one was recorded.
     fn proposal(&self, project: &str, id: &str) -> Result<Option<ProposalRecord>, StoreError>;
+
+    /// The proposals for this project, newest first (by insertion order, so a re-recorded
+    /// proposal keeps its original position). The list is what the proposals page renders:
+    /// every proposal, decided or not, with the decision attached.
+    fn list_proposals(&self, project: &str) -> Result<Vec<ProposalRecord>, StoreError>;
 
     /// Record a human's decision to REFUSE a proposal. A refusal is a decision, not a failed
     /// action: the proposal is marked refused with the verified subject and the wall clock,

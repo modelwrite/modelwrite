@@ -156,6 +156,7 @@ fn diagram_markup(
         } @else {
             p { "This model has no graph section, so there is nothing to draw." }
         }
+        script src="/ui/app.js" {}
     };
     let title = format!("modelwrite — {} — diagram", project);
     layout::shell(
@@ -335,8 +336,8 @@ fn diagram_svg(graph: &Graph) -> String {
                 node.name.as_str()
             };
             svg.push_str(&format!(
-                "<g class='node'><rect x='{:.1}' y='{:.1}' width='{:.1}' height='{:.1}' rx='6' fill='{}' stroke='{}'/><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='13' font-family='sans-serif'>{}</text>",
-                nx, ny, NODE_W, NODE_H, fill, stroke, cx, ny + 26.0, xml_escape(display_name)
+                "<g class='node' data-mw-id='{}'><rect x='{:.1}' y='{:.1}' width='{:.1}' height='{:.1}' rx='6' fill='{}' stroke='{}'/><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='13' font-family='sans-serif'>{}</text>",
+                xml_escape(&node.id), nx, ny, NODE_W, NODE_H, fill, stroke, cx, ny + 26.0, xml_escape(display_name)
             ));
             if !node.name.is_empty() {
                 svg.push_str(&format!(

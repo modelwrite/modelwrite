@@ -84,8 +84,52 @@ table.requirements th, table.traceability th { background: #f4f4f4; }
 .loss-list li { border-left: 3px solid #842029; padding-left: 0.5rem; margin-bottom: 0.35rem; }
 .loss-subject { font-family: ui-monospace, monospace; font-weight: 600; }
 .loss-note { color: #666; font-size: 0.85rem; }
+
 .loss-accept { list-style: none; margin: 0; padding: 0; }
 .loss-accept li { margin-bottom: 0.25rem; }
+/* The JS-added IDE layout: containment tree | content | properties. Absent with JS off. */
+main.mw-model-ide { max-width: none; }
+.mw-workbench { display: flex; gap: 1.25rem; align-items: flex-start; }
+.mw-tree-panel, .mw-props-panel { position: sticky; top: 1rem; max-height: calc(100vh - 3.5rem); overflow: auto; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.mw-tree-panel { flex: 0 0 16rem; padding: 0.5rem; }
+.mw-props-panel { flex: 0 0 19rem; padding: 0.75rem 1rem; }
+.mw-content { flex: 1 1 auto; min-width: 0; }
+.mw-tree-panel .mw-search { width: 100%; padding: 0.35rem 0.5rem; font-family: ui-monospace, monospace; margin-bottom: 0.5rem; box-sizing: border-box; }
+.mw-tree { list-style: none; margin: 0; padding: 0; }
+.mw-tree ul { list-style: none; margin: 0 0 0 0.75rem; padding: 0 0 0 0.6rem; border-left: 1px solid #ddd; }
+.mw-tree li { margin: 0.1rem 0; }
+.mw-tree .mw-node { display: flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.3rem; border-radius: 4px; cursor: pointer; }
+.mw-tree .mw-node:hover { background: #eef4fa; }
+.mw-tree .mw-node.mw-selected { background: #145ea8; color: #fff; }
+.mw-tree .mw-toggle { cursor: pointer; user-select: none; flex: 0 0 1rem; text-align: center; color: #666; }
+.mw-tree .mw-group-label { font-weight: 600; color: #145ea8; padding: 0.2rem 0.3rem; cursor: pointer; }
+.mw-tree .mw-kind-badge { color: #999; font-size: 0.75rem; margin-left: auto; }
+.mw-node.mw-selected .mw-kind-badge { color: #dbe7f5; }
+.mw-props h3 { margin: 0 0 0.5rem; }
+.mw-props dl { margin: 0; }
+.mw-props dt { font-weight: 600; margin-top: 0.6rem; font-size: 0.8rem; color: #666; }
+.mw-props dd { margin: 0.1rem 0 0; overflow-wrap: anywhere; }
+.mw-props .mw-empty { color: #999; font-style: italic; }
+.mw-highlight { outline: 2px solid #145ea8; outline-offset: 2px; background: #f3f8fd; }
+.mw-attr { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+.mw-badge-covered, .mw-badge-uncovered, .mw-badge-unknown { font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+.mw-badge-covered { background: #d1e7dd; color: #0f5132; }
+.mw-badge-uncovered { background: #f8d7da; color: #842029; }
+.mw-badge-unknown { background: #eee; color: #555; }
+g.mw-selected-node rect { stroke: #145ea8; stroke-width: 3px; }
+.assist-panel, .accept-proposal, .review-artifact, .provenance { margin-bottom: 2rem; }
+.assist-form label, .accept-form label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.assist-form textarea { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; width: 100%; max-width: 40rem; min-height: 4rem; }
+.accept-form input { font-family: ui-monospace, monospace; padding: 0.3rem 0.5rem; }
+ul.proposals, ul.proposal-list, ul.accepted-items, ul.gaps { list-style: none; margin: 0; padding: 0; }
+ul.proposals li, ul.proposal-list li { border: 1px solid #ccc; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; background: #fff; }
+ul.proposals li h2 { margin-top: 0; }
+.proposal-action { font-weight: 600; }
+.proposal-subject { font-family: ui-monospace, monospace; margin-left: 0.5rem; }
+.proposal-rationale { margin: 0.25rem 0; }
+.confidence { color: #666; font-size: 0.85rem; }
+.low-confidence { background: #f8d7da; color: #842029; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+.decision { font-weight: 600; }
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {
