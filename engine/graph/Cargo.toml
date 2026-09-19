@@ -4,13 +4,17 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "Graph analysis over OKF documents: node and edge statistics, isolation, components, and requirement coverage."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","graph","okf","analysis"]
+categories = ["algorithms"]
 
 [lib]
 name = "graph"
 
 [dependencies]
-mw-okf = { path = "../okf" }
+mw-okf = { path = "../okf", version = "0.1.0" }
 petgraph.workspace = true
 serde.workspace = true
 # Pinned so the engine layer stays buildable at the workspace rust-version floor
@@ -19,5 +23,5 @@ serde.workspace = true
 indexmap.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../test-support" }
+mw-test-support = { path = "../test-support", version = "0.1.0" }
 serde_json.workspace = true

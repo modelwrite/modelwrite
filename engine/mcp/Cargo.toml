@@ -4,7 +4,10 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "A Model Context Protocol (MCP) server exposing modelwrite's OKF validation, graph, and gate tools over stdio."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","mcp","model-context","okf"]
 
 [lib]
 name = "mcp"
@@ -14,11 +17,11 @@ name = "mw-mcp"
 path = "src/main.rs"
 
 [dependencies]
-mw-okf = { path = "../okf" }
-mw-graph = { path = "../graph" }
-mw-gate = { path = "../gate" }
+mw-okf = { path = "../okf", version = "0.1.0" }
+mw-graph = { path = "../graph", version = "0.1.0" }
+mw-gate = { path = "../gate", version = "0.1.0" }
 serde_json.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../test-support" }
+mw-test-support = { path = "../test-support", version = "0.1.0" }
 serde_json.workspace = true

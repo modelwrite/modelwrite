@@ -4,7 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "Shared test fixtures and path helpers for the modelwrite engine crates."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","testing","fixtures"]
+categories = ["development-tools::testing"]
 
 [lib]
 name = "test_support"
