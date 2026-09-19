@@ -102,6 +102,18 @@ pub fn validate(root: &OkfRoot) -> ValidationReport {
                 label
             ));
         }
+        // A bound element is named by its id within the subsystem revision, so an empty id
+        // can never resolve. Whether the id actually EXISTS in that revision is a
+        // cross-model check the compositional gate performs against the store; validation
+        // only rejects an id that cannot possibly name anything.
+        for bound in &reference.bounds {
+            if bound.trim().is_empty() {
+                report.errors.push(format!(
+                    "subsystem reference to {} has an empty bound element id",
+                    label
+                ));
+            }
+        }
     }
     if root.graph.is_none() {
         report.errors.push("graph section is missing".to_string());

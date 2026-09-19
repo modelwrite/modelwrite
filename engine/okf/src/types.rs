@@ -184,6 +184,14 @@ pub struct SubsystemReference {
     /// The role the subsystem plays in the platform (for example radar or propulsion).
     /// The role is model vocabulary, not free prose.
     pub role: String,
+    /// The specific elements within the pinned revision this platform binds to - the
+    /// interfaces or blocks the platform connects to - each named by element id within
+    /// that revision. These are the cross-model traceability edges: a platform
+    /// requirement is satisfied by a bound element inside the subsystem, and the
+    /// reference is the typed edge that closes the coverage. Empty means the reference
+    /// binds to the subsystem as a whole without naming any element.
+    #[serde(default)]
+    pub bounds: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

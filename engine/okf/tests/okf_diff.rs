@@ -91,6 +91,7 @@ fn with_reference(revision: &str) -> OkfRoot {
         project: "radar".into(),
         revision: revision.into(),
         role: "radar".into(),
+        bounds: Vec::new(),
     });
     root
 }

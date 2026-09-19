@@ -32,7 +32,24 @@ pub async fn run_gate(
     let candidate =
         load_model(state.store.as_ref(), &project, &body.candidate).map_err(map_store_error)?;
 
-    let outcome = gate::run(&reference, &candidate, false);
+    let mut outcome = gate::run(&reference, &candidate, false);
+
+    // The compositional gate (S1) runs ON TOP of the single-model gate. It measures, over
+    // the candidate platform model: that every reference resolves at its pinned revision,
+    // that every integrated revision was itself gated, and that platform coverage holds
+    // locally. It also states the measured-vs-asserted boundary as data. A named
+    // resolution or was-gated failure refuses the integration, exactly like a single-model
+    // failure; the composition findings are merged into the evidence so the report cannot
+    // blur a proof and a claim.
+    let composition =
+        crate::composition::check(state.store.as_ref(), &candidate).map_err(map_store_error)?;
+    outcome.failures.extend(composition.failures);
+    outcome.passed = outcome.failures.is_empty();
+    outcome.evidence["composition"] = composition.evidence;
+    outcome.evidence["passed"] = json!(outcome.passed);
+    outcome.evidence["failures"] =
+        serde_json::to_value(&outcome.failures).expect("failures serialize");
+
     let branch = state
         .store
         .commit(&project, &body.candidate)

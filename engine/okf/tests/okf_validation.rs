@@ -151,6 +151,7 @@ fn a_complete_reference_validates() {
         project: "radar".into(),
         revision: "a".repeat(64),
         role: "radar".into(),
+        bounds: Vec::new(),
     });
     let report = validate::validate(&root);
     assert!(report.valid, "unexpected errors: {:?}", report.errors);
@@ -163,6 +164,7 @@ fn a_reference_without_a_project_is_an_error() {
         project: String::new(),
         revision: "a".repeat(64),
         role: "radar".into(),
+        bounds: Vec::new(),
     });
     let report = validate::validate(&root);
     assert!(!report.valid);
@@ -176,6 +178,7 @@ fn a_reference_without_a_revision_is_an_error() {
         project: "radar".into(),
         revision: String::new(),
         role: "radar".into(),
+        bounds: Vec::new(),
     });
     let report = validate::validate(&root);
     assert!(!report.valid);
@@ -189,6 +192,7 @@ fn a_reference_without_a_role_is_an_error() {
         project: "radar".into(),
         revision: "a".repeat(64),
         role: String::new(),
+        bounds: Vec::new(),
     });
     let report = validate::validate(&root);
     assert!(!report.valid);
