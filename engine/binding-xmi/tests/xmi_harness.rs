@@ -87,6 +87,7 @@ fn subset_document() -> OkfRoot {
             }],
         }),
         provenance: None,
+        references: Vec::new(),
     }
 }
 

@@ -170,6 +170,22 @@ pub struct Provenance {
     pub exporter_version: String,
 }
 
+/// A typed subsystem reference: a platform model declares each integrated subsystem as a
+/// (project, pinned commit hash, role) triple. This is the R1 primitive - a reference, never
+/// a copy - and R2's pinned revision: the commit hash is part of the reference's identity,
+/// never a branch name and never "latest".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubsystemReference {
+    /// The identity of the subsystem project.
+    pub project: String,
+    /// The pinned commit hash of the subsystem model integrated by this platform - the
+    /// content address, not a branch name and not "latest".
+    pub revision: String,
+    /// The role the subsystem plays in the platform (for example radar or propulsion).
+    /// The role is model vocabulary, not free prose.
+    pub role: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OkfRoot {
     #[serde(default)]
@@ -195,4 +211,9 @@ pub struct OkfRoot {
     pub graph: Option<Graph>,
     #[serde(default)]
     pub provenance: Option<Provenance>,
+    /// The subsystem references a platform model declares: one entry per integrated
+    /// subsystem, each (project, pinned revision, role). References are ordinary model
+    /// content - committed, diffed and gated like every other element, never a side table.
+    #[serde(default)]
+    pub references: Vec<SubsystemReference>,
 }

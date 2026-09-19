@@ -41,6 +41,7 @@ fn source_document() -> OkfRoot {
             edges: Vec::new(),
         }),
         provenance: None,
+        references: Vec::new(),
     }
 }
 

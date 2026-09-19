@@ -215,7 +215,12 @@
       if (group.children.length === 0) {
         return;
       }
-      buildGroup(tree, group, state);
+      // The group element MUST be attached to the tree here. An earlier
+      // version built it and discarded the return value, so the containment
+      // tree rendered empty at runtime while every syntax check passed - the
+      // browser test suite caught exactly that, and this append is what
+      // makes the tree exist.
+      tree.appendChild(buildGroup(tree, group, state));
       state.groups.push(group);
     });
 

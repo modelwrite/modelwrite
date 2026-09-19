@@ -147,6 +147,28 @@ pub fn load_model(
     })
 }
 
+/// Whether a subsystem reference resolves: the named project exists and the pinned revision
+/// is a commit of it. `None` means it resolves; `Some(reason)` names exactly why it does not
+/// (a missing project, or a revision that is not a commit of that project). This is the ONE
+/// wording for resolution, shared by the commit path (which refuses a platform model whose
+/// references do not resolve) and the resolve endpoint (which reports the same answer on read).
+pub fn check_reference(
+    store: &dyn Store,
+    project: &str,
+    revision: &str,
+) -> Result<Option<String>, StoreError> {
+    if store.project(project)?.is_none() {
+        return Ok(Some(format!("project {} does not exist", project)));
+    }
+    if store.commit(project, revision)?.is_none() {
+        return Ok(Some(format!(
+            "{} is not a commit of project {}",
+            revision, project
+        )));
+    }
+    Ok(None)
+}
+
 /// The real clock in seconds, as the store requires it. The store itself never reads the
 /// clock: time is passed in so lock expiry is testable without sleeping.
 fn now_seconds() -> i64 {
@@ -424,6 +446,27 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
     if !report.valid {
         return Err(CommitFailure::Invalid {
             errors: report.errors,
+        });
+    }
+
+    // A platform model must resolve every subsystem reference it declares: a reference to
+    // a project that does not exist, or to a revision that is not a commit of that project,
+    // is refused here - never stored as a silently dangling reference. This is the SAME
+    // resolution the resolve endpoint reports on read, so the two cannot drift.
+    let mut resolution_errors = Vec::new();
+    for reference in &input.candidate.references {
+        let reason = check_reference(store, &reference.project, &reference.revision)
+            .map_err(CommitFailure::Store)?;
+        if let Some(reason) = reason {
+            resolution_errors.push(format!(
+                "reference to {} does not resolve: {}",
+                reference.project, reason
+            ));
+        }
+    }
+    if !resolution_errors.is_empty() {
+        return Err(CommitFailure::Invalid {
+            errors: resolution_errors,
         });
     }
 
@@ -775,6 +818,74 @@ pub async fn get_commit_record(
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
     Ok(Json(commit_json(&commit)))
+}
+
+/// GET /projects/:project/commits/:hash/references - the subsystem references a platform
+/// model declares at that commit, exactly as the document carries them: each a (project,
+/// pinned revision, role). References are ordinary model content, so they are read from the
+/// commit's document, never from a side table.
+pub async fn list_references(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, hash)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let model = load_model(state.store.as_ref(), &project, &hash).map_err(map_store_error)?;
+    Ok(Json(json!({
+        "project": project,
+        "commit": hash,
+        "references": model.references,
+    })))
+}
+
+/// GET /projects/:project/commits/:hash/references/resolve - whether every subsystem
+/// reference in that platform model resolves. This is the SAME resolution the commit path
+/// enforces, reported per reference: `resolves` plus, when it does not, the exact reason
+/// (a missing project, or a revision that is not a commit of it).
+pub async fn resolve_references(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, hash)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    if !identity.may(Permission::Read) {
+        return Err(ApiError::forbidden("read permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let model = load_model(state.store.as_ref(), &project, &hash).map_err(map_store_error)?;
+    let mut all_resolve = true;
+    let mut references = Vec::new();
+    for reference in &model.references {
+        let reason = check_reference(
+            state.store.as_ref(),
+            &reference.project,
+            &reference.revision,
+        )
+        .map_err(map_store_error)?;
+        let resolves = reason.is_none();
+        if !resolves {
+            all_resolve = false;
+        }
+        references.push(json!({
+            "project": reference.project,
+            "revision": reference.revision,
+            "role": reference.role,
+            "resolves": resolves,
+            "reason": reason,
+        }));
+    }
+    Ok(Json(json!({
+        "project": project,
+        "commit": hash,
+        "resolves": all_resolve,
+        "references": references,
+    })))
 }
 
 #[derive(Deserialize)]

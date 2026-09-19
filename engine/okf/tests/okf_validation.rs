@@ -144,3 +144,53 @@ fn the_corpus_has_no_orphaned_elements() {
         report.warnings
     );
 }
+#[test]
+fn a_complete_reference_validates() {
+    let mut root = expected();
+    root.references.push(okf::types::SubsystemReference {
+        project: "radar".into(),
+        revision: "a".repeat(64),
+        role: "radar".into(),
+    });
+    let report = validate::validate(&root);
+    assert!(report.valid, "unexpected errors: {:?}", report.errors);
+}
+
+#[test]
+fn a_reference_without_a_project_is_an_error() {
+    let mut root = expected();
+    root.references.push(okf::types::SubsystemReference {
+        project: String::new(),
+        revision: "a".repeat(64),
+        role: "radar".into(),
+    });
+    let report = validate::validate(&root);
+    assert!(!report.valid);
+    assert!(report.errors.iter().any(|e| e.contains("empty project")));
+}
+
+#[test]
+fn a_reference_without_a_revision_is_an_error() {
+    let mut root = expected();
+    root.references.push(okf::types::SubsystemReference {
+        project: "radar".into(),
+        revision: String::new(),
+        role: "radar".into(),
+    });
+    let report = validate::validate(&root);
+    assert!(!report.valid);
+    assert!(report.errors.iter().any(|e| e.contains("empty revision")));
+}
+
+#[test]
+fn a_reference_without_a_role_is_an_error() {
+    let mut root = expected();
+    root.references.push(okf::types::SubsystemReference {
+        project: "radar".into(),
+        revision: "a".repeat(64),
+        role: String::new(),
+    });
+    let report = validate::validate(&root);
+    assert!(!report.valid);
+    assert!(report.errors.iter().any(|e| e.contains("empty role")));
+}

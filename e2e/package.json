@@ -1,0 +1,13 @@
+{
+  "name": "modelwrite-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Headless-browser tests for the modelwrite workbench IDE. Dev-only: never served by the product, never a runtime fetch, never in the Docker image.",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

@@ -145,6 +145,16 @@ pub fn attribute_keys(root: &OkfRoot) -> BTreeMap<String, String> {
             }
         }
     }
+    for reference in &root.references {
+        if let Ok(v) = serde_json::to_string(reference) {
+            // The subsystem project is the reference's identity in the diff universe, so a
+            // revision or role change reads as a CHANGED attribute on one NAMED reference,
+            // and an added or removed subsystem reads as an extra or missing element. This
+            // is what makes two platforms at different revisions of one subsystem differ
+            // visibly, as a one-line change naming the reference.
+            put("reference", &reference.project, v);
+        }
+    }
     map
 }
 

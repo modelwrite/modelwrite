@@ -15,3 +15,8 @@ Thumbs.db
 *.db-shm
 trial-*
 e2e-*
+# Headless-browser e2e tests: CI/dev-only, never served, never in the image.
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/.state.json

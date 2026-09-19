@@ -1,5 +1,5 @@
 {
-  "candidateHash": "968ac0f83b68d9154053222fd687666914b2b84a3732036aef27b3cd6f914b69",
+  "candidateHash": "a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b",
   "coverage": {
     "allocated": 0,
     "covered": 15,
@@ -31,7 +31,7 @@
   },
   "okfVersion": "1.0",
   "passed": true,
-  "referenceHash": "968ac0f83b68d9154053222fd687666914b2b84a3732036aef27b3cd6f914b69",
+  "referenceHash": "a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b",
   "roundtrip": {
     "changedAttributes": [],
     "equal": true,
