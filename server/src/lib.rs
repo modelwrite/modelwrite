@@ -65,12 +65,27 @@ pub fn app(state: AppState) -> Router {
             "/",
             get(|| async { axum::response::Redirect::temporary("/ui") }),
         )
-        .route("/ui", get(ui::pages::project_list))
+        .route(
+            "/ui",
+            get(ui::pages::project_list).post(ui::pages::create_project),
+        )
         .route("/ui/projects/:project", get(ui::pages::project_page))
+        .route(
+            "/ui/projects/:project/branch",
+            post(ui::pages::create_branch),
+        )
         .route("/ui/projects/:project/model", get(ui::model::model_page))
+        .route(
+            "/ui/projects/:project/model/new",
+            post(ui::create::create_model),
+        )
         .route(
             "/ui/projects/:project/diagram",
             get(ui::diagram::diagram_page),
+        )
+        .route(
+            "/ui/projects/:project/element/new",
+            get(ui::create::element_form).post(ui::create::create_element),
         )
         .route(
             "/ui/projects/:project/edit/:element",
