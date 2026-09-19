@@ -293,7 +293,7 @@ fn diagram_svg(graph: &Graph) -> String {
             // A self-loop would be a zero-length line; draw a small loop above the node.
             let ly = sy - NODE_H / 2.0;
             svg.push_str(&format!(
-                "<path class='edge' d='M {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}' fill='none' stroke='#999' stroke-width='1'/>",
+                "<path class='edge' d='M {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}' fill='none' stroke='#a0a8b0' stroke-width='1'/>",
                 sx, ly, sx - 34.0, ly - 26.0, sx + 34.0, ly - 26.0, sx, ly
             ));
             push_edge_label(&mut svg, edge, sx, ly - 30.0);
@@ -311,7 +311,7 @@ fn diagram_svg(graph: &Graph) -> String {
         let (x1, y1) = (sx + ox, sy + oy);
         let (x2, y2) = (tx + ox, ty + oy);
         svg.push_str(&format!(
-            "<line class='edge' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}' stroke='#999' stroke-width='1'/>",
+            "<line class='edge' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}' stroke='#a0a8b0' stroke-width='1'/>",
             x1, y1, x2, y2
         ));
         push_edge_label(&mut svg, edge, (x1 + x2) / 2.0, (y1 + y2) / 2.0);
@@ -328,7 +328,7 @@ fn diagram_svg(graph: &Graph) -> String {
             let (fill, stroke) = if node.kind == "requirement" {
                 ("#fff3cd", "#8a6d1a")
             } else {
-                ("#eef4fa", "#145ea8")
+                ("#eff6ff", "#2563eb")
             };
             let display_name = if node.name.is_empty() {
                 node.id.as_str()
@@ -341,7 +341,7 @@ fn diagram_svg(graph: &Graph) -> String {
             ));
             if !node.name.is_empty() {
                 svg.push_str(&format!(
-                    "<text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='9' font-family='monospace' fill='#666'>{}</text>",
+                    "<text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='9' font-family='monospace' fill='#59636e'>{}</text>",
                     cx, ny + 46.0, xml_escape(&node.id)
                 ));
             }
@@ -353,7 +353,7 @@ fn diagram_svg(graph: &Graph) -> String {
     for id in &dangling_ids {
         let (cx, cy) = dangling_centers[id];
         svg.push_str(&format!(
-            "<g class='dangling'><polygon points='{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}' fill='#f8d7da' stroke='#842029'/><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='10' font-family='sans-serif' fill='#842029'>unresolved</text><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='9' font-family='monospace' fill='#842029'>{}</text></g>",
+            "<g class='dangling'><polygon points='{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}' fill='#ffebe9' stroke='#cf222e'/><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='10' font-family='sans-serif' fill='#cf222e'>unresolved</text><text x='{:.1}' y='{:.1}' text-anchor='middle' font-size='9' font-family='monospace' fill='#cf222e'>{}</text></g>",
             cx, cy - 14.0, cx + 14.0, cy, cx, cy + 14.0, cx - 14.0, cy,
             cx, cy + 30.0,
             cx, cy + 44.0,
@@ -397,7 +397,7 @@ fn push_edge_label(svg: &mut String, edge: &GraphEdge, x: f64, y: f64) {
         return;
     }
     svg.push_str(&format!(
-        "<text class='edge-label' x='{:.1}' y='{:.1}' text-anchor='middle' font-size='10' font-family='sans-serif' fill='#555'>{}</text>",
+        "<text class='edge-label' x='{:.1}' y='{:.1}' text-anchor='middle' font-size='10' font-family='sans-serif' fill='#59636e'>{}</text>",
         x, y, xml_escape(&edge.label)
     ));
 }

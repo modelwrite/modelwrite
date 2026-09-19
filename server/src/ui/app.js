@@ -124,6 +124,19 @@
     var content = el('div', 'mw-content');
     var propsPanel = el('aside', 'mw-props-panel');
 
+    // Panel chrome: a header on each side pane so the layout reads as three
+    // deliberate panes, and a body for the properties pane so its header and
+    // the empty/selected content do not fight over the same container.
+    var treeHead = el('header', 'mw-panel-head');
+    treeHead.appendChild(el('span', 'mw-panel-title', 'Structure'));
+    treePanel.appendChild(treeHead);
+
+    var propsHead = el('header', 'mw-panel-head');
+    propsHead.appendChild(el('span', 'mw-panel-title', 'Properties'));
+    var propsBody = el('div', 'mw-props-body');
+    propsPanel.appendChild(propsHead);
+    propsPanel.appendChild(propsBody);
+
     while (main.firstChild) {
       content.appendChild(main.firstChild);
     }
@@ -132,13 +145,14 @@
     workbench.appendChild(propsPanel);
     main.appendChild(workbench);
 
-    var state = buildTree(treePanel, propsPanel);
-
     var search = el('input', 'mw-search');
     search.type = 'search';
     search.placeholder = 'Filter name / id / stereotype';
     search.setAttribute('aria-label', 'Filter the containment tree');
-    treePanel.insertBefore(search, treePanel.firstChild);
+    treePanel.appendChild(search);
+
+    var state = buildTree(treePanel, propsBody);
+
     search.addEventListener('input', function () {
       applyFilter(state, search.value);
     });
@@ -180,13 +194,13 @@
     return node;
   }
 
-  function buildTree(treePanel, propsPanel) {
+  function buildTree(treePanel, propsBody) {
     var tree = el('ul', 'mw-tree');
     treePanel.appendChild(tree);
 
     var state = {
       tree: tree,
-      propsPanel: propsPanel,
+      props: propsBody,
       flat: [],
       groups: [],
       selectedKey: null,
@@ -228,7 +242,7 @@
       tree.appendChild(el('li', 'mw-empty', 'This model has no elements.'));
     }
 
-    renderEmptyProps(propsPanel);
+    renderEmptyProps(propsBody);
     return state;
   }
 
@@ -288,6 +302,7 @@
     var li = el('li');
     var row = el('div', 'mw-node');
     row.setAttribute('data-key', node.key);
+    row.setAttribute('data-kind', node.kind);
     row.setAttribute('role', 'treeitem');
     row.setAttribute('tabindex', '-1');
 
@@ -302,7 +317,10 @@
       toggle = el('span', 'mw-toggle', '');
     }
     row.appendChild(toggle);
-    row.appendChild(el('span', '', node.name || node.key));
+    if (node.kind) {
+      row.appendChild(el('span', 'mw-kind-dot'));
+    }
+    row.appendChild(el('span', 'mw-node-name', node.name || node.key));
     if (node.kind) {
       row.appendChild(el('span', 'mw-kind-badge', node.kind));
     }
@@ -363,7 +381,7 @@
       }
     }
 
-    renderProps(state.propsPanel, node);
+    renderProps(state.props, node);
     setSelectParam(node.key);
     syncDiagramLink(node.key);
   }
@@ -406,18 +424,18 @@
     }
   }
 
-  function renderEmptyProps(propsPanel) {
-    propsPanel.textContent = '';
-    propsPanel.appendChild(el('h3', '', 'Selection'));
-    propsPanel.appendChild(el('p', 'mw-empty', 'Select an element to see its properties.'));
+  function renderEmptyProps(body) {
+    body.textContent = '';
+    body.appendChild(el('h3', 'mw-props-title', 'Selection'));
+    body.appendChild(el('p', 'mw-empty', 'Select an element to see its properties.'));
   }
 
-  function renderProps(propsPanel, node) {
-    propsPanel.textContent = '';
+  function renderProps(body, node) {
+    body.textContent = '';
 
-    propsPanel.appendChild(el('h3', '', node.name || node.key));
+    body.appendChild(el('h3', 'mw-props-title', node.name || node.key));
 
-    var dl = el('dl');
+    var dl = el('dl', 'mw-props-list');
     appendRow(dl, 'id', node.key);
     appendRow(dl, 'name', node.name);
     appendRow(dl, 'kind', node.kind);
@@ -460,7 +478,7 @@
       dl.appendChild(covDesc);
     }
 
-    propsPanel.appendChild(dl);
+    body.appendChild(dl);
   }
 
   function appendRow(dl, label, value) {
