@@ -74,4 +74,61 @@ fn a_real_magicdraw_sysml_export_imports_with_every_loss_named() {
         unmappable,
         declarations.len()
     );
+
+    // --- The number this test exists to move ---
+    assert_eq!(root.requirements.len(), 25, "all 25 requirements carried");
+    assert_eq!(root.summary.requirements, 25);
+
+    let graph = root.graph.as_ref().expect("graph present");
+    let satisfy = graph.edges.iter().filter(|e| e.label == "Satisfy").count();
+    let allocate = graph.edges.iter().filter(|e| e.label == "Allocate").count();
+    assert_eq!(satisfy, 20, "all 20 Satisfy links carried");
+    assert_eq!(allocate, 3, "all 3 Allocate links carried");
+    assert_eq!(
+        graph.edges.len(),
+        28,
+        "20 Satisfy + 3 Allocate + 4 Refine + 1 Verify"
+    );
+    assert_eq!(graph.nodes.len(), 59, "34 blocks + 25 requirements");
+
+    // Every requirement is a graph node, so a traceability edge resolves both
+    // endpoints (OKF spec: every element is a node).
+    let node_ids: std::collections::HashSet<&str> =
+        graph.nodes.iter().map(|n| n.id.as_str()).collect();
+    for r in &root.requirements {
+        assert!(
+            node_ids.contains(r.id.as_str()),
+            "{} must be a graph node",
+            r.id
+        );
+    }
+
+    // A leaf requirement carries its own id (reqId), body (reqText) and name.
+    let heater = root
+        .requirements
+        .iter()
+        .find(|r| r.name == "Heater Initialization")
+        .expect("Heater Initialization requirement present");
+    assert_eq!(heater.req_id, "1.1");
+    assert!(
+        heater
+            .req_text
+            .starts_with("The boiler shall heat water to 84")
+            && heater
+                .req_text
+                .ends_with("within 90 seconds of turning on the coffee machine")
+    );
+
+    // A Satisfy edge points from the satisfying block (client) to the satisfied
+    // requirement (supplier): the Boiler satisfies "Heater Initialization".
+    assert!(graph.edges.iter().any(|e| {
+        e.label == "Satisfy"
+            && e.source == "_2026x_1_12a70364_1789363551438_409574_3734"
+            && e.target == "_2026x_1_12a70364_1789522470210_613186_5619"
+    }));
+
+    // The requirement class is carried, not left as an unmapped non-block class.
+    assert!(!content_losses.iter().any(|m| {
+        m.subject == "uml:Class _2026x_1_12a70364_1789522470210_613186_5619 (Heater Initialization)"
+    }));
 }

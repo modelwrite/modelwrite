@@ -23,6 +23,11 @@ XMI needs its own corpus and its own fidelity report, which is a later tranche.
   "name" with the UML attribute, to prove it is not read as UML and is reported.
 - root-attr.xmi: an xmi:version attribute on the xmi:XMI root, to prove root
   attributes are reported rather than passed over.
+- magicdraw-requirements.xmi: the MagicDraw REQUIREMENT/TRACEABILITY shape - a
+  requirement is a uml:Class carrying a <sysml:Requirement base_Class=... Id=...
+  Text=.../> stereotype application, and Satisfy/Allocate are uml:Abstraction
+  elements whose client/supplier are CHILD elements (<client xmi:idref=.../>)
+  with a <sysml:Satisfy base_Abstraction=.../> sibling application.
 
 ## Conventions
 
@@ -34,7 +39,12 @@ XMI needs its own corpus and its own fidelity report, which is a later tranche.
   element with a base_Class reference: <Block xmi:id="..." base_Class="..."/>.
 - A dependency is a uml:Dependency with client/supplier references and a
   Satisfy/Allocate/Refine/Verify stereotype applied as a child element with a
-  base_Dependency reference.
+  base_Dependency reference. MagicDraw instead uses a uml:Abstraction whose
+  client/supplier are child elements and applies the stereotype as a sibling
+  with a base_Abstraction reference; the reader accepts both forms.
+- A requirement is a uml:Class carrying a Requirement stereotype applied as
+  <sysml:Requirement base_Class=... Id=... Text=.../>; the class carries the
+  name, Id carries reqId and Text carries reqText.
 - A property is an ownedAttribute uml:Property with a type reference (an
   xmi:id that resolves to a block name, or a primitive type literal), an
   aggregation (none/shared/composite) and an optional default.

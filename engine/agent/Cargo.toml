@@ -4,17 +4,20 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "The agent contract: proposals about a model and the human-readable review artifact that precedes any commit."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","agent","proposals","review"]
 
 [lib]
 name = "agent"
 
 [dependencies]
-mw-binding = { path = "../binding" }
-mw-okf = { path = "../okf" }
+mw-binding = { path = "../binding", version = "0.1.0" }
+mw-okf = { path = "../okf", version = "0.1.0" }
 serde.workspace = true
 
 [dev-dependencies]
-mw-binding = { path = "../binding" }
-mw-binding-xmi = { path = "../binding-xmi" }
-mw-okf = { path = "../okf" }
+mw-binding = { path = "../binding", version = "0.1.0" }
+mw-binding-xmi = { path = "../binding-xmi", version = "0.1.0" }
+mw-okf = { path = "../okf", version = "0.1.0" }

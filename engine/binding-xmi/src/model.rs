@@ -13,7 +13,13 @@ use binding::{Mapping, MappingVerdict};
 /// The stereotype on a uml:Class that marks a SysML block.
 pub const BLOCK_STEREOTYPE: &str = "Block";
 
-/// The stereotypes on a uml:Dependency that this binding carries as graph edges.
+/// The stereotype on a uml:Class that marks a SysML requirement.
+pub const REQUIREMENT_STEREOTYPE: &str = "Requirement";
+
+/// The stereotypes on a uml:Dependency or uml:Abstraction that this binding
+/// carries as graph edges. MagicDraw applies Satisfy/Allocate/Refine/Verify to a
+/// uml:Abstraction (base_Abstraction), while hand-written fixtures use a
+/// uml:Dependency (base_Dependency).
 pub const DEPENDENCY_STEREOTYPES: &[&str] = &["Satisfy", "Allocate", "Refine", "Verify"];
 
 /// The subset this binding understands, stated as data.
@@ -45,12 +51,17 @@ pub fn mapping_table() -> Vec<Mapping> {
             note: "mapped to a block element carrying its properties and documentation".to_string(),
         },
         Mapping {
+            subject: "uml:Class with the Requirement stereotype".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "mapped to a requirement element carrying its name, reqId and reqText (MagicDraw applies the stereotype as a sibling <sysml:Requirement base_Class=... Id=... Text=.../> element)".to_string(),
+        },
+        Mapping {
             subject: "uml:Property with an aggregation".to_string(),
             verdict: MappingVerdict::Exact,
             note: "mapped to a block attribute; aggregation (none/shared/composite) and default carried verbatim (the property's xmi:id has no OKF slot and is named in the loss report)".to_string(),
         },
         Mapping {
-            subject: "uml:Dependency with a Satisfy/Allocate/Refine/Verify stereotype".to_string(),
+            subject: "uml:Dependency or uml:Abstraction with a Satisfy/Allocate/Refine/Verify stereotype".to_string(),
             verdict: MappingVerdict::Exact,
             note: "mapped to a graph edge of kind 'dependency' whose label is the stereotype name (the dependency's xmi:id and name have no OKF slot and are named in the loss report)".to_string(),
         },
@@ -65,7 +76,12 @@ pub fn mapping_table() -> Vec<Mapping> {
             note: "carried verbatim as the OKF element id and graph node id".to_string(),
         },
         Mapping {
-            subject: "xmi:id on uml:Model, uml:Package, uml:Property, uml:Dependency or uml:Comment".to_string(),
+            subject: "xmi:id on a requirement (element and graph node)".to_string(),
+            verdict: MappingVerdict::Exact,
+            note: "carried verbatim as the OKF requirement id and graph node id".to_string(),
+        },
+        Mapping {
+            subject: "xmi:id on uml:Model, uml:Package, uml:Property, uml:Dependency, uml:Abstraction or uml:Comment".to_string(),
             verdict: MappingVerdict::Lossy,
             note: "OKF's project, package, Attribute, GraphEdge and documentation have no id slot; each dropped id is named in the loss report".to_string(),
         },

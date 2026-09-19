@@ -14,7 +14,9 @@ use binding::{
     artifact_hash, Binding, BindingError, BindingInfo, Direction, LossReport, Mapping,
     MappingVerdict,
 };
-use okf::types::{Attribute, Element, Graph, GraphEdge, GraphNode, OkfRoot, StateMachine, Summary};
+use okf::types::{
+    Attribute, Element, Graph, GraphEdge, GraphNode, OkfRoot, Requirement, StateMachine, Summary,
+};
 
 /// The binding identity the gate and the workbench use to select this reader.
 pub const BINDING_ID: &str = "sysml-v1-xmi";
@@ -41,7 +43,7 @@ impl Binding for XmiBinding {
             version: BINDING_VERSION.to_string(),
             direction: Direction::ImportAndExport,
             description:
-                "SysML v1 (UML profile) XMI: blocks, properties, dependency edges and documentation"
+                "SysML v1 (UML profile) XMI: blocks, requirements, properties and Satisfy/Allocate traceability"
                     .to_string(),
         }
     }
@@ -114,6 +116,30 @@ fn base_ref<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> Option<&'a str> {
     for a in node.attributes() {
         if a.name().starts_with("base_") && a.namespace().is_none() {
             return Some(a.value());
+        }
+    }
+    None
+}
+
+/// An unqualified attribute (MagicDraw writes stereotype properties such as a
+/// requirement's Id and Text unqualified); matching only the unqualified form
+/// keeps a foreign-namespaced attribute of the same name from being mistaken for it.
+fn plain_attr<'a, 'input>(node: roxmltree::Node<'a, 'input>, name: &str) -> Option<&'a str> {
+    node.attributes()
+        .find(|a| a.name() == name && a.namespace().is_none())
+        .map(|a| a.value())
+}
+
+/// The xmi:idref carried by a child element of the given local name. MagicDraw
+/// serialises a uml:Abstraction's client and supplier as child elements
+/// (<client xmi:idref=.../>, <supplier xmi:idref=.../>) rather than attributes,
+/// so the reference is read from the child, not the attribute.
+fn child_ref<'a, 'input>(node: roxmltree::Node<'a, 'input>, name: &str) -> Option<&'a str> {
+    for child in node.children() {
+        if child.is_element() && child.tag_name().name() == name {
+            if let Some(r) = attr_ns(child, Some(XMI_NS), "idref") {
+                return Some(r);
+            }
         }
     }
     None
@@ -196,8 +222,10 @@ enum ElementKind {
     Class,
     Property,
     Dependency,
+    Abstraction,
     Comment,
     Stereotype,
+    Requirement,
 }
 
 struct RawProperty {
@@ -219,6 +247,16 @@ struct RawDependency {
     name: String,
     client: String,
     supplier: String,
+    /// The UML base element type: "Dependency" (hand-written fixtures) or
+    /// "Abstraction" (MagicDraw). Used to name the id-drop in the loss report.
+    element: String,
+}
+
+/// The SysML requirement properties carried by a <sysml:Requirement> stereotype
+/// application: the requirement's own id (reqId) and its body text (reqText).
+struct RequirementMeta {
+    req_id: String,
+    req_text: String,
 }
 
 struct RawComment {
@@ -235,6 +273,7 @@ struct Importer {
     found_model: bool,
     classes: Vec<RawClass>,
     block_ids: HashSet<String>,
+    req_meta: HashMap<String, RequirementMeta>,
     dependencies: Vec<RawDependency>,
     dep_stereotypes: HashMap<String, String>,
     packages: Vec<(String, String)>,
@@ -251,6 +290,7 @@ impl Importer {
             found_model: false,
             classes: Vec::new(),
             block_ids: HashSet::new(),
+            req_meta: HashMap::new(),
             dependencies: Vec::new(),
             dep_stereotypes: HashMap::new(),
             packages: Vec::new(),
@@ -311,6 +351,20 @@ impl Importer {
                         node,
                         ElementKind::Stereotype,
                         &format!("{tag} {id}"),
+                    );
+                    return;
+                }
+            }
+            if tag == model::REQUIREMENT_STEREOTYPE {
+                if let Some(base) = base_ref(node) {
+                    let req_id = plain_attr(node, "Id").unwrap_or("").to_string();
+                    let req_text = plain_attr(node, "Text").unwrap_or("").to_string();
+                    self.req_meta
+                        .insert(base.to_string(), RequirementMeta { req_id, req_text });
+                    self.report_unmapped_attributes(
+                        node,
+                        ElementKind::Requirement,
+                        &format!("Requirement {id}"),
                     );
                     return;
                 }
@@ -426,10 +480,32 @@ impl Importer {
                     name,
                     client,
                     supplier,
+                    element: "Dependency".to_string(),
                 });
                 for child in node.children() {
                     self.walk(child, None);
                 }
+            }
+            "Abstraction" => {
+                // MagicDraw applies Satisfy/Allocate/Refine/Verify to a uml:Abstraction
+                // whose client/supplier are child elements, not attributes.
+                let name = attr(node, "name").unwrap_or("").to_string();
+                let client = child_ref(node, "client").unwrap_or("").to_string();
+                let supplier = child_ref(node, "supplier").unwrap_or("").to_string();
+                self.report_unmapped_attributes(
+                    node,
+                    ElementKind::Abstraction,
+                    &format!("uml:Abstraction {id}"),
+                );
+                self.dependencies.push(RawDependency {
+                    id: id.clone(),
+                    name,
+                    client,
+                    supplier,
+                    element: "Abstraction".to_string(),
+                });
+                // The client/supplier child elements are carried as the edge
+                // endpoints; walking them would misreport them as unknown elements.
             }
             "Comment" => {
                 let body = attr(node, "body").unwrap_or("").to_string();
@@ -573,6 +649,19 @@ impl Importer {
                         || (name == "client" && uml)
                         || (name == "supplier" && uml)
                 }
+                ElementKind::Abstraction => {
+                    // client/supplier are child elements, not attributes; the
+                    // only attributes are the element's identity and name.
+                    (name == "id" && xmi) || (name == "type" && xmi) || (name == "name" && uml)
+                }
+                ElementKind::Requirement => {
+                    // A <sysml:Requirement> stereotype application carries its
+                    // base_Class reference and the requirement's Id and Text.
+                    (name == "id" && xmi)
+                        || (name.starts_with("base_") && ns.is_none())
+                        || (name == "Id" && ns.is_none())
+                        || (name == "Text" && ns.is_none())
+                }
                 ElementKind::Comment => {
                     // NOTE: 'name' is deliberately absent: a uml:Comment name has
                     // no OKF slot and is reported rather than consumed in silence.
@@ -609,6 +698,9 @@ impl Importer {
             .map(|c| c.id.as_str())
             .collect();
 
+        // The emitted requirements are the classes carrying the Requirement stereotype.
+        let req_class_ids: HashSet<&str> = self.req_meta.keys().map(|k| k.as_str()).collect();
+
         // A label for every recognised element, so a comment targeting a non-block
         // can say what it targeted rather than just "dangling".
         let mut known: HashMap<&str, String> = HashMap::new();
@@ -616,11 +708,13 @@ impl Importer {
             known.insert(pid.as_str(), format!("uml:Package {pname}"));
         }
         for d in &self.dependencies {
-            known.insert(d.id.as_str(), format!("uml:Dependency {}", d.name));
+            known.insert(d.id.as_str(), format!("uml:{} {}", d.element, d.name));
         }
         for c in &self.classes {
             if emitted.contains(c.id.as_str()) {
                 known.insert(c.id.as_str(), format!("block {}", c.name));
+            } else if req_class_ids.contains(c.id.as_str()) {
+                known.insert(c.id.as_str(), format!("requirement {}", c.name));
             } else {
                 known.insert(c.id.as_str(), format!("uml:Class {} (not a block)", c.name));
             }
@@ -678,6 +772,7 @@ impl Importer {
         }
 
         let mut structure: Vec<Element> = Vec::new();
+        let mut requirements: Vec<Requirement> = Vec::new();
         for c in &self.classes {
             if emitted.contains(c.id.as_str()) {
                 let documentation = docs.get(&c.id).cloned().unwrap_or_default();
@@ -711,11 +806,46 @@ impl Importer {
                     attributes,
                     documentation,
                 });
+            } else if let Some(meta) = self.req_meta.get(&c.id) {
+                // A class carrying the Requirement stereotype is a requirement: its
+                // own id (reqId) and body (reqText) come from the stereotype
+                // application, while its name and element id come from the class.
+                for p in &c.properties {
+                    if !p.id.is_empty() {
+                        self.losses.push(Mapping {
+                            subject: format!("uml:Property {}", p.id),
+                            verdict: MappingVerdict::Lossy,
+                            note: "uml:Property xmi:id dropped: OKF Attribute has no id slot"
+                                .to_string(),
+                        });
+                    }
+                }
+                let attributes = c
+                    .properties
+                    .iter()
+                    .map(|p| Attribute {
+                        name: p.name.clone(),
+                        attr_type: resolve_type(&p.type_ref, &id_to_name),
+                        aggregation: p.aggregation.clone(),
+                        default: p.default.clone(),
+                    })
+                    .collect();
+                requirements.push(Requirement {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    kind: "requirement".to_string(),
+                    stereotypes: vec![model::REQUIREMENT_STEREOTYPE.to_string()],
+                    attributes,
+                    documentation: String::new(),
+                    req_id: meta.req_id.clone(),
+                    req_text: meta.req_text.clone(),
+                });
             } else {
                 self.losses.push(Mapping {
                     subject: format!("uml:Class {} ({})", c.id, c.name),
                     verdict: MappingVerdict::Unmappable,
-                    note: "uml:Class without the Block stereotype; not a block".to_string(),
+                    note: "uml:Class without the Block or Requirement stereotype; not carried"
+                        .to_string(),
                 });
                 // I3: each property of the non-block class is named individually,
                 // rather than passed over.
@@ -729,7 +859,7 @@ impl Importer {
             }
         }
 
-        let graph_nodes: Vec<GraphNode> = structure
+        let mut graph_nodes: Vec<GraphNode> = structure
             .iter()
             .map(|el| GraphNode {
                 id: el.id.clone(),
@@ -738,6 +868,16 @@ impl Importer {
                 stereotypes: vec![model::BLOCK_STEREOTYPE.to_string()],
             })
             .collect();
+        // Every requirement is also a graph node, so a Satisfy/Allocate edge can
+        // resolve both endpoints (OKF spec: "every element as a node").
+        for r in &requirements {
+            graph_nodes.push(GraphNode {
+                id: r.id.clone(),
+                kind: "requirement".to_string(),
+                name: r.name.clone(),
+                stereotypes: r.stereotypes.clone(),
+            });
+        }
 
         let mut graph_edges: Vec<GraphEdge> = Vec::new();
         for d in &self.dependencies {
@@ -746,19 +886,24 @@ impl Importer {
                 // none), so it is named rather than dropped in silence.
                 if !d.id.is_empty() {
                     self.losses.push(Mapping {
-                        subject: format!("uml:Dependency {}", d.id),
+                        subject: format!("uml:{} {}", d.element, d.id),
                         verdict: MappingVerdict::Lossy,
-                        note: "uml:Dependency xmi:id dropped: OKF GraphEdge has no id slot"
-                            .to_string(),
+                        note: format!(
+                            "uml:{} xmi:id dropped: OKF GraphEdge has no id slot",
+                            d.element
+                        ),
                     });
                 }
                 // I1: a stereotyped dependency's name is dropped (the edge label
                 // carries only the stereotype), so a non-empty name is named.
                 if !d.name.is_empty() {
                     self.losses.push(Mapping {
-                        subject: format!("uml:Dependency {} ({})", d.id, d.name),
+                        subject: format!("uml:{} {} ({})", d.element, d.id, d.name),
                         verdict: MappingVerdict::Lossy,
-                        note: "uml:Dependency name dropped: the graph edge label carries only the stereotype".to_string(),
+                        note: format!(
+                            "uml:{} name dropped: the graph edge label carries only the stereotype",
+                            d.element
+                        ),
                     });
                 }
                 graph_edges.push(GraphEdge {
@@ -769,10 +914,12 @@ impl Importer {
                 });
             } else {
                 self.losses.push(Mapping {
-                    subject: format!("uml:Dependency {} ({})", d.id, d.name),
+                    subject: format!("uml:{} {} ({})", d.element, d.id, d.name),
                     verdict: MappingVerdict::Unmappable,
-                    note: "uml:Dependency without a recognised Satisfy/Allocate/Refine/Verify stereotype"
-                        .to_string(),
+                    note: format!(
+                        "uml:{} without a recognised Satisfy/Allocate/Refine/Verify stereotype",
+                        d.element
+                    ),
                 });
             }
         }
@@ -788,7 +935,7 @@ impl Importer {
 
         let summary = Summary {
             blocks: structure.len() as u64,
-            requirements: 0,
+            requirements: requirements.len() as u64,
             interfaces: 0,
             signals: 0,
             activities: 0,
@@ -804,7 +951,7 @@ impl Importer {
             structure,
             interfaces: Vec::new(),
             signals: Vec::new(),
-            requirements: Vec::new(),
+            requirements,
             // I3: OKF requires the stateMachine section to be present even when the model
             // has no state machine. The binding emits the empty section itself, so the document
             // it produces passes OKF validation UNCHANGED - the measured document is the committed
@@ -860,10 +1007,23 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
             "cannot export signals: outside the sysml-v1-xmi subset".to_string(),
         ));
     }
-    if !root.requirements.is_empty() {
-        return Err(BindingError::Export(
-            "cannot export requirements: outside the sysml-v1-xmi subset".to_string(),
-        ));
+    for r in &root.requirements {
+        if r.kind != "requirement" {
+            return Err(BindingError::Export(format!(
+                "cannot export requirement {} of kind '{}': only requirements are in the subset",
+                r.id, r.kind
+            )));
+        }
+        // I2: the export carries exactly one stereotype (Requirement). Any other
+        // stereotype set would be silently normalised on the way out, so refuse.
+        if r.stereotypes.len() != 1 || r.stereotypes[0] != model::REQUIREMENT_STEREOTYPE {
+            return Err(BindingError::Export(format!(
+                "cannot export requirement {}: stereotypes {:?} are outside the subset (only {:?} is carried)",
+                r.id,
+                r.stereotypes,
+                [model::REQUIREMENT_STEREOTYPE]
+            )));
+        }
     }
     if !root.activities.is_empty() {
         return Err(BindingError::Export(
@@ -887,35 +1047,57 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
     for el in &root.structure {
         name_to_id.insert(el.name.as_str(), el.id.as_str());
     }
+    for r in &root.requirements {
+        name_to_id.insert(r.name.as_str(), r.id.as_str());
+    }
 
     if let Some(graph) = &root.graph {
-        let expected: Vec<&str> = root.structure.iter().map(|e| e.id.as_str()).collect();
+        // The graph must mirror the structure blocks followed by the requirements,
+        // exactly and in order, or export would silently lose or reorder them.
+        let mut expected: Vec<(&str, &str, &str, &[String])> = Vec::new();
+        for e in &root.structure {
+            expected.push((
+                e.id.as_str(),
+                e.kind.as_str(),
+                e.name.as_str(),
+                e.stereotypes.as_slice(),
+            ));
+        }
+        for r in &root.requirements {
+            expected.push((
+                r.id.as_str(),
+                r.kind.as_str(),
+                r.name.as_str(),
+                r.stereotypes.as_slice(),
+            ));
+        }
         let actual: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();
-        if actual != expected {
+        let expected_ids: Vec<&str> = expected.iter().map(|(id, _, _, _)| *id).collect();
+        if actual != expected_ids {
             return Err(BindingError::Export(
-                "graph nodes do not mirror the structure blocks; export would silently lose them"
+                "graph nodes do not mirror the structure blocks and requirements; export would silently lose them"
                     .to_string(),
             ));
         }
-        // I2: a graph node must mirror its structure element exactly - kind,
-        // name and stereotypes - or export would silently normalise it.
-        for (n, el) in graph.nodes.iter().zip(root.structure.iter()) {
-            if n.kind != "block" {
+        // I2: a graph node must mirror its element exactly - kind, name and
+        // stereotypes - or export would silently normalise it.
+        for (n, (_, kind, name, stereotypes)) in graph.nodes.iter().zip(expected.iter()) {
+            if n.kind.as_str() != *kind {
                 return Err(BindingError::Export(format!(
-                    "cannot export graph node {} of kind '{}': outside the subset",
-                    n.id, n.kind
+                    "cannot export graph node {} of kind '{}': expected kind '{}'",
+                    n.id, n.kind, kind
                 )));
             }
-            if n.name != el.name {
+            if n.name.as_str() != *name {
                 return Err(BindingError::Export(format!(
-                    "cannot export graph node {}: name '{}' does not match its structure element name '{}'",
-                    n.id, n.name, el.name
+                    "cannot export graph node {}: name '{}' does not match its element name '{}'",
+                    n.id, n.name, name
                 )));
             }
-            if n.stereotypes != el.stereotypes {
+            if n.stereotypes.as_slice() != *stereotypes {
                 return Err(BindingError::Export(format!(
-                    "cannot export graph node {}: stereotypes {:?} do not match its structure element stereotypes {:?}",
-                    n.id, n.stereotypes, el.stereotypes
+                    "cannot export graph node {}: stereotypes {:?} do not match its element stereotypes {:?}",
+                    n.id, n.stereotypes, stereotypes
                 )));
             }
         }
@@ -977,6 +1159,50 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 "      <ownedComment xmi:type=\"uml:Comment\" xmi:id=\"{}-doc\" body=\"{}\"/>\n",
                 escape(&el.id),
                 escape(&el.documentation)
+            ));
+        }
+        out.push_str("    </packagedElement>\n");
+    }
+    for r in &root.requirements {
+        out.push_str(&format!(
+            "    <packagedElement xmi:type=\"uml:Class\" xmi:id=\"{}\" name=\"{}\">\n",
+            escape(&r.id),
+            escape(&r.name)
+        ));
+        out.push_str(&format!(
+            "      <Requirement base_Class=\"{}\"",
+            escape(&r.id)
+        ));
+        if !r.req_id.is_empty() {
+            out.push_str(&format!(" Id=\"{}\"", escape(&r.req_id)));
+        }
+        if !r.req_text.is_empty() {
+            out.push_str(&format!(" Text=\"{}\"", escape(&r.req_text)));
+        }
+        out.push_str("/>\n");
+        for (i, a) in r.attributes.iter().enumerate() {
+            let type_ref = name_to_id
+                .get(a.attr_type.as_str())
+                .copied()
+                .unwrap_or(a.attr_type.as_str());
+            out.push_str(&format!(
+                "      <ownedAttribute xmi:type=\"uml:Property\" xmi:id=\"{}-attr-{}\" name=\"{}\" type=\"{}\" aggregation=\"{}\"",
+                escape(&r.id),
+                i,
+                escape(&a.name),
+                escape(type_ref),
+                escape(&a.aggregation)
+            ));
+            if !a.default.is_empty() {
+                out.push_str(&format!(" default=\"{}\"", escape(&a.default)));
+            }
+            out.push_str("/>\n");
+        }
+        if !r.documentation.is_empty() {
+            out.push_str(&format!(
+                "      <ownedComment xmi:type=\"uml:Comment\" xmi:id=\"{}-doc\" body=\"{}\"/>\n",
+                escape(&r.id),
+                escape(&r.documentation)
             ));
         }
         out.push_str("    </packagedElement>\n");

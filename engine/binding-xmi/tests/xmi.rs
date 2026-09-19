@@ -519,3 +519,86 @@ fn content_losses_stay_visible_beside_declarations() {
         .iter()
         .all(|m| m.subject.contains("ProfileApplication") || m.subject.contains("PackageImport")));
 }
+
+// --- Requirements and Satisfy/Allocate traceability (MagicDraw shape) ---
+
+#[test]
+fn magicdraw_requirements_and_abstraction_traceability_are_carried() {
+    let (root, loss) = import("magicdraw-requirements.xmi");
+
+    // The two blocks are the structure.
+    assert_eq!(root.structure.len(), 2);
+    assert_eq!(root.structure[0].id, "block-boiler");
+    assert_eq!(root.structure[1].id, "block-water");
+
+    // The requirement is a uml:Class carrying the Requirement stereotype, whose
+    // base_Class reference names the class and whose Id/Text carry reqId/reqText.
+    assert_eq!(root.requirements.len(), 1);
+    let requirement = &root.requirements[0];
+    assert_eq!(requirement.id, "req-heat");
+    assert_eq!(requirement.name, "Heater Initialization");
+    assert_eq!(requirement.kind, "requirement");
+    assert_eq!(requirement.stereotypes, vec!["Requirement".to_string()]);
+    assert_eq!(requirement.req_id, "1.1");
+    assert_eq!(requirement.req_text, "The boiler shall heat water");
+
+    // The requirement is also a graph node, so the Satisfy edge resolves.
+    let graph = root.graph.as_ref().expect("graph present");
+    assert_eq!(graph.nodes.len(), 3);
+    assert_eq!(graph.nodes[0].id, "block-boiler");
+    assert_eq!(graph.nodes[0].kind, "block");
+    assert_eq!(graph.nodes[1].id, "block-water");
+    assert_eq!(graph.nodes[2].id, "req-heat");
+    assert_eq!(graph.nodes[2].kind, "requirement");
+
+    // Satisfy and Allocate are uml:Abstraction with client/supplier CHILD elements;
+    // the edge keeps source=client, target=supplier (Satisfy: block -> requirement).
+    assert_eq!(
+        graph.edges,
+        vec![
+            GraphEdge {
+                source: "block-boiler".to_string(),
+                target: "req-heat".to_string(),
+                kind: "dependency".to_string(),
+                label: "Satisfy".to_string(),
+            },
+            GraphEdge {
+                source: "block-boiler".to_string(),
+                target: "block-water".to_string(),
+                kind: "dependency".to_string(),
+                label: "Allocate".to_string(),
+            },
+        ]
+    );
+
+    // The summary counts follow.
+    assert_eq!(root.summary.blocks, 2);
+    assert_eq!(root.summary.requirements, 1);
+    assert_eq!(root.summary.graph_nodes, 3);
+    assert_eq!(root.summary.graph_edges, 2);
+
+    // The requirement class is carried, NOT reported as a non-block; the two
+    // abstraction ids are named (Lossy) rather than dropped in silence.
+    assert!(!loss
+        .mappings
+        .iter()
+        .any(|m| { m.subject == "uml:Class req-heat (Heater Initialization)" }));
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Lossy && m.subject == "uml:Abstraction abs-satisfy"
+    }));
+    assert!(loss.mappings.iter().any(|m| {
+        m.verdict == MappingVerdict::Lossy && m.subject == "uml:Abstraction abs-allocate"
+    }));
+}
+
+#[test]
+fn requirements_and_traceability_round_trip_through_export() {
+    let (root, _) = import("magicdraw-requirements.xmi");
+    let bytes = XmiBinding::new()
+        .export(&root)
+        .expect("export must succeed");
+    let (round_tripped, _) = XmiBinding::new()
+        .import(&bytes)
+        .expect("re-import must succeed");
+    assert_eq!(round_tripped, root);
+}

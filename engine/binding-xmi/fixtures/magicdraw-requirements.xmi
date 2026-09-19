@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001"
+         xmlns:sysml="http://www.omg.org/spec/SysML/20181001/SysML">
+  <uml:Model xmi:id="model-mdr" name="MagicDraw Requirements">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg-req" name="Requirements">
+      <packagedElement xmi:type="uml:Class" xmi:id="req-heat" name="Heater Initialization"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg-struct" name="Structure">
+      <packagedElement xmi:type="uml:Class" xmi:id="block-boiler" name="Boiler"/>
+      <packagedElement xmi:type="uml:Class" xmi:id="block-water" name="Water System"/>
+    </packagedElement>
+    <!-- MagicDraw serialises Satisfy/Allocate as a uml:Abstraction whose client and
+         supplier are CHILD elements (xmi:idref), not attributes. -->
+    <packagedElement xmi:type="uml:Abstraction" xmi:id="abs-satisfy">
+      <client xmi:idref="block-boiler"/>
+      <supplier xmi:idref="req-heat"/>
+    </packagedElement>
+    <packagedElement xmi:type="uml:Abstraction" xmi:id="abs-allocate">
+      <client xmi:idref="block-boiler"/>
+      <supplier xmi:idref="block-water"/>
+    </packagedElement>
+  </uml:Model>
+  <!-- Stereotype applications are siblings of uml:Model, with the Requirement carrying
+       its own id (Id) and body (Text). -->
+  <sysml:Requirement xmi:id="app-req" base_Class="req-heat" Id="1.1" Text="The boiler shall heat water"/>
+  <sysml:Block xmi:id="app-boiler" base_Class="block-boiler"/>
+  <sysml:Block xmi:id="app-water" base_Class="block-water"/>
+  <sysml:Satisfy xmi:id="app-satisfy" base_Abstraction="abs-satisfy"/>
+  <sysml:Allocate xmi:id="app-allocate" base_Abstraction="abs-allocate"/>
+</xmi:XMI>

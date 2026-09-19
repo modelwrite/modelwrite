@@ -4,17 +4,21 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "C ABI exposing modelwrite's OKF validation, diff, and gate to non-Rust consumers."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","c-api","ffi","okf"]
+categories = ["development-tools::ffi"]
 
 [lib]
 name = "capi"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-mw-okf = { path = "../okf" }
-mw-gate = { path = "../gate" }
+mw-okf = { path = "../okf", version = "0.1.0" }
+mw-gate = { path = "../gate", version = "0.1.0" }
 serde_json.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../test-support" }
+mw-test-support = { path = "../test-support", version = "0.1.0" }
 serde_json.workspace = true

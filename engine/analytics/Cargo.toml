@@ -4,18 +4,21 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "Cross-model analytics and data fusion whose findings are traceable to sources with weakest-link confidence."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","analytics","data-fusion","confidence"]
 
 [lib]
 name = "analytics"
 
 [dependencies]
-mw-okf = { path = "../okf" }
-mw-graph = { path = "../graph" }
+mw-okf = { path = "../okf", version = "0.1.0" }
+mw-graph = { path = "../graph", version = "0.1.0" }
 serde.workspace = true
 sha2.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../test-support" }
+mw-test-support = { path = "../test-support", version = "0.1.0" }
 serde_json.workspace = true

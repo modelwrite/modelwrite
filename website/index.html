@@ -137,16 +137,19 @@ not reassuring.</strong> The MagicDraw SysML model in
 <code>sample/corpus/coffee-machine/legacy/CoffeeMachine-SysML-Model.mdzip</code> (a
 193&nbsp;KB XMI in its <code>com.nomagic.magicdraw.uml_model.model</code> entry) contains
 148 <code>packagedElement</code> and 57 <code>ownedAttribute</code> elements: 34 Blocks,
-25 Requirements, 20 Satisfy links and 3 Allocate links. Importing it produces 34 structure
-elements (the Blocks), <em>zero</em> requirements, <em>zero</em> graph edges, and 348
-content losses — every one Unmappable and named. Requirements, Satisfy and Allocate links,
-Ports, Operations and Associations are all reported as unmappable: named, never dropped in
-silence, but not carried. Reproduce it with
+25 Requirements, and 28 traceability links (20 Satisfy, 3 Allocate, 4 Refine, 1 Verify).
+Importing it produces 34 structure elements (the Blocks), 25 requirements, 59 graph nodes
+and 28 graph edges — the Satisfy, Allocate, Refine and Verify links — alongside 270
+content losses, every one Unmappable and named. Requirements and their traceability are
+now carried; Ports, Operations, Associations, visibility and other attributes are still
+reported as unmappable: named, never dropped in silence, but not carried. Reproduce it
+with
 <code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code>.</li>
-<li><strong>Real vendor migration is not ready.</strong> The reader carries a subset: the
-first real model tested lost every requirement (25) and every traceability link (20 Satisfy
-and 3 Allocate), and produced no graph edges. Migrating a MagicDraw or CATIA Magic model
-without those losses is not yet supported.</li>
+<li><strong>Real vendor migration is still not complete.</strong> The reader now carries
+requirements and their traceability — 25 requirements and 28 links (20 Satisfy, 3
+Allocate, 4 Refine, 1 Verify), where the first measurement carried none — but it still
+loses 270 things: Ports, Operations, Associations, visibility and other attributes.
+Migrating a MagicDraw or CATIA Magic model without those losses is not yet supported.</li>
 <li><strong>The native XMI-to-OKF direction is not independently measured.</strong>
 The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip; the read rests
 on the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</li>
