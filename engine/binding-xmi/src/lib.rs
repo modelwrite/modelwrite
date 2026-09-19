@@ -221,8 +221,10 @@ enum ElementKind {
     Package,
     Class,
     Property,
+    Port,
     Dependency,
     Abstraction,
+    Association,
     Comment,
     Stereotype,
     Requirement,
@@ -252,6 +254,15 @@ struct RawDependency {
     element: String,
 }
 
+/// A uml:Association between two elements, reduced to its ordered member ends.
+/// The graph edge's source is the type of member_ends[0] and its target the type
+/// of member_ends[1] (the ownedEnd) - the golden corpus direction.
+struct RawAssociation {
+    id: String,
+    name: String,
+    member_ends: Vec<String>,
+}
+
 /// The SysML requirement properties carried by a <sysml:Requirement> stereotype
 /// application: the requirement's own id (reqId) and its body text (reqText).
 struct RequirementMeta {
@@ -273,11 +284,22 @@ struct Importer {
     found_model: bool,
     classes: Vec<RawClass>,
     block_ids: HashSet<String>,
+    interface_block_ids: HashSet<String>,
+    constraint_block_ids: HashSet<String>,
     req_meta: HashMap<String, RequirementMeta>,
     dependencies: Vec<RawDependency>,
     dep_stereotypes: HashMap<String, String>,
+    associations: Vec<RawAssociation>,
     packages: Vec<(String, String)>,
     comments: Vec<RawComment>,
+    /// property xmi:id -> the stereotype applied to it (PartProperty or
+    /// ReferenceProperty), which decides the graph edge emitted for it.
+    part_property_ids: HashSet<String>,
+    reference_property_ids: HashSet<String>,
+    /// property xmi:id of a uml:Port, so it also emits a 'part' edge.
+    port_property_ids: HashSet<String>,
+    /// property xmi:id -> its type reference, for resolving association member ends.
+    property_types: HashMap<String, String>,
     losses: Vec<Mapping>,
 }
 
@@ -290,11 +312,18 @@ impl Importer {
             found_model: false,
             classes: Vec::new(),
             block_ids: HashSet::new(),
+            interface_block_ids: HashSet::new(),
+            constraint_block_ids: HashSet::new(),
             req_meta: HashMap::new(),
             dependencies: Vec::new(),
             dep_stereotypes: HashMap::new(),
+            associations: Vec::new(),
             packages: Vec::new(),
             comments: Vec::new(),
+            part_property_ids: HashSet::new(),
+            reference_property_ids: HashSet::new(),
+            port_property_ids: HashSet::new(),
+            property_types: HashMap::new(),
             losses: Vec::new(),
         }
     }
@@ -343,6 +372,74 @@ impl Importer {
                     );
                     return;
                 }
+            }
+            if tag == model::INTERFACEBLOCK_STEREOTYPE {
+                if let Some(base) = base_ref(node) {
+                    self.interface_block_ids.insert(base.to_string());
+                    self.report_unmapped_attributes(
+                        node,
+                        ElementKind::Stereotype,
+                        &format!("InterfaceBlock {id}"),
+                    );
+                    return;
+                }
+            }
+            if tag == model::CONSTRAINTBLOCK_STEREOTYPE {
+                if let Some(base) = base_ref(node) {
+                    self.constraint_block_ids.insert(base.to_string());
+                    self.report_unmapped_attributes(
+                        node,
+                        ElementKind::Stereotype,
+                        &format!("ConstraintBlock {id}"),
+                    );
+                    return;
+                }
+            }
+            if tag == model::PART_STEREOTYPE || tag == model::REFERENCE_STEREOTYPE {
+                if let Some(base) = base_ref(node) {
+                    if tag == model::PART_STEREOTYPE {
+                        self.part_property_ids.insert(base.to_string());
+                    } else {
+                        self.reference_property_ids.insert(base.to_string());
+                    }
+                    self.report_unmapped_attributes(
+                        node,
+                        ElementKind::Stereotype,
+                        &format!("{tag} {id}"),
+                    );
+                    return;
+                }
+            }
+            if model::CONSUMED_PROPERTY_STEREOTYPES.contains(&tag.as_str()) {
+                if let Some(_base) = base_ref(node) {
+                    // ValueProperty/FlowProperty mark the property's SysML role,
+                    // which the carried attribute (name/type/aggregation) already
+                    // expresses; consumed exactly like the Block stereotype.
+                    self.report_unmapped_attributes(
+                        node,
+                        ElementKind::Stereotype,
+                        &format!("{tag} {id}"),
+                    );
+                    return;
+                }
+            }
+            if tag == "DiagramInfo" || tag == "auxiliaryResource" {
+                // DiagramInfo/auxiliaryResource are MagicDraw stereotype
+                // applications carrying diagram author/date and auxiliary-file
+                // metadata: hand-placed bookkeeping, never model content. OKF
+                // deliberately does not carry diagram layout, so these are
+                // declarations, not content losses - but still named.
+                let kind = if tag == "DiagramInfo" {
+                    "diagram-info metadata".to_string()
+                } else {
+                    "auxiliary-resource metadata".to_string()
+                };
+                self.losses.push(Mapping {
+                    subject: format!("{tag} {id}"),
+                    verdict: MappingVerdict::Exact,
+                    note: format!("declaration: {kind} recognised and not carried — it carries no model content"),
+                });
+                return;
             }
             if model::DEPENDENCY_STEREOTYPES.contains(&tag.as_str()) {
                 if let Some(base) = base_ref(node) {
@@ -440,6 +537,7 @@ impl Importer {
                     .to_string();
                 let aggregation = attr(node, "aggregation").unwrap_or("none").to_string();
                 let default = attr(node, "default").unwrap_or("").to_string();
+                self.property_types.insert(id.clone(), type_ref.clone());
                 self.report_unmapped_attributes(
                     node,
                     ElementKind::Property,
@@ -462,6 +560,46 @@ impl Importer {
                             subject: format!("uml:Property {id}"),
                             verdict: MappingVerdict::Unmappable,
                             note: "uml:Property outside any class".to_string(),
+                        });
+                    }
+                }
+            }
+            "Port" => {
+                // A uml:Port IS a uml:Property (UML: Port extends Property) and
+                // MagicDraw serialises a proxy port as <ownedAttribute
+                // xmi:type='uml:Port' ... aggregation='composite' type=InterfaceBlock>.
+                // It is carried exactly like a property - an attribute of its
+                // owning block typed by its InterfaceBlock - and additionally as a
+                // 'part' edge (owner -> port type), the golden corpus shape.
+                let name = attr(node, "name").unwrap_or("").to_string();
+                let type_ref = node
+                    .attributes()
+                    .find(|a| is_uml_attr(a, "type"))
+                    .map(|a| a.value())
+                    .unwrap_or("")
+                    .to_string();
+                let aggregation = attr(node, "aggregation").unwrap_or("none").to_string();
+                let default = attr(node, "default").unwrap_or("").to_string();
+                self.port_property_ids.insert(id.clone());
+                self.property_types.insert(id.clone(), type_ref.clone());
+                self.report_unmapped_attributes(node, ElementKind::Port, &format!("uml:Port {id}"));
+                match enclosing_class {
+                    Some(owner) => {
+                        if let Some(c) = self.classes.iter_mut().find(|c| c.id == owner) {
+                            c.properties.push(RawProperty {
+                                id: id.clone(),
+                                name,
+                                type_ref,
+                                aggregation,
+                                default,
+                            });
+                        }
+                    }
+                    None => {
+                        self.losses.push(Mapping {
+                            subject: format!("uml:Port {id}"),
+                            verdict: MappingVerdict::Unmappable,
+                            note: "uml:Port outside any class".to_string(),
                         });
                     }
                 }
@@ -506,6 +644,79 @@ impl Importer {
                 });
                 // The client/supplier child elements are carried as the edge
                 // endpoints; walking them would misreport them as unknown elements.
+            }
+            "Association" => {
+                // A uml:Association is a relationship between two blocks; carried
+                // as a graph edge of kind "association". MagicDraw serialises it
+                // as two <memberEnd xmi:idref=.../> plus an <ownedEnd
+                // xmi:type='uml:Property' type=.../>. Edge direction follows the
+                // golden corpus: source = type of the FIRST memberEnd, target =
+                // type of the SECOND memberEnd (the ownedEnd).
+                let name = attr(node, "name").unwrap_or("").to_string();
+                self.report_unmapped_attributes(
+                    node,
+                    ElementKind::Association,
+                    &format!("uml:Association {id}"),
+                );
+                let mut member_ends: Vec<String> = Vec::new();
+                for child in node.children() {
+                    if !child.is_element() {
+                        continue;
+                    }
+                    match child.tag_name().name() {
+                        "memberEnd" => {
+                            if let Some(r) = attr_ns(child, Some(XMI_NS), "idref") {
+                                member_ends.push(r.to_string());
+                            }
+                        }
+                        "ownedEnd" => {
+                            // The ownedEnd carries the second end's type directly;
+                            // record it so the edge can resolve both ends.
+                            if let (Some(oid), Some(ty)) =
+                                (attr_ns(child, Some(XMI_NS), "id"), attr(child, "type"))
+                            {
+                                self.property_types.insert(oid.to_string(), ty.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                self.associations.push(RawAssociation {
+                    id: id.clone(),
+                    name,
+                    member_ends,
+                });
+                // The memberEnd/ownedEnd children are carried as the edge
+                // endpoints; walking them would misreport them as unknown elements.
+            }
+            "Extension" => {
+                // An xmi:Extension container holds MagicDraw serialization and
+                // diagram-representation metadata (plugins, resources,
+                // stereotypesHREFS, ownedDiagram geometry): never model content.
+                let id_part = if id.is_empty() {
+                    "<no xmi:id>".to_string()
+                } else {
+                    id.clone()
+                };
+                self.losses.push(Mapping {
+                    subject: format!("Extension {id_part}"),
+                    verdict: MappingVerdict::Exact,
+                    note: "declaration: xmi:Extension serialization/diagram metadata recognised and not carried — it carries no model content".to_string(),
+                });
+            }
+            "Documentation" => {
+                // xmi:Documentation records the exporting tool and version: file
+                // metadata, not model content.
+                let id_part = if id.is_empty() {
+                    "<no xmi:id>".to_string()
+                } else {
+                    id.clone()
+                };
+                self.losses.push(Mapping {
+                    subject: format!("Documentation {id_part}"),
+                    verdict: MappingVerdict::Exact,
+                    note: "declaration: xmi:Documentation exporter metadata recognised and not carried — it carries no model content".to_string(),
+                });
             }
             "Comment" => {
                 let body = attr(node, "body").unwrap_or("").to_string();
@@ -641,6 +852,24 @@ impl Importer {
                         || (name == "name" && uml)
                         || (name == "aggregation" && uml)
                         || (name == "default" && uml)
+                        // The association attribute is a back-reference to the
+                        // owning uml:Association, which is carried as an edge; it
+                        // adds nothing beyond that edge.
+                        || (name == "association" && uml)
+                }
+                ElementKind::Port => {
+                    // A Port is a Property; the same attributes are consumed.
+                    // visibility and isConjugated have no OKF slot and are named.
+                    (name == "id" && xmi)
+                        || (name == "type" && xmi)
+                        || (name == "type" && uml)
+                        || (name == "name" && uml)
+                        || (name == "aggregation" && uml)
+                        || (name == "default" && uml)
+                }
+                ElementKind::Association => {
+                    // memberEnd/ownedEnd are child elements, not attributes.
+                    (name == "id" && xmi) || (name == "type" && xmi) || (name == "name" && uml)
                 }
                 ElementKind::Dependency => {
                     (name == "id" && xmi)
@@ -690,11 +919,19 @@ impl Importer {
             id_to_name.insert(c.id.as_str(), c.name.as_str());
         }
 
-        // The emitted blocks are exactly the classes carrying the Block stereotype.
+        // The emitted blocks are the classes carrying the Block, InterfaceBlock
+        // or ConstraintBlock stereotype. InterfaceBlock/ConstraintBlock classes are
+        // real SysML blocks (a port's type, a constraint block) and are carried as
+        // blocks so ports and property types resolve to graph nodes - the golden
+        // corpus shape.
         let emitted: HashSet<&str> = self
             .classes
             .iter()
-            .filter(|c| self.block_ids.contains(&c.id))
+            .filter(|c| {
+                self.block_ids.contains(&c.id)
+                    || self.interface_block_ids.contains(&c.id)
+                    || self.constraint_block_ids.contains(&c.id)
+            })
             .map(|c| c.id.as_str())
             .collect();
 
@@ -780,11 +1017,17 @@ impl Importer {
                     // CRITICAL 2: the property id has no OKF slot (Attribute has
                     // none), so it is named rather than dropped in silence.
                     if !p.id.is_empty() {
+                        let construct = if self.port_property_ids.contains(&p.id) {
+                            "uml:Port"
+                        } else {
+                            "uml:Property"
+                        };
                         self.losses.push(Mapping {
-                            subject: format!("uml:Property {}", p.id),
+                            subject: format!("{construct} {}", p.id),
                             verdict: MappingVerdict::Lossy,
-                            note: "uml:Property xmi:id dropped: OKF Attribute has no id slot"
-                                .to_string(),
+                            note: format!(
+                                "{construct} xmi:id dropped: OKF Attribute has no id slot"
+                            ),
                         });
                     }
                 }
@@ -798,11 +1041,18 @@ impl Importer {
                         default: p.default.clone(),
                     })
                     .collect();
+                let stereotype = if self.interface_block_ids.contains(&c.id) {
+                    model::INTERFACEBLOCK_STEREOTYPE
+                } else if self.constraint_block_ids.contains(&c.id) {
+                    model::CONSTRAINTBLOCK_STEREOTYPE
+                } else {
+                    model::BLOCK_STEREOTYPE
+                };
                 structure.push(Element {
                     id: c.id.clone(),
                     name: c.name.clone(),
                     kind: "block".to_string(),
-                    stereotypes: vec![model::BLOCK_STEREOTYPE.to_string()],
+                    stereotypes: vec![stereotype.to_string()],
                     attributes,
                     documentation,
                 });
@@ -812,11 +1062,17 @@ impl Importer {
                 // application, while its name and element id come from the class.
                 for p in &c.properties {
                     if !p.id.is_empty() {
+                        let construct = if self.port_property_ids.contains(&p.id) {
+                            "uml:Port"
+                        } else {
+                            "uml:Property"
+                        };
                         self.losses.push(Mapping {
-                            subject: format!("uml:Property {}", p.id),
+                            subject: format!("{construct} {}", p.id),
                             verdict: MappingVerdict::Lossy,
-                            note: "uml:Property xmi:id dropped: OKF Attribute has no id slot"
-                                .to_string(),
+                            note: format!(
+                                "{construct} xmi:id dropped: OKF Attribute has no id slot"
+                            ),
                         });
                     }
                 }
@@ -865,7 +1121,7 @@ impl Importer {
                 id: el.id.clone(),
                 kind: "block".to_string(),
                 name: el.name.clone(),
-                stereotypes: vec![model::BLOCK_STEREOTYPE.to_string()],
+                stereotypes: el.stereotypes.clone(),
             })
             .collect();
         // Every requirement is also a graph node, so a Satisfy/Allocate edge can
@@ -920,6 +1176,90 @@ impl Importer {
                         "uml:{} without a recognised Satisfy/Allocate/Refine/Verify stereotype",
                         d.element
                     ),
+                });
+            }
+        }
+
+        // Association edges: source = type of the FIRST memberEnd, target = type
+        // of the SECOND memberEnd (the ownedEnd). This is the golden corpus
+        // direction: for a block--part association the edge points from the part's
+        // type back to the owning block.
+        for a in &self.associations {
+            if a.member_ends.len() != 2 {
+                self.losses.push(Mapping {
+                    subject: format!("uml:Association {} ({})", a.id, a.name),
+                    verdict: MappingVerdict::Unmappable,
+                    note: "uml:Association with other than two member ends; not carried"
+                        .to_string(),
+                });
+                continue;
+            }
+            let src = self.property_types.get(&a.member_ends[0]);
+            let tgt = self.property_types.get(&a.member_ends[1]);
+            let (s, t) = match (src, tgt) {
+                (Some(s), Some(t)) => (s, t),
+                _ => {
+                    self.losses.push(Mapping {
+                        subject: format!("uml:Association {}", a.id),
+                        verdict: MappingVerdict::Unmappable,
+                        note: "uml:Association with an unresolvable member end".to_string(),
+                    });
+                    continue;
+                }
+            };
+            let s_carried = emitted.contains(s.as_str()) || req_class_ids.contains(s.as_str());
+            let t_carried = emitted.contains(t.as_str()) || req_class_ids.contains(t.as_str());
+            if !s_carried || !t_carried {
+                self.losses.push(Mapping {
+                    subject: format!("uml:Association {}", a.id),
+                    verdict: MappingVerdict::Unmappable,
+                    note: "uml:Association between elements outside the carried subset (an end is not a carried block or requirement)".to_string(),
+                });
+                continue;
+            }
+            // CRITICAL 2: the association id has no OKF slot (GraphEdge has none).
+            if !a.id.is_empty() {
+                self.losses.push(Mapping {
+                    subject: format!("uml:Association {}", a.id),
+                    verdict: MappingVerdict::Lossy,
+                    note: "uml:Association xmi:id dropped: OKF GraphEdge has no id slot"
+                        .to_string(),
+                });
+            }
+            graph_edges.push(GraphEdge {
+                source: s.clone(),
+                target: t.clone(),
+                kind: "association".to_string(),
+                label: String::new(),
+            });
+        }
+
+        // Part/reference edges: a PartProperty (or a port) and a ReferenceProperty
+        // are carried as the owning block's attribute PLUS a graph edge from the
+        // owning block to the property's type - the golden corpus direction
+        // (owner --part/reference--> type).
+        for c in &self.classes {
+            if !emitted.contains(c.id.as_str()) {
+                continue;
+            }
+            for p in &c.properties {
+                let kind = if self.part_property_ids.contains(&p.id)
+                    || self.port_property_ids.contains(&p.id)
+                {
+                    "part"
+                } else if self.reference_property_ids.contains(&p.id) {
+                    "reference"
+                } else {
+                    continue;
+                };
+                if p.type_ref.is_empty() {
+                    continue;
+                }
+                graph_edges.push(GraphEdge {
+                    source: c.id.clone(),
+                    target: p.type_ref.clone(),
+                    kind: kind.to_string(),
+                    label: String::new(),
                 });
             }
         }
@@ -985,15 +1325,20 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                 el.id, el.kind
             )));
         }
-        // I2: the export carries exactly one stereotype (Block). Any other
-        // stereotype set would be silently normalised on the way out, so refuse
-        // rather than normalise.
-        if el.stereotypes.len() != 1 || el.stereotypes[0] != model::BLOCK_STEREOTYPE {
+        // I2: the export carries exactly one recognised block stereotype (Block,
+        // InterfaceBlock or ConstraintBlock). Any other stereotype set would be
+        // silently normalised on the way out, so refuse rather than normalise.
+        let block_stereotypes = [
+            model::BLOCK_STEREOTYPE,
+            model::INTERFACEBLOCK_STEREOTYPE,
+            model::CONSTRAINTBLOCK_STEREOTYPE,
+        ];
+        if el.stereotypes.len() != 1 || !block_stereotypes.contains(&el.stereotypes[0].as_str()) {
             return Err(BindingError::Export(format!(
                 "cannot export structure element {}: stereotypes {:?} are outside the subset (only {:?} is carried)",
                 el.id,
                 el.stereotypes,
-                [model::BLOCK_STEREOTYPE]
+                block_stereotypes
             )));
         }
     }
@@ -1133,7 +1478,8 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
             escape(&el.name)
         ));
         out.push_str(&format!(
-            "      <Block base_Class=\"{}\"/>\n",
+            "      <{} base_Class=\"{}\"/>\n",
+            el.stereotypes[0],
             escape(&el.id)
         ));
         for (i, a) in el.attributes.iter().enumerate() {

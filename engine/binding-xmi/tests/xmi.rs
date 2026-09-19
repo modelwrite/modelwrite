@@ -602,3 +602,78 @@ fn requirements_and_traceability_round_trip_through_export() {
         .expect("re-import must succeed");
     assert_eq!(round_tripped, root);
 }
+
+// --- Items 2-3: ports, associations and parts carry with the golden corpus
+// edge direction ---
+
+#[test]
+fn ports_associations_and_parts_carry_with_the_golden_corpus_direction() {
+    let (root, loss) = import("association-part.xmi");
+
+    // Three blocks: Whole, Part, and the InterfaceBlock Iface (a port's type).
+    assert_eq!(root.structure.len(), 3);
+    let whole = root.structure.iter().find(|e| e.name == "Whole").unwrap();
+    let part = root.structure.iter().find(|e| e.name == "Part").unwrap();
+    let iface = root.structure.iter().find(|e| e.name == "Iface").unwrap();
+    assert_eq!(whole.stereotypes, vec!["Block".to_string()]);
+    assert_eq!(part.stereotypes, vec!["Block".to_string()]);
+    assert_eq!(iface.stereotypes, vec!["InterfaceBlock".to_string()]);
+    assert_eq!(iface.kind, "block");
+
+    // The PartProperty and the Port are both carried as composite attributes of
+    // their owning block, typed by the part block and the InterfaceBlock.
+    let child = whole
+        .attributes
+        .iter()
+        .find(|a| a.name == "child")
+        .expect("PartProperty carried as an attribute");
+    assert_eq!(child.attr_type, "Part");
+    assert_eq!(child.aggregation, "composite");
+    let port = whole
+        .attributes
+        .iter()
+        .find(|a| a.name == "p")
+        .expect("port carried as an attribute");
+    assert_eq!(port.attr_type, "Iface");
+    assert_eq!(port.aggregation, "composite");
+
+    let graph = root.graph.as_ref().expect("graph present");
+    // PartProperty -> 'part' edge: owner (Whole) -> part type (Part).
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| { e.kind == "part" && e.source == whole.id && e.target == part.id }));
+    // Port -> 'part' edge: owner (Whole) -> port type (Iface).
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| { e.kind == "part" && e.source == whole.id && e.target == iface.id }));
+    // Association -> 'association' edge: type of memberEnd[0] (Part) -> type of
+    // memberEnd[1]/ownedEnd (Whole). This is the OPPOSITE of the part edge, and is
+    // the golden corpus direction.
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| { e.kind == "association" && e.source == part.id && e.target == whole.id }));
+    assert!(!graph
+        .edges
+        .iter()
+        .any(|e| { e.kind == "association" && e.source == whole.id && e.target == part.id }));
+    assert_eq!(graph.edges.len(), 3);
+
+    // The association and property ids have no OKF slot, so they are named Lossy;
+    // the port's id is named as a uml:Port; nothing is Unmappable because every
+    // construct was carried.
+    assert!(loss
+        .mappings
+        .iter()
+        .any(|m| { m.verdict == MappingVerdict::Lossy && m.subject == "uml:Association assoc-1" }));
+    assert!(loss
+        .mappings
+        .iter()
+        .any(|m| { m.verdict == MappingVerdict::Lossy && m.subject == "uml:Port port-p" }));
+    assert!(loss
+        .mappings
+        .iter()
+        .all(|m| m.verdict != MappingVerdict::Unmappable));
+}

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! An AUDIT of exactly what the real MagicDraw import still loses.
 //!
-//! The headline is "270 content losses". A number like that is not actionable:
-//! nobody can decide what to build next from it. This test turns it into a
-//! histogram, so the biggest remaining gap is a fact rather than a guess.
+//! A single headline number is not actionable: nobody can decide what to build
+//! next from it. This test turns it into a histogram, so the biggest remaining
+//! gap is a fact rather than a guess. (Diagram/file metadata is reclassified as
+//! declarations, so it is deliberately absent from the content-loss histogram.)
 
-use binding::{Binding, MappingVerdict};
+use binding::Binding;
 use binding_xmi::XmiBinding;
 use std::collections::BTreeMap;
 
@@ -38,9 +39,7 @@ fn the_remaining_losses_are_counted_by_kind() {
     let mut by_verdict: BTreeMap<String, usize> = BTreeMap::new();
     for m in &losses {
         *by_kind.entry(kind_of(&m.subject)).or_default() += 1;
-        *by_verdict
-            .entry(format!("{:?}", m.verdict))
-            .or_default() += 1;
+        *by_verdict.entry(format!("{:?}", m.verdict)).or_default() += 1;
     }
 
     println!("=== LOSS AUDIT: {} content losses ===", losses.len());
