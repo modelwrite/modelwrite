@@ -76,7 +76,28 @@ fn render_model_page(
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    let hash = resolve_hash(state, project, query)?;
+    let hash = match resolve_hash(state, project, query) {
+        Ok(hash) => hash,
+        Err(error) => {
+            // A project with no commits at all has no model to render. The page says what to
+            // do next - with the action right there - instead of a bare 404. This is the
+            // empty state, not an error: a named branch that has no tip while another does
+            // is still a real 404.
+            let branches = state
+                .store
+                .list_branches(project)
+                .map_err(map_store_error)?;
+            if branches.is_empty() {
+                return Ok(crate::ui::create::empty_model_page(
+                    identity,
+                    state.auth.mechanism(),
+                    project,
+                    &[],
+                ));
+            }
+            return Err(error);
+        }
+    };
     let commit = state
         .store
         .commit(project, &hash)
@@ -155,6 +176,12 @@ fn model_markup(
             // The COMMIT, not the branch: viewing a historical model and then opening the
             // branch's current diagram would show a different model than the one being read.
             a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram?commit=" (crate::ui::urlencode(commit.hash.as_str())) } { "View diagram" }
+        }
+        // Adding an element WRITES, so the link is offered only to a caller who may write.
+        @if can_edit {
+            p class="meta" {
+                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+            }
         }
         (structure_section(root, project, &commit.branch, can_edit))
         (requirements_section(root, &ctx))

@@ -13,7 +13,7 @@ use crate::audit::{
 use crate::auth::{AuthConfig, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{
-    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, ImportProvenance, Store,
+    is_lock_refusal, now_epoch, AuditEntry, Commit, CommitGuard, ImportProvenance, Project, Store,
     StoreError,
 };
 
@@ -467,6 +467,31 @@ pub struct CreateProject {
     pub name: String,
 }
 
+/// The ONE implementation of creating a project: build the audit entry and call the store,
+/// shared by the JSON handler and the workbench form so they cannot diverge on the sequence
+/// or the audit record. The permission and project-scope decisions stay in the callers, in
+/// the same order; this core only does what every create must do.
+pub fn create_project_core(
+    store: &dyn Store,
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
+    name: &str,
+) -> Result<Project, StoreError> {
+    let audit = AuditEntry {
+        id: 0,
+        project: name.to_string(),
+        at: now_seconds(),
+        actor: actor.to_string(),
+        mechanism: mechanism.to_string(),
+        authorizer: authorizer.to_string(),
+        action: PROJECT_CREATE.to_string(),
+        subject: name.to_string(),
+        detail: "project created".to_string(),
+    };
+    store.create_project(name, Some(&audit))
+}
+
 pub async fn create_project(
     identity: Identity,
     State(state): State<ApiState>,
@@ -479,21 +504,14 @@ pub async fn create_project(
         return Err(ApiError::forbidden("project not in scope"));
     }
     validate_name("project name", &body.name)?;
-    let audit = AuditEntry {
-        id: 0,
-        project: body.name.clone(),
-        at: now_seconds(),
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
-        action: PROJECT_CREATE.to_string(),
-        subject: body.name.clone(),
-        detail: "project created".to_string(),
-    };
-    let project = state
-        .store
-        .create_project(&body.name, Some(&audit))
-        .map_err(map_store_error)?;
+    let project = create_project_core(
+        state.store.as_ref(),
+        &identity.subject,
+        state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
+        &body.name,
+    )
+    .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "name": project.name, "createdAt": project.created_at })),
@@ -726,6 +744,33 @@ pub struct CreateBranch {
     pub from: String,
 }
 
+/// The ONE implementation of creating a branch: build the audit entry and call the store,
+/// shared by the JSON handler and the workbench form so they cannot diverge on the sequence
+/// or the audit record. The permission and project-scope decisions stay in the callers, in
+/// the same order; this core only does what every branch-create must do.
+pub fn create_branch_core(
+    store: &dyn Store,
+    project: &str,
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
+    name: &str,
+    from: &str,
+) -> Result<(), StoreError> {
+    let audit = AuditEntry {
+        id: 0,
+        project: project.to_string(),
+        at: now_seconds(),
+        actor: actor.to_string(),
+        mechanism: mechanism.to_string(),
+        authorizer: authorizer.to_string(),
+        action: BRANCH_CREATE.to_string(),
+        subject: name.to_string(),
+        detail: format!("from {}", from),
+    };
+    store.create_branch(project, name, from, Some(&audit))
+}
+
 pub async fn create_branch(
     identity: Identity,
     State(state): State<ApiState>,
@@ -739,21 +784,16 @@ pub async fn create_branch(
         return Err(ApiError::forbidden("project not in scope"));
     }
     validate_name("branch name", &body.name)?;
-    let audit = AuditEntry {
-        id: 0,
-        project: project.clone(),
-        at: now_seconds(),
-        actor: identity.subject.clone(),
-        mechanism: state.auth.mechanism().to_string(),
-        authorizer: state.auth.authorizer().unwrap_or("").to_string(),
-        action: BRANCH_CREATE.to_string(),
-        subject: body.name.clone(),
-        detail: format!("from {}", body.from),
-    };
-    state
-        .store
-        .create_branch(&project, &body.name, &body.from, Some(&audit))
-        .map_err(map_store_error)?;
+    create_branch_core(
+        state.store.as_ref(),
+        &project,
+        &identity.subject,
+        state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
+        &body.name,
+        &body.from,
+    )
+    .map_err(map_store_error)?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "name": body.name, "tip": body.from })),

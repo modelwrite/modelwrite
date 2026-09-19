@@ -2361,3 +2361,489 @@ async fn a_viewer_cannot_start_an_import() {
         "the page must name the permission refusal"
     );
 }
+// ---------------------------------------------------------------------------
+// The creation pages: project, model, element and branch.
+
+/// The Location header of a redirect response, so a test can follow where the form landed
+/// the caller and read the commit hash out of the model URL.
+fn location(response: &axum::response::Response) -> Option<String> {
+    response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+#[tokio::test]
+async fn a_project_is_created_from_the_project_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let list = router.clone().oneshot(get("/ui")).await.unwrap();
+    let list_html = body_text(list).await;
+    assert!(
+        list_html.contains("New project"),
+        "the list must offer the create form, got:\n{}",
+        list_html
+    );
+    assert!(
+        list_html.contains("No projects yet. Create one below."),
+        "the empty list must say what to do next, got:\n{}",
+        list_html
+    );
+
+    let created = router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        location(&created).as_deref(),
+        Some("/ui/projects/coffee"),
+        "creating a project must land the caller on it"
+    );
+
+    let list = router.oneshot(get("/ui")).await.unwrap();
+    let html = body_text(list).await;
+    assert!(html.contains("coffee"), "the new project must be listed");
+}
+
+#[tokio::test]
+async fn a_refused_project_create_renders_the_reason_and_a_duplicate_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    let invalid = router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "bad name!")]))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(invalid).await;
+    assert!(
+        html.contains("project name may contain only letters, digits, dot, underscore and hyphen"),
+        "the refusal must name the reason, got:\n{}",
+        html
+    );
+
+    let created = router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+
+    let duplicate = router
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_viewer_is_not_offered_creation_and_cannot_create() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state_with_auth(dir.path(), AuthConfig::fixed(viewer())));
+
+    let list = router.clone().oneshot(get("/ui")).await.unwrap();
+    let html = body_text(list).await;
+    assert!(
+        !html.contains("New project"),
+        "a viewer must not be offered the create form"
+    );
+
+    let created = router
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::FORBIDDEN);
+    let html = body_text(created).await;
+    assert!(
+        html.contains("admin permission required"),
+        "the refusal must name the permission"
+    );
+}
+
+#[tokio::test]
+async fn an_empty_project_offers_to_start_a_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        html.contains("This project has no model yet — start one or import a legacy model."),
+        "the empty state must say what to do next, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Start from empty"),
+        "the start-empty action must be there"
+    );
+    assert!(
+        html.contains("Create from pasted document"),
+        "the paste action must be there"
+    );
+    assert!(
+        html.contains("Import a legacy model"),
+        "the import action must be there"
+    );
+}
+
+#[tokio::test]
+async fn a_model_can_be_started_from_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+
+    let created = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/model/new",
+            &[
+                ("mode", "empty"),
+                ("branch", "main"),
+                ("message", "start the model"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    assert!(
+        location(&created)
+            .unwrap()
+            .starts_with("/ui/projects/coffee/model?commit="),
+        "starting a model must land on it"
+    );
+
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(
+        !html.contains("no model yet"),
+        "the empty state must be gone"
+    );
+    assert!(
+        html.contains("This model has no structure elements."),
+        "an empty model renders, not the empty-state page"
+    );
+
+    let commits = router
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let body = json_body(commits).await;
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body[0]["message"], "start the model");
+    assert_eq!(body[0]["author"], "anonymous");
+}
+
+#[tokio::test]
+async fn a_model_can_be_created_from_a_pasted_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+
+    let pasted = serde_json::json!({
+        "project": "coffee",
+        "stateMachine": { "name": "sm", "regions": [] },
+        "structure": [{ "id": "b1", "name": "Block", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "" }],
+        "requirements": [],
+        "graph": { "nodes": [{ "id": "b1", "kind": "block", "name": "Block" }], "edges": [] }
+    })
+    .to_string();
+
+    let created = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/model/new",
+            &[
+                ("mode", "paste"),
+                ("branch", "main"),
+                ("message", "paste it"),
+                ("okf", pasted.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    let html = body_text(page).await;
+    assert!(
+        html.contains("Block"),
+        "the pasted block must render, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn a_pasted_document_that_is_not_json_is_refused_with_the_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+
+    let refused = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/model/new",
+            &[
+                ("mode", "paste"),
+                ("branch", "main"),
+                ("message", "bad"),
+                ("okf", "this is not json"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+    assert!(
+        html.contains("not valid JSON"),
+        "the refusal must name the parse failure, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn a_requirement_needs_a_req_id_and_a_duplicate_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/model/new",
+            &[("mode", "empty"), ("branch", "main"), ("message", "start")],
+        ))
+        .await
+        .unwrap();
+
+    let no_req_id = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/element/new",
+            &[
+                ("kind", "requirement"),
+                ("id", "r1"),
+                ("name", "Heat"),
+                ("req_id", ""),
+                ("text", "shall heat"),
+                ("branch", "main"),
+                ("message", "add requirement"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(no_req_id.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(no_req_id).await;
+    assert!(
+        html.contains("a requirement needs a reqId"),
+        "the refusal must name the missing reqId"
+    );
+
+    // Add one block successfully, then try to add a second block with the same id.
+    let first = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/element/new",
+            &[
+                ("kind", "block"),
+                ("id", "b1"),
+                ("name", "Heater"),
+                ("req_id", ""),
+                ("text", ""),
+                ("branch", "main"),
+                ("message", "add block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::SEE_OTHER);
+
+    let duplicate = router
+        .oneshot(post_form(
+            "/ui/projects/coffee/element/new",
+            &[
+                ("kind", "block"),
+                ("id", "b1"),
+                ("name", "Other"),
+                ("req_id", ""),
+                ("text", ""),
+                ("branch", "main"),
+                ("message", "duplicate"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(duplicate).await;
+    assert!(
+        html.contains("duplicate element id b1"),
+        "the validator's duplicate-id error must render, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_full_flow_builds_a_model_with_a_block_a_requirement_and_a_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+
+    // 1. Create the project through the UI.
+    let created = router
+        .clone()
+        .oneshot(post_form("/ui", &[("name", "coffee")]))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    assert_eq!(location(&created).as_deref(), Some("/ui/projects/coffee"));
+
+    // 2. Start the first model from empty.
+    let started = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/model/new",
+            &[
+                ("mode", "empty"),
+                ("branch", "main"),
+                ("message", "start the model"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(started.status(), StatusCode::SEE_OTHER);
+
+    // 3. Add a block.
+    let block = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/element/new",
+            &[
+                ("kind", "block"),
+                ("id", "b1"),
+                ("name", "Heater"),
+                ("req_id", ""),
+                ("text", ""),
+                ("branch", "main"),
+                ("message", "add the heater block"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(block.status(), StatusCode::SEE_OTHER);
+
+    // 4. Add a requirement.
+    let requirement = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/element/new",
+            &[
+                ("kind", "requirement"),
+                ("id", "r1"),
+                ("name", "Heat"),
+                ("req_id", "1.1"),
+                ("text", "the machine shall heat"),
+                ("branch", "main"),
+                ("message", "add the heat requirement"),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(requirement.status(), StatusCode::SEE_OTHER);
+
+    // The model page shows both new elements.
+    let page = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/model"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+    assert!(html.contains("Heater"), "the block must render");
+    assert!(
+        html.contains("the machine shall heat"),
+        "the requirement text must render"
+    );
+
+    // The commits are exactly the three writes, oldest first.
+    let commits = router
+        .clone()
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    let body = json_body(commits).await;
+    let list = body.as_array().unwrap();
+    assert_eq!(
+        list.len(),
+        3,
+        "three commits must exist, got {}",
+        list.len()
+    );
+    let messages: Vec<&str> = list
+        .iter()
+        .map(|c| c["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "start the model",
+            "add the heater block",
+            "add the heat requirement"
+        ]
+    );
+
+    // 5. Create a branch from main's tip.
+    let tip = list[2]["hash"].as_str().unwrap().to_string();
+    let branched = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/branch",
+            &[("name", "feature"), ("from", tip.as_str())],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::SEE_OTHER);
+
+    let project_page = router.oneshot(get("/ui/projects/coffee")).await.unwrap();
+    let project_html = body_text(project_page).await;
+    assert!(
+        project_html.contains("feature"),
+        "the new branch must be listed, got:\n{}",
+        project_html
+    );
+}

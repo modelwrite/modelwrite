@@ -4,12 +4,16 @@
 //! permission and project-scope checks as the JSON handlers, so the workbench can never
 //! be a second implementation with weaker rules.
 
-use axum::extract::{Path, State};
+use std::collections::HashMap;
+
+use axum::extract::{Form, Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Redirect, Response};
 use maud::{html, Markup};
 
-use crate::api::{map_store_error, ApiState};
+use crate::api::{
+    create_branch_core, create_project_core, map_store_error, validate_name, ApiState,
+};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{Commit, Store};
@@ -36,7 +40,7 @@ pub async fn project_list(State(state): State<ApiState>, headers: HeaderMap) -> 
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
-    match render_project_list(&state, &identity) {
+    match render_project_list(&state, &identity, None) {
         Ok(page) => layout::html_response(StatusCode::OK, page),
         Err(error) => layout::error_page(
             error.status,
@@ -47,7 +51,88 @@ pub async fn project_list(State(state): State<ApiState>, headers: HeaderMap) -> 
     }
 }
 
-fn render_project_list(state: &ApiState, identity: &Identity) -> Result<Markup, ApiError> {
+/// `POST /ui` - create a project and land the caller on it. The SAME permission, scope and
+/// validation decisions as the JSON handler, through the SAME shared core, so the page and
+/// the endpoint cannot disagree about what a create did.
+pub async fn create_project(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Form(form): Form<HashMap<String, String>>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    // Permissions first, in the same order as the JSON handler.
+    if !identity.may(Permission::Administer) {
+        return layout::error_page(
+            StatusCode::FORBIDDEN,
+            Some(&identity.subject),
+            mechanism,
+            "admin permission required",
+        );
+    }
+    let name = form.get("name").cloned().unwrap_or_default();
+    if !identity.may_reach(&name) {
+        return layout::error_page(
+            StatusCode::FORBIDDEN,
+            Some(&identity.subject),
+            mechanism,
+            "project not in scope",
+        );
+    }
+    if let Err(error) = validate_name("project name", &name) {
+        return render_project_list_refused(
+            &state,
+            &identity,
+            mechanism,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &error.message,
+        );
+    }
+    match create_project_core(
+        state.store.as_ref(),
+        &identity.subject,
+        mechanism,
+        state.auth.authorizer().unwrap_or(""),
+        &name,
+    ) {
+        Ok(_) => {
+            Redirect::to(&format!("/ui/projects/{}", crate::ui::urlencode(&name))).into_response()
+        }
+        Err(error) => {
+            let api = map_store_error(error);
+            render_project_list_refused(&state, &identity, mechanism, api.status, &api.message)
+        }
+    }
+}
+
+/// Re-render the project list with a refusal as information: the caller keeps the page and
+/// sees what was wrong, rather than a bare error page.
+fn render_project_list_refused(
+    state: &ApiState,
+    identity: &Identity,
+    mechanism: &str,
+    status: StatusCode,
+    notice: &str,
+) -> Response {
+    match render_project_list(state, identity, Some(notice)) {
+        Ok(page) => layout::html_response(status, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+fn render_project_list(
+    state: &ApiState,
+    identity: &Identity,
+    notice: Option<&str>,
+) -> Result<Markup, ApiError> {
     if !identity.may(Permission::Read) {
         return Err(ApiError::forbidden("read permission required"));
     }
@@ -71,14 +156,30 @@ fn render_project_list(state: &ApiState, identity: &Identity) -> Result<Markup, 
             latest,
         });
     }
-    Ok(project_list_page(identity, state.auth.mechanism(), &rows))
+    Ok(project_list_page(
+        identity,
+        state.auth.mechanism(),
+        &rows,
+        notice,
+    ))
 }
 
-fn project_list_page(identity: &Identity, mechanism: &str, rows: &[ProjectRow]) -> Markup {
+fn project_list_page(
+    identity: &Identity,
+    mechanism: &str,
+    rows: &[ProjectRow],
+    notice: Option<&str>,
+) -> Markup {
     let body = html! {
         h1 { "Projects" }
+        @if let Some(notice) = notice {
+            section class="form-errors" {
+                h2 { "The project was not created" }
+                p { (notice) }
+            }
+        }
         @if rows.is_empty() {
-            p { "No projects yet. A project created through the API appears here." }
+            p { "No projects yet. Create one below." }
         } @else {
             ul class="projects" {
                 @for row in rows {
@@ -96,6 +197,7 @@ fn project_list_page(identity: &Identity, mechanism: &str, rows: &[ProjectRow]) 
                 }
             }
         }
+        (create_project_form(identity))
     };
     layout::shell(
         "modelwrite — projects",
@@ -104,6 +206,26 @@ fn project_list_page(identity: &Identity, mechanism: &str, rows: &[ProjectRow]) 
         mechanism,
         body,
     )
+}
+
+/// The create-project form, offered only to a caller who may administer: a form the caller
+/// cannot submit is a trap, and the refusal is still enforced server-side for a direct request.
+fn create_project_form(identity: &Identity) -> Markup {
+    if !identity.may(Permission::Administer) {
+        return Markup::default();
+    }
+    html! {
+        section class="create-project" {
+            h2 { "New project" }
+            form method="post" action="/ui" class="create-form" {
+                p {
+                    label for="project-name" { "Project name" }
+                    input type="text" id="project-name" name="name" required;
+                }
+                button type="submit" { "Create project" }
+            }
+        }
+    }
 }
 
 /// `GET /ui/projects/:project` - the project's branches, each with its tip and the tip's
@@ -118,7 +240,7 @@ pub async fn project_page(
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
-    match render_project_page(&state, &identity, &project) {
+    match render_project_page(&state, &identity, &project, None) {
         Ok(page) => layout::html_response(StatusCode::OK, page),
         Err(error) => layout::error_page(
             error.status,
@@ -133,6 +255,7 @@ fn render_project_page(
     state: &ApiState,
     identity: &Identity,
     project: &str,
+    notice: Option<&str>,
 ) -> Result<Markup, ApiError> {
     if !identity.may(Permission::Read) {
         return Err(ApiError::forbidden("read permission required"));
@@ -162,6 +285,7 @@ fn render_project_page(
         state.auth.mechanism(),
         project,
         &rows,
+        notice,
     ))
 }
 
@@ -170,12 +294,24 @@ fn branch_list_page(
     mechanism: &str,
     project: &str,
     rows: &[BranchRow],
+    notice: Option<&str>,
 ) -> Markup {
     let title = format!("modelwrite — {}", project);
     let body = html! {
         h1 { "Branches" }
+        @if let Some(notice) = notice {
+            section class="form-errors" {
+                h2 { "The branch was not created" }
+                p { (notice) }
+            }
+        }
         @if rows.is_empty() {
             p { "This project has no branches yet." }
+            @if identity.may(Permission::Write) {
+                p {
+                    a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model" } { "Start a model" }
+                }
+            }
         } @else {
             ul class="branches" {
                 @for row in rows {
@@ -225,6 +361,11 @@ fn branch_list_page(
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/import" } { "Import a legacy model" }
             }
         }
+        // Creating a branch WRITES and needs an existing commit to start from, so the form is
+        // offered only to a caller who may write AND only once there is a commit.
+        @if identity.may(Permission::Write) {
+            (create_branch_form(project, rows))
+        }
         // Merging WRITES, so the form is offered only to a caller who may perform it. A form
         // the caller cannot submit is a trap: it invites an action, then refuses it after the
         // work is typed. The refusal is still enforced server-side for a direct request.
@@ -240,6 +381,123 @@ fn branch_list_page(
         mechanism,
         body,
     )
+}
+
+/// The create-branch form. A branch starts from an existing commit, so the form offers each
+/// branch's tip as a choice; it renders nothing when there is no commit to branch from.
+fn create_branch_form(project: &str, rows: &[BranchRow]) -> Markup {
+    if rows.is_empty() {
+        return Markup::default();
+    }
+    html! {
+        section class="create-branch" {
+            h2 { "New branch" }
+            form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/branch" } class="create-form" {
+                p {
+                    label for="branch-name" { "Branch name" }
+                    input type="text" id="branch-name" name="name" required;
+                }
+                p {
+                    label for="branch-from" { "Branch from" }
+                    select id="branch-from" name="from" {
+                        @for row in rows {
+                            option value=(row.tip.as_str()) { (row.name.as_str()) " @ " (short_hash(&row.tip)) }
+                        }
+                    }
+                }
+                button type="submit" { "Create branch" }
+            }
+        }
+    }
+}
+
+/// `POST /ui/projects/:project/branch` - create a branch and land the caller back on the
+/// project page. The SAME permission, scope and validation decisions as the JSON handler,
+/// through the SAME shared core.
+pub async fn create_branch(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Form(form): Form<HashMap<String, String>>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    // Permissions first, in the same order as the JSON handler.
+    if !identity.may(Permission::Write) {
+        return layout::error_page(
+            StatusCode::FORBIDDEN,
+            Some(&identity.subject),
+            mechanism,
+            "write permission required",
+        );
+    }
+    if !identity.may_reach(&project) {
+        return layout::error_page(
+            StatusCode::FORBIDDEN,
+            Some(&identity.subject),
+            mechanism,
+            "project not in scope",
+        );
+    }
+    let name = form.get("name").cloned().unwrap_or_default();
+    let from = form.get("from").cloned().unwrap_or_default();
+    if let Err(error) = validate_name("branch name", &name) {
+        return render_project_page_refused(
+            &state,
+            &identity,
+            mechanism,
+            &project,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &error.message,
+        );
+    }
+    match create_branch_core(
+        state.store.as_ref(),
+        &project,
+        &identity.subject,
+        mechanism,
+        state.auth.authorizer().unwrap_or(""),
+        &name,
+        &from,
+    ) {
+        Ok(()) => Redirect::to(&format!("/ui/projects/{}", crate::ui::urlencode(&project)))
+            .into_response(),
+        Err(error) => {
+            let api = map_store_error(error);
+            render_project_page_refused(
+                &state,
+                &identity,
+                mechanism,
+                &project,
+                api.status,
+                &api.message,
+            )
+        }
+    }
+}
+
+/// Re-render the project page with a refusal as information, so a refused branch create keeps
+/// the caller on the page and says what was wrong rather than showing a bare error page.
+fn render_project_page_refused(
+    state: &ApiState,
+    identity: &Identity,
+    mechanism: &str,
+    project: &str,
+    status: StatusCode,
+    notice: &str,
+) -> Response {
+    match render_project_page(state, identity, project, Some(notice)) {
+        Ok(page) => layout::html_response(status, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
 }
 
 /// The latest commit in a project: the most recently created commit among the branch
