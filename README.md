@@ -7,6 +7,13 @@ into portable, provable data — the Open Knowledge Format (OKF) — and
 automates the skilled work of building and reviewing models with grounded
 AI.
 
+## Documentation
+
+The user guide lives in [docs/guide/](docs/guide/README.md). It covers what
+modelwrite is and is not, the mental model (concepts), the click paths (tasks),
+the MCP contract for AI agents (agents), the honest FAQ, the standing limits, and
+troubleshooting. Start at docs/guide/README.md.
+
 ## Website
 
 The project website is hand-written HTML and CSS in `website/` — no build
