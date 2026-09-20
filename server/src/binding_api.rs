@@ -14,9 +14,9 @@
 //! 4. Provenance is durable and atomic: the commit and its link to the source artifact are
 //!    written in one transaction, so a committed import can never be unlinked from its source.
 
-use axum::extract::{Path, State};
+use axum::extract::{Multipart, Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -30,7 +30,7 @@ use crate::api::{
 use crate::audit::{IMPORT_ACCEPT, IMPORT_REFUSED, PROPOSAL_ACCEPT};
 use crate::auth::{Identity, Permission};
 use crate::binding_registry;
-use crate::error::ApiError;
+use crate::error::{ApiError, BodyTooLarge};
 use crate::store::{now_seconds, AuditEntry, Commit, ImportProvenance, ProposalAcceptance, Store};
 
 #[derive(Deserialize)]
@@ -432,8 +432,9 @@ pub async fn import_artifact(
     identity: Identity,
     State(state): State<ApiState>,
     Path(project): Path<String>,
-    Json(body): Json<ImportRequest>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
+    headers: HeaderMap,
+    body: Result<Json<ImportRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
     // Permission and scope before anything else, exactly as every other write path.
     if !identity.may(Permission::Write) {
         return Err(ApiError::forbidden("write permission required"));
@@ -441,6 +442,19 @@ pub async fn import_artifact(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
+    // A body the limit refused becomes the SAME useful 413 the streaming endpoint produces -
+    // naming the configured limit and (when declared) the received size - rather than axum's
+    // bare "length limit exceeded".
+    let body = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return Ok(json_rejection_to_response(
+                rejection,
+                state.max_body_bytes,
+                &headers,
+            ));
+        }
+    };
     let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &body.branch)?;
@@ -477,7 +491,8 @@ pub async fn import_artifact(
                 "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
                 "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
             })),
-        )),
+        )
+            .into_response()),
         ImportOutcome::Blocking { unaccepted, .. } => {
             let blocking_json: Vec<Value> = unaccepted
                 .iter()
@@ -489,7 +504,266 @@ pub async fn import_artifact(
                     "error": "the import has blocking losses that must be accepted by name",
                     "blocking": blocking_json
                 })),
-            ))
+            )
+                .into_response())
+        }
+    }
+}
+
+/// The declared `Content-Length`, if present and numeric.
+fn content_length(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get(header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()
+}
+
+/// A request whose declared `Content-Length` already exceeds the configured limit. The
+/// header is checked before a single byte is staged or buffered, so a caller learns the
+/// exact size they attempted to send.
+fn content_length_over_limit(headers: &HeaderMap, limit: u64) -> Option<BodyTooLarge> {
+    let content_length = content_length(headers)?;
+    (content_length > limit).then_some(BodyTooLarge {
+        limit,
+        received: Some(content_length),
+    })
+}
+
+/// Turn a JSON body rejection into a response. The length-limit case becomes the SAME useful
+/// 413 the streaming endpoint produces - configured limit plus, when declared, the received
+/// size - while every other rejection (bad syntax, missing content type) keeps its own
+/// response.
+fn json_rejection_to_response(
+    rejection: axum::extract::rejection::JsonRejection,
+    limit: u64,
+    headers: &HeaderMap,
+) -> Response {
+    use axum::extract::rejection::{BytesRejection, FailedToBufferBody, JsonRejection};
+    match rejection {
+        JsonRejection::BytesRejection(BytesRejection::FailedToBufferBody(
+            FailedToBufferBody::LengthLimitError(_),
+        )) => BodyTooLarge {
+            limit,
+            received: content_length(headers),
+        }
+        .into_response(),
+        other => other.into_response(),
+    }
+}
+
+/// Map a multipart parsing failure to an API error, keeping the 413 status for a body that
+/// exceeded the limit rather than folding it into a generic 400.
+fn multipart_error(error: &axum::extract::multipart::MultipartError) -> ApiError {
+    ApiError {
+        status: error.status(),
+        message: format!("could not read the import upload: {}", error.body_text()),
+    }
+}
+
+/// POST /projects/:project/import/stream - the STREAMING artifact path.
+///
+/// The artifact arrives as the `artifact` FILE field of a `multipart/form-data` body and is
+/// STREAMED into the content-addressed blob store: the bytes are staged to a file in bounded
+/// chunks while the limit is enforced, then moved into the blob store under their sha256 by
+/// [`crate::store::Store::put_blob_file`] BEFORE import is attempted. Peak memory never
+/// scales with the artifact size on this path (the XMI is read back into memory only for the
+/// binding to parse, which a tree parser requires). The small metadata fields - `binding`,
+/// `branch`, `message`, `author`, `holder`, repeated `acceptLosses` - ride the same form.
+///
+/// This is the same import as the JSON endpoint - same permission, scope, author, actor and
+/// acceptance decisions, same [`import_core`] - but it never buffers the artifact as a
+/// base64 JSON string, which is what lets a 36 MB (or 300 MB) vendor export arrive without
+/// first ballooning through a JSON decoder.
+pub async fn import_artifact_stream(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path(project): Path<String>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    use std::io::Write as _;
+
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+
+    // Refuse a declared oversize body up front with the exact size, before staging anything.
+    if let Some(too_large) = content_length_over_limit(&headers, state.max_body_bytes) {
+        return Ok(too_large.into_response());
+    }
+
+    let mut binding = String::new();
+    let mut branch = String::new();
+    let mut message = String::new();
+    let mut author = String::new();
+    let mut holder = String::new();
+    let mut accept_losses: Vec<String> = Vec::new();
+
+    // The artifact is staged to a file, not a buffer: a content address is only known after
+    // the last byte, so the bytes must land somewhere durable before they can be placed
+    // under their hash. The hash itself is computed incrementally inside the store.
+    let mut staged = tempfile::NamedTempFile::new()
+        .map_err(|e| ApiError::internal(format!("could not stage the artifact: {}", e)))?;
+    let mut received: u64 = 0;
+    let mut got_artifact = false;
+
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(error) => {
+                if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    return Ok(BodyTooLarge {
+                        limit: state.max_body_bytes,
+                        received: Some(received),
+                    }
+                    .into_response());
+                }
+                return Err(multipart_error(&error));
+            }
+        };
+        let name = field.name().unwrap_or_default().to_string();
+        match name.as_str() {
+            "artifact" => {
+                got_artifact = true;
+                let mut field = field;
+                loop {
+                    let chunk = match field.chunk().await {
+                        Ok(Some(chunk)) => chunk,
+                        Ok(None) => break,
+                        Err(error) => {
+                            if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                                return Ok(BodyTooLarge {
+                                    limit: state.max_body_bytes,
+                                    received: Some(received),
+                                }
+                                .into_response());
+                            }
+                            return Err(multipart_error(&error));
+                        }
+                    };
+                    received = received.saturating_add(chunk.len() as u64);
+                    if received > state.max_body_bytes {
+                        return Ok(BodyTooLarge {
+                            limit: state.max_body_bytes,
+                            received: Some(received),
+                        }
+                        .into_response());
+                    }
+                    staged.write_all(&chunk).map_err(|e| {
+                        ApiError::internal(format!("could not stage the artifact: {}", e))
+                    })?;
+                }
+            }
+            other => {
+                let value = field.text().await.map_err(|e| multipart_error(&e))?;
+                match other {
+                    "binding" => binding = value,
+                    "branch" => branch = value,
+                    "message" => message = value,
+                    "author" => author = value,
+                    "holder" => holder = value,
+                    "acceptLosses" => accept_losses.push(value),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if !got_artifact {
+        return Err(ApiError::bad_request(
+            "the source artifact must be supplied as the `artifact` file field",
+        ));
+    }
+    if binding.is_empty() {
+        return Err(ApiError::bad_request("a binding must be selected"));
+    }
+    if branch.is_empty() {
+        branch = "main".to_string();
+    }
+    validate_name("branch name", &branch)?;
+    if message.trim().is_empty() {
+        return Err(ApiError::bad_request("commit message must not be empty"));
+    }
+    let author = resolve_author(&state.auth, &identity, &author)?;
+    let holder_opt = if holder.is_empty() {
+        None
+    } else {
+        Some(holder.as_str())
+    };
+    verify_actor(&state.auth, &identity, holder_opt)?;
+
+    // Rule 1: retain the artifact byte-for-byte, content-addressed, BEFORE import is even
+    // attempted. The staged file is moved into the blob store under its hash now; the
+    // bytes are read back only to hand them to the binding, which needs the whole document.
+    let temp_path = staged.into_temp_path();
+    let artifact_hash = state
+        .store
+        .put_blob_file(temp_path.as_ref())
+        .map_err(map_store_error)?;
+    let artifact_bytes = state
+        .store
+        .blob(&artifact_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| {
+            eprintln!(
+                "missing blob {} immediately after storing it",
+                artifact_hash
+            );
+            ApiError::internal("the retained artifact could not be read back")
+        })?;
+
+    match import_core(
+        state.store.as_ref(),
+        &project,
+        &ImportCore {
+            binding: &binding,
+            branch: &branch,
+            author: &author,
+            message: &message,
+            artifact: &artifact_bytes,
+            accept_losses: &accept_losses,
+            holder: holder_opt,
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
+            acceptance: None,
+        },
+    )? {
+        ImportOutcome::Committed {
+            commit,
+            loss_report,
+            fidelity,
+            ..
+        } => Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "commit": commit_json(&commit),
+                "artifactHash": artifact_hash,
+                "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
+                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+            })),
+        )
+            .into_response()),
+        ImportOutcome::Blocking { unaccepted, .. } => {
+            let blocking_json: Vec<Value> = unaccepted
+                .iter()
+                .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                .collect();
+            Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "the import has blocking losses that must be accepted by name",
+                    "artifactHash": artifact_hash,
+                    "blocking": blocking_json
+                })),
+            )
+                .into_response())
         }
     }
 }

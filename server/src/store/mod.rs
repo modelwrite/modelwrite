@@ -367,6 +367,37 @@ pub fn blob_hash(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Content address of a file, computed by streaming it in bounded chunks so the hash of a
+/// 500 MB artifact does not require a 500 MB buffer. This is the incremental half of the
+/// streaming store: the upload is written to a temporary file and its hash computed here,
+/// chunk by chunk, before [`Store::put_blob_file`] moves the bytes into the blob store.
+pub fn file_hash(path: &std::path::Path) -> Result<String, StoreError> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        StoreError::Backend(format!(
+            "could not open staged artifact {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buf).map_err(|e| {
+            StoreError::Backend(format!(
+                "could not read staged artifact {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 /// Content address of a commit: sha256 over a canonical JSON payload of everything
 /// that defines it except time. Two identical commits made at different moments hash
 /// the same, which is what makes a commit reproducible and its evidence citable.
@@ -498,6 +529,18 @@ pub trait Store: Send + Sync {
     fn list_projects(&self) -> Result<Vec<Project>, StoreError>;
     fn put_blob(&self, bytes: &[u8]) -> Result<String, StoreError>;
     fn blob(&self, hash: &str) -> Result<Option<Vec<u8>>, StoreError>;
+
+    /// Persist a fully-written temporary file as a content-addressed blob, streaming it
+    /// into the backend in bounded chunks so peak memory does not scale with the artifact
+    /// size. The file is removed on success and on error; the caller owns the temporary
+    /// file. Returns the sha256 content address the bytes were stored under.
+    ///
+    /// This is the streaming half of the store, paired with [`file_hash`]: the upload is
+    /// staged to a temporary file (bounded memory) and this moves it into the blob store
+    /// under its hash. Content addressing requires the key before placement, which is why
+    /// the bytes land on disk first and under their hash second - the two steps are the
+    /// price of never holding a 500 MB artifact as one in-memory buffer.
+    fn put_blob_file(&self, path: &std::path::Path) -> Result<String, StoreError>;
 
     /// Commit a model onto a branch atomically: the tip is read, the parents and the
     /// commit hash are derived from it, and the commit row and the branch tip are written

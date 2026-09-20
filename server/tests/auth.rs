@@ -42,6 +42,7 @@ fn router(auth: AuthConfig) -> Router {
             store: Arc::new(store),
             evidence_dir: dir.path().to_path_buf(),
             auth,
+            max_body_bytes: server::DEFAULT_MAX_BODY_BYTES,
         })
 }
 

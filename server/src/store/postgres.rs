@@ -432,6 +432,30 @@ impl Store for PostgresStore {
         Ok(hash)
     }
 
+    fn put_blob_file(&self, path: &std::path::Path) -> Result<String, StoreError> {
+        // The hash is still computed incrementally (bounded memory), but PostgreSQL's
+        // BYTEA insert has no zero-copy streaming write in this setup: the staged file is
+        // read into memory for the single INSERT and released immediately. Peak memory for
+        // the PostgreSQL backend is therefore one artifact's worth at insert time, not
+        // during receipt; the SQLite backend streams the file into its blob column without
+        // that buffer. This asymmetry is recorded, not hidden.
+        let hash = super::file_hash(path)?;
+        if self.blob(&hash)?.is_some() {
+            let _ = std::fs::remove_file(path);
+            return Ok(hash);
+        }
+        let bytes = std::fs::read(path).map_err(|e| {
+            StoreError::Backend(format!(
+                "could not read staged artifact {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        let stored = self.put_blob(&bytes)?;
+        let _ = std::fs::remove_file(path);
+        Ok(stored)
+    }
+
     fn blob(&self, hash: &str) -> Result<Option<Vec<u8>>, StoreError> {
         self.with_client(|client| {
             match client

@@ -82,3 +82,37 @@ impl IntoResponse for ApiError {
         (self.status, Json(json!({ "error": self.message }))).into_response()
     }
 }
+
+/// A request body larger than the configured limit. This is its own response type rather
+/// than an `ApiError` because a refusal must NAME the configured limit and the size that
+/// was received, so an operator (or a caller) can tell "raise the limit" from "something
+/// is wrong with the upload". `received` is the exact size when the request declared a
+/// `Content-Length` and otherwise the number of bytes actually read before the refusal.
+#[derive(Debug)]
+pub struct BodyTooLarge {
+    pub limit: u64,
+    pub received: Option<u64>,
+}
+
+impl IntoResponse for BodyTooLarge {
+    fn into_response(self) -> Response {
+        let message = match self.received {
+            Some(received) => format!(
+                "request body of {} bytes exceeds the configured limit of {} bytes",
+                received, self.limit
+            ),
+            None => format!(
+                "request body exceeds the configured limit of {} bytes",
+                self.limit
+            ),
+        };
+        let mut body = json!({
+            "error": message,
+            "limit": self.limit,
+        });
+        if let Some(received) = self.received {
+            body["received"] = json!(received);
+        }
+        (StatusCode::PAYLOAD_TOO_LARGE, Json(body)).into_response()
+    }
+}

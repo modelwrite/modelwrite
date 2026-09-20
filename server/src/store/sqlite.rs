@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
 
 use super::{
     now_epoch, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun, ImportProvenance,
@@ -416,6 +416,92 @@ impl Store for SqliteStore {
                 params![hash, bytes],
             )
         })?;
+        Ok(hash)
+    }
+
+    fn put_blob_file(&self, path: &Path) -> Result<String, StoreError> {
+        use std::io::Read;
+        let hash = super::file_hash(path)?;
+        let size = std::fs::metadata(path)
+            .map_err(|e| {
+                StoreError::Backend(format!(
+                    "could not stat staged artifact {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?
+            .len();
+
+        // Hold the connection for the whole write: the blob must be written positionally
+        // through a handle that borrows the connection, and this store is a single
+        // connection behind a mutex (the same blocking discipline every other write here
+        // already uses). `zeroblob(size)` reserves the exact bytes; `blob_open` then lets
+        // us overwrite them in bounded chunks, so no step holds the artifact in memory.
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StoreError::Backend("connection lock poisoned".to_string()))?;
+        let c = &*connection;
+
+        let inserted = c
+            .execute(
+                "INSERT OR IGNORE INTO blobs (hash, bytes) VALUES (?1, zeroblob(?2))",
+                params![hash, size as i64],
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if inserted == 0 {
+            // The same bytes were already retained under this address; content addressing
+            // makes a re-upload a no-op and the staged file redundant.
+            let _ = std::fs::remove_file(path);
+            return Ok(hash);
+        }
+
+        let write_result: Result<(), StoreError> = (|| {
+            let rowid: i64 = c
+                .query_row(
+                    "SELECT rowid FROM blobs WHERE hash = ?1",
+                    params![hash],
+                    |row| row.get(0),
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut blob = c
+                .blob_open(DatabaseName::Main, "blobs", "bytes", rowid, false)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut file = std::fs::File::open(path).map_err(|e| {
+                StoreError::Backend(format!(
+                    "could not open staged artifact {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            let mut buf = [0u8; 64 * 1024];
+            let mut written: usize = 0;
+            loop {
+                let read = file.read(&mut buf).map_err(|e| {
+                    StoreError::Backend(format!(
+                        "could not read staged artifact {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
+                if read == 0 {
+                    break;
+                }
+                blob.write_all_at(&buf[..read], written)
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                written += read;
+            }
+            Ok(())
+        })();
+
+        if let Err(error) = write_result {
+            // A partial write must not leave a blob that claims to be these bytes. We
+            // inserted the row just above, so removing it on failure keeps the store honest.
+            let _ = c.execute("DELETE FROM blobs WHERE hash = ?1", params![hash]);
+            let _ = std::fs::remove_file(path);
+            return Err(error);
+        }
+        let _ = std::fs::remove_file(path);
         Ok(hash)
     }
 

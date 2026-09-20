@@ -17,30 +17,45 @@ pub mod proposal_api;
 pub mod store;
 pub mod ui;
 
-pub use error::ApiError;
+pub use error::{ApiError, BodyTooLarge};
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
+
+/// The largest request body the service will accept, unless `MW_MAX_BODY_BYTES` says
+/// otherwise.
+///
+/// 512 MiB, deliberately: real MBSE models run to hundreds of megabytes (the Open-MBEE
+/// Thirty Meter Telescope is a 36 MB XMI and is SMALL by production standards), so a
+/// two-megabyte default turns a routine vendor export into a failure. 512 MiB accepts the
+/// models a migration actually sees while staying under SQLite's 1 GB single-value ceiling
+/// with headroom, and it bounds a single upload's on-disk staging so a run of concurrent
+/// imports cannot exhaust the host. A larger model is a configuration decision, not a code
+/// change: set `MW_MAX_BODY_BYTES`.
+pub const DEFAULT_MAX_BODY_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Read `MW_MAX_BODY_BYTES` from the environment, falling back to
+/// [`DEFAULT_MAX_BODY_BYTES`] when it is unset or does not parse to a positive number. A
+/// value that is not a positive integer is a configuration error, but refusing to start on
+/// it would make a typo in one optional knob take the service down; the honest fallback is
+/// the documented default, and the operator can see the effective value on the import page.
+pub fn max_body_bytes_from_env() -> u64 {
+    std::env::var("MW_MAX_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|bytes| *bytes > 0)
+        .unwrap_or(DEFAULT_MAX_BODY_BYTES)
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn store::Store>,
     pub evidence_dir: std::path::PathBuf,
     pub auth: auth::AuthConfig,
-}
-
-impl AppState {
-    fn api(&self) -> api::ApiState {
-        api::ApiState {
-            store: self.store.clone(),
-            evidence_dir: self.evidence_dir.clone(),
-            auth: self.auth.clone(),
-        }
-    }
 }
 
 /// The complete route table. `/health` and `/version` are public liveness/information
@@ -55,7 +70,22 @@ impl AppState {
 /// ways to RESOLVE an identity is a deliberate trade for rendering the 401 as HTML; two
 /// ways to DECIDE what it may do would not be, which is why the decisions are shared.
 pub fn app(state: AppState) -> Router {
-    let api_state = state.api();
+    app_with_limit(state, max_body_bytes_from_env())
+}
+
+/// The complete route table at an explicit body limit. Tests drive the refusal through
+/// this entry point with a small limit; `app` uses the configured (or default) limit. The
+/// limit is applied as [`DefaultBodyLimit`] so EVERY body-consuming route - the JSON
+/// extractors and the streaming multipart path alike - is capped, and it is carried on
+/// [`api::ApiState`] so the import page can state it and the streaming handler can refuse
+/// with the exact number.
+pub fn app_with_limit(state: AppState, max_body_bytes: u64) -> Router {
+    let api_state = api::ApiState {
+        store: state.store,
+        evidence_dir: state.evidence_dir,
+        auth: state.auth,
+        max_body_bytes,
+    };
     Router::new()
         .route("/health", get(health))
         .route("/version", get(version))
@@ -134,6 +164,10 @@ pub fn app(state: AppState) -> Router {
             "/ui/projects/:project/import",
             get(ui::import::import_page).post(ui::import::submit_import),
         )
+        .route(
+            "/ui/projects/:project/import/upload",
+            post(ui::import::submit_import_upload),
+        )
         .route("/ui/projects/:project/gate", get(ui::gate::gate_list))
         .route("/ui/projects/:project/checks", get(ui::gate::gate_list))
         .route(
@@ -200,6 +234,10 @@ pub fn app(state: AppState) -> Router {
             post(binding_api::import_artifact),
         )
         .route(
+            "/projects/:project/import/stream",
+            post(binding_api::import_artifact_stream),
+        )
+        .route(
             "/projects/:project/import/:artifactHash/report",
             get(binding_api::import_report),
         )
@@ -244,6 +282,7 @@ pub fn app(state: AppState) -> Router {
             "/projects/:project/locks/release",
             post(locks_api::release_locks),
         )
+        .layer(DefaultBodyLimit::max(max_body_bytes as usize))
         .with_state(api_state)
 }
 

@@ -22,6 +22,11 @@ pub struct ApiState {
     pub store: Arc<dyn Store>,
     pub evidence_dir: std::path::PathBuf,
     pub auth: AuthConfig,
+    /// The configured request-body limit, in bytes (`MW_MAX_BODY_BYTES`, default
+    /// [`crate::DEFAULT_MAX_BODY_BYTES`]). Carried on the state so the import page can
+    /// state it before a user uploads, and so the streaming import can refuse with the
+    /// exact number rather than a bare 413.
+    pub max_body_bytes: u64,
 }
 
 /// A name that is safe as a URL segment: letters, digits, dot, underscore and hyphen,

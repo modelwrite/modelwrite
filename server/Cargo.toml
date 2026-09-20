@@ -41,7 +41,7 @@ mw-agent = { path = "../engine/agent", version = "0.2.0" }
 mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
 axum = { workspace = true, features = ["multipart"] }
 tokio.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["blob"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
