@@ -44,7 +44,7 @@ docker build --cpuset-cpus=0-3 -f deploy/Dockerfile -t modelwrite/modelwrite:idc
 
 The trial is OPEN by decision (2026-09-21): `MW_AUTH_TOKEN` is blanked and
 `MW_ALLOW_OPEN=yes`, so every request is accepted as an anonymous admin and the UI works
-in a plain browser with no header. This is deliberate; it is bounded by the nightly reset
+in a plain browser with no header. This is deliberate; it is bounded by the hourly reset
 below, which is now load-bearing.
 
 - To re-enable auth: restore the `MW_AUTH_TOKEN` line and remove `MW_ALLOW_OPEN=yes` in
@@ -87,25 +87,27 @@ Verified from the workstation: `https://trial.modelwrite.org/health` returns
 `{"authMode":"open","status":"ok"}` and `/projects` returns the six models with no token,
 proving it is idc-1 (the local 8080 trial was left unchanged).
 
-## Nightly reset (sandbox)
+## Hourly reset (sandbox)
 
-The trial is a sandbox: visitors may create, edit or wreck anything, and every night it
-returns to the seeded baseline.
+The trial is a sandbox: visitors may create, edit or wreck anything, and every hour it
+returns to the seeded baseline. (The reset was tightened from nightly 18:00 UTC to hourly
+when the trial was opened, so a stranger's mess lasts minutes, not a day.)
 
-- Timer: `modelwrite-trial-reset.timer`, `OnCalendar=*-*-* 18:00:00` (18:00 UTC =
-  04:00 Sydney, outside the vLLM fleet's working hours), `Persistent=true`.
+- Timer: `modelwrite-trial-reset.timer`, `OnCalendar=hourly`, `Persistent=true`. The reset
+  is CPU-trivial (no build) and only briefly restarts modelwrite; it never touches the
+  live model fleet.
 - Reset: `/opt/modelwrite/deploy/reset-trial.sh`, run by
   `modelwrite-trial-reset.service` (Type=oneshot). It:
-  1. stops `modelwrite.service`;
-  2. backs up the outgoing DB to `/opt/modelwrite/backups/<date>.db` (keeps the last 7);
-  3. rebuilds a FRESH database by replaying `/opt/modelwrite/seed/manifest.json` into a
-     throwaway seed container (`seed-from-manifest.py`), verifying every reproduced
-     commit hash against the captured `expectedHash`;
-  4. verifies the six models are present and that cafe-stand's four references resolve;
-  5. swaps the fresh DB in, restarts, and logs. On any failure the service is restarted
-     on the last good database (never left down).
-- Safe to run twice (idempotent). Backups are date-only, so a same-day re-run overwrites
-  that day's backup.
+  1. builds a FRESH database off to the side by replaying `/opt/modelwrite/seed/manifest.json`
+     into a throwaway seed container (`seed-from-manifest.py`), verifying every reproduced
+     commit hash against the captured `expectedHash` - the live service keeps serving;
+  2. verifies the six models are present and that cafe-stand's four references resolve;
+  3. stops `modelwrite.service` only at the very end, backs up the outgoing DB to
+     `/opt/modelwrite/backups/<date>T<time>.db` (keeps the last 48), swaps the fresh DB in,
+     restarts, and logs. On any failure the service is restarted on the last good database
+     (never left down).
+- Safe to run twice (idempotent). Backups are timestamped (date+time), so every hourly
+  reset is a distinct file.
 
 ## Seed (canonical + reproducible)
 
@@ -139,5 +141,5 @@ different `PORT`, `DATA_DIR`, seed-container port and `SERVICE` name.
 
 The trial is intentionally OPEN (no token): a browser click on
 https://trial.modelwrite.org renders the workbench directly. This is by decision, and it
-is bounded by the nightly reset above, which is now load-bearing (the reset and its
+is bounded by the hourly reset above, which is now load-bearing (the reset and its
 backup of the outgoing DB return the trial to the six seeded models).
