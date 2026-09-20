@@ -151,6 +151,109 @@ async fn a_scripted_assist_produces_a_review_artifact_and_writes_no_commit() {
 }
 
 #[tokio::test]
+async fn a_proposal_reports_the_graph_orphans_and_uncovered_requirements_it_would_create() {
+    use_scripted_reasoner();
+    let (router, _store, _dir) = app_with_auth(admin());
+    seed_model(&router).await;
+
+    let assisted = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/assist",
+            json!({ "request": "add a heater block and a 95C requirement", "branch": "main" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(assisted.status(), StatusCode::CREATED);
+    let body = json_body(assisted).await;
+
+    // The review artifact carries the validator-and-gate result BEFORE any acceptance, so a
+    // human sees that the candidate would leave isolated nodes and an uncovered requirement.
+    let check = &body["reviewArtifact"]["check"];
+    assert_eq!(
+        check["passed"], false,
+        "the candidate leaves isolated nodes and more than one component"
+    );
+    let isolated: Vec<&str> = check["isolatedNodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        isolated.contains(&"heater-block"),
+        "the new element must be reported isolated: {:?}",
+        isolated
+    );
+    assert!(
+        isolated.contains(&"req-heat"),
+        "the new requirement must be reported isolated: {:?}",
+        isolated
+    );
+    assert_eq!(check["componentCount"], 3, "one node per isolated element");
+    let uncovered: Vec<&str> = check["uncoveredRequirements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        uncovered.contains(&"req-heat"),
+        "the uncovered requirement must be reported: {:?}",
+        uncovered
+    );
+}
+
+#[tokio::test]
+async fn an_accepted_change_writes_a_model_whose_summary_agrees_with_its_content() {
+    use_scripted_reasoner();
+    let (router, store, _dir) = app_with_auth(admin());
+    seed_model(&router).await;
+
+    let assisted = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/assist",
+            json!({ "request": "add a heater block and a 95C requirement", "branch": "main" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(assisted.status(), StatusCode::CREATED);
+    let id = json_body(assisted).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let accepted = router
+        .clone()
+        .oneshot(post(
+            &format!("/projects/coffee/proposals/{}/accept", id),
+            json!({ "branch": "main", "message": "accept the proposal" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED, "{:?}", accepted);
+
+    let tip = store.branch_tip("coffee", "main").unwrap().unwrap();
+    let model = server::api::load_model(store.as_ref(), "coffee", &tip).unwrap();
+    // The accepted model's summary is DERIVED, never trusted: every count agrees with the
+    // document it describes.
+    assert_eq!(model.summary.blocks as usize, model.structure.len());
+    assert_eq!(
+        model.summary.requirements as usize,
+        model.requirements.len()
+    );
+    assert_eq!(
+        model.summary.graph_nodes as usize,
+        model.graph.as_ref().unwrap().nodes.len()
+    );
+    assert_eq!(
+        model.summary.graph_edges as usize,
+        model.graph.as_ref().unwrap().edges.len()
+    );
+}
+
+#[tokio::test]
 async fn a_human_accepts_a_model_change_and_the_commit_names_both() {
     use_scripted_reasoner();
     let (router, store, _dir) = app_with_auth(admin());

@@ -7,7 +7,7 @@
 //! must list the entries the agent had nothing to say about rather than hiding
 //! them. Nothing here can panic; it is pure formatting over borrowed data.
 
-use crate::{Confidence, Proposal, ProposedAction, ReviewArtifact};
+use crate::{Confidence, Proposal, ProposalCheck, ProposedAction, ReviewArtifact};
 
 /// The section headings are kept as constants so a change to the rendered
 /// vocabulary is a deliberate edit in one place rather than a typo that
@@ -18,6 +18,7 @@ const CHANGES_MODEL: &str = "PROPOSALS THAT CHANGE THE MODEL";
 const OBSERVATIONS: &str = "PROPOSALS THAT DO NOT CHANGE THE MODEL";
 const ATTENTION: &str = " *** NEEDS ATTENTION ***";
 const UNKNOWN: &str = "WHAT THE AGENT DOES NOT KNOW";
+const GATE_CHECK: &str = "GATE CHECK OF THE CANDIDATE";
 
 pub(crate) fn render(artifact: &ReviewArtifact) -> String {
     let mut out = String::new();
@@ -79,6 +80,12 @@ pub(crate) fn render(artifact: &ReviewArtifact) -> String {
         }
     }
 
+    // The gate check of the candidate is its own section, so a human reads, before
+    // accepting, that the result would leave an isolated node or a coverage regression.
+    if let Some(check) = &artifact.check {
+        render_check(&mut out, check);
+    }
+
     out.push('\n');
     out.push_str(CHANGES_MODEL);
     out.push('\n');
@@ -94,6 +101,49 @@ pub(crate) fn render(artifact: &ReviewArtifact) -> String {
     render_proposals(&mut out, &artifact.proposals, false);
 
     out
+}
+
+/// Render the gate check of the candidate: the verdict, any validation errors, the isolated
+/// nodes, the component count and the coverage delta. Every line is absent when it has nothing
+/// to say, so a clean candidate reads as a short, plain pass.
+fn render_check(out: &mut String, check: &ProposalCheck) {
+    out.push('\n');
+    out.push_str(GATE_CHECK);
+    out.push('\n');
+    out.push_str(&"-".repeat(GATE_CHECK.len()));
+    out.push('\n');
+    out.push_str(&format!(
+        "passed: {}\n",
+        if check.passed { "yes" } else { "NO" }
+    ));
+    if check.validation_errors.is_empty() {
+        out.push_str("validation errors: (none)\n");
+    } else {
+        for e in &check.validation_errors {
+            out.push_str(&format!("- validation error: {}\n", e));
+        }
+    }
+    if check.isolated_nodes.is_empty() {
+        out.push_str("isolated nodes: (none)\n");
+    } else {
+        for id in &check.isolated_nodes {
+            out.push_str(&format!("- isolated node: {}\n", id));
+        }
+    }
+    out.push_str(&format!(
+        "connected components: {}\n",
+        check.component_count
+    ));
+    let new_uncovered = check
+        .uncovered_requirements
+        .iter()
+        .filter(|id| !check.prior_uncovered_requirements.contains(id))
+        .count();
+    out.push_str(&format!(
+        "uncovered requirements: {} ({} new since current model)\n",
+        check.uncovered_requirements.len(),
+        new_uncovered
+    ));
 }
 
 /// Render one proposal, preserving the order the reasoner returned them in

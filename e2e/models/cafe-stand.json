@@ -4,9 +4,12 @@
     "exportedAt":  "",
     "summary":  {
                     "blocks":  3,
-                    "requirements":  3,
+                    "requirements":  4,
+                    "interfaces":  1,
                     "signals":  3,
-                    "activities":  5
+                    "activities":  6,
+                    "graphNodes":  13,
+                    "graphEdges":  15
                 },
     "structure":  [
                       {

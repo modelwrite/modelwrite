@@ -23,7 +23,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use agent::{AgentTask, Confidence, Material, Proposal, ProposedAction, ReviewArtifact};
+use agent::{
+    AgentTask, Confidence, Material, Proposal, ProposalCheck, ProposedAction, ReviewArtifact,
+};
 use okf::types::{Element, GraphNode, OkfRoot, Requirement};
 
 use crate::api::{load_model, map_store_error, validate_element_name, validate_name, ApiState};
@@ -577,11 +579,12 @@ fn parse_and_validate(raw: &str) -> Result<Vec<ModelChange>, ApiError> {
     Ok(changes)
 }
 
-/// Apply the changes to a clone of the current model, producing the candidate document. The
-/// summary counts are kept in step exactly as the create-element page does, so the document
-/// stays self-consistent. A change whose id already exists replaces that element or
-/// requirement in place; a new id appends to the matching section (block, interface, signal,
-/// requirement) with a matching graph node.
+/// Apply the changes to a clone of the current model, producing the candidate document. A
+/// change whose id already exists replaces that element or requirement in place; a new id
+/// appends to the matching section (block, interface, signal, requirement) with a matching
+/// graph node. The summary is RECOMPUTED from the sections afterwards rather than
+/// incremented field by field, so the candidate can never carry a stale count inherited from
+/// a base whose summary was already wrong.
 pub fn apply_changes(current: &OkfRoot, changes: &[ModelChange]) -> OkfRoot {
     let mut candidate = current.clone();
     for change in changes {
@@ -599,6 +602,7 @@ pub fn apply_changes(current: &OkfRoot, changes: &[ModelChange]) -> OkfRoot {
             _ => {}
         }
     }
+    okf::summary::recompute(&mut candidate);
     candidate
 }
 
@@ -624,19 +628,13 @@ fn place_element(candidate: &mut OkfRoot, element: &Element) {
         element.kind.clone()
     };
     match element.kind.as_str() {
-        "interface" => {
-            candidate.interfaces.push(element.clone());
-            candidate.summary.interfaces += 1;
-        }
-        "signal" => {
-            candidate.signals.push(element.clone());
-            candidate.summary.signals += 1;
-        }
-        _ => {
-            candidate.structure.push(element.clone());
-            candidate.summary.blocks += 1;
-        }
+        "interface" => candidate.interfaces.push(element.clone()),
+        "signal" => candidate.signals.push(element.clone()),
+        _ => candidate.structure.push(element.clone()),
     }
+    // A new element is always attached to the graph as a node, so it is at least visible and
+    // countable. It may still be ISOLATED (no edges) when the change has no relationship to
+    // express; the proposal's gate check reports that, never buries it.
     if let Some(graph) = candidate.graph.as_mut() {
         graph.nodes.push(GraphNode {
             id: element.id.clone(),
@@ -644,7 +642,6 @@ fn place_element(candidate: &mut OkfRoot, element: &Element) {
             name: element.name.clone(),
             stereotypes: element.stereotypes.clone(),
         });
-        candidate.summary.graph_nodes += 1;
     }
 }
 
@@ -658,7 +655,6 @@ fn place_requirement(candidate: &mut OkfRoot, requirement: &Requirement) {
         return;
     }
     candidate.requirements.push(requirement.clone());
-    candidate.summary.requirements += 1;
     if let Some(graph) = candidate.graph.as_mut() {
         graph.nodes.push(GraphNode {
             id: requirement.id.clone(),
@@ -666,13 +662,14 @@ fn place_requirement(candidate: &mut OkfRoot, requirement: &Requirement) {
             name: requirement.name.clone(),
             stereotypes: requirement.stereotypes.clone(),
         });
-        candidate.summary.graph_nodes += 1;
     }
 }
 
 /// Build the review artifact from the changes, embedding the candidate document as the
 /// material so the human reads the SAME document that a later acceptance applies - a single
-/// source of truth, never a claim a caller could contradict.
+/// source of truth, never a claim a caller could contradict. The artifact also carries the
+/// validator-and-gate result over that candidate, so a human sees BEFORE accepting that the
+/// result would leave an isolated node, a disconnected component or a coverage regression.
 pub fn build_review_artifact(
     agent: &str,
     request: &str,
@@ -680,6 +677,7 @@ pub fn build_review_artifact(
     changes: &[ModelChange],
 ) -> ReviewArtifact {
     let candidate = apply_changes(current, changes);
+    let check = proposal_check(current, &candidate);
     let proposals: Vec<Proposal> = changes
         .iter()
         .map(|change| Proposal {
@@ -702,7 +700,64 @@ pub fn build_review_artifact(
         agent: agent.to_string(),
         rationale_summary: format!("{} proposed {} change(s)", agent, changes.len()),
         gaps: Vec::new(),
+        check: Some(check),
     }
+}
+
+/// Run the SAME validator and gate the proposal loop must run, and distill the parts a human
+/// must see before accepting: validation errors (a candidate that cannot commit), isolated
+/// nodes, disconnected components, and the coverage delta. The round-trip diff is deliberately
+/// excluded from `passed`: a proposal is SUPPOSED to differ from the current model, so
+/// "passed" here means "the candidate would not fail the gate's integration checks".
+fn proposal_check(current: &OkfRoot, candidate: &OkfRoot) -> ProposalCheck {
+    let outcome = gate::run(current, candidate, false);
+    let evidence = &outcome.evidence;
+
+    let validation_errors = string_array(evidence, &["validationErrors"]);
+    let isolated_nodes = string_array(evidence, &["integration", "isolated"]);
+    let component_count = evidence
+        .get("integration")
+        .and_then(|i| i.get("componentCount"))
+        .and_then(|c| c.as_u64())
+        .unwrap_or(0) as usize;
+    let uncovered_requirements = string_array(evidence, &["coverage", "uncovered"]);
+    let prior_uncovered_requirements = if current.graph.is_some() {
+        graph::requirement_coverage(current).uncovered
+    } else {
+        Vec::new()
+    };
+
+    let passed = validation_errors.is_empty() && isolated_nodes.is_empty() && component_count == 1;
+
+    ProposalCheck {
+        passed,
+        validation_errors,
+        isolated_nodes,
+        component_count,
+        uncovered_requirements,
+        prior_uncovered_requirements,
+    }
+}
+
+/// Read a string array from the gate evidence at the given JSON path, returning an empty list
+/// when the key is absent or not an array of strings. The evidence schema is stable, but a
+/// reader must never panic on a shape it does not recognise.
+fn string_array(value: &serde_json::Value, path: &[&str]) -> Vec<String> {
+    let mut cursor = value;
+    for key in path {
+        cursor = match cursor.get(key) {
+            Some(next) => next,
+            None => return Vec::new(),
+        };
+    }
+    cursor
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Which live backend answers a request: the organisation's OWN OpenAI-compatible fleet
@@ -1513,5 +1568,54 @@ mod tests {
             ReasonerStatus::UnknownMode("bogus".to_string())
         );
         assert!(select_reasoner_from(None, None, None, None, Some("bogus")).is_err());
+    }
+
+    #[test]
+    fn apply_changes_attaches_a_node_and_recomputes_a_stale_summary() {
+        // A base whose summary UNDER-counts its graph: one real node, claimed zero.
+        let mut current = empty_model();
+        current.graph = Some(Graph {
+            nodes: vec![GraphNode {
+                id: "root".to_string(),
+                kind: "block".to_string(),
+                name: "root".to_string(),
+                stereotypes: Vec::new(),
+            }],
+            edges: Vec::new(),
+        });
+        current.summary = Summary::default();
+
+        let change = ModelChange {
+            action: ProposedAction::EditElement,
+            element: Some(Element {
+                id: "heater-block".to_string(),
+                name: "Heater Block".to_string(),
+                kind: "block".to_string(),
+                stereotypes: Vec::new(),
+                attributes: Vec::new(),
+                documentation: String::new(),
+            }),
+            requirement: None,
+            rationale: "add a heater".to_string(),
+            confidence: Confidence::High,
+        };
+
+        let candidate = apply_changes(&current, &[change]);
+
+        // The added element is attached to the graph as a node, visible and countable.
+        assert!(candidate
+            .graph
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.id == "heater-block"));
+        // The summary is RECOMPUTED from the sections, never incremented from the stale base.
+        assert_eq!(
+            candidate.summary.graph_nodes as usize, 2,
+            "root + heater-block"
+        );
+        assert_eq!(candidate.summary.blocks as usize, 1, "one structure block");
+        assert_eq!(candidate.summary.graph_edges as usize, 0);
     }
 }

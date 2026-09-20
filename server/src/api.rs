@@ -401,11 +401,12 @@ pub enum CommitFailure {
 }
 
 /// Everything the commit core needs that the caller resolved upstream. `author` and
-/// `actor` are already resolved against the identity; `bytes` are the exact bytes to
-/// store (the JSON handler stores the client's document, the editor stores its re-serialised
-/// model); `tip` and `reference` are the tip the candidate was computed against and that
-/// tip's model, both `None` for a first commit; `import` is the provenance an import
-/// commit carries, `None` for every other commit.
+/// `actor` are already resolved against the identity; `bytes` are the caller's serialisation
+/// of the candidate, kept as the stored bytes when the summary is already correct (and
+/// re-serialised by the core when the summary must be corrected); `tip` and `reference` are
+/// the tip the candidate was computed against and that tip's model, both `None` for a first
+/// commit; `import` is the provenance an import commit carries, `None` for every other
+/// commit.
 pub struct CommitCore<'a> {
     pub project: &'a str,
     pub branch: &'a str,
@@ -440,9 +441,17 @@ pub struct CommitCore<'a> {
 /// [create_commit] and the editor's `perform_edit` call this, so they cannot diverge on
 /// the sequence, the guard or the audit entry.
 pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, CommitFailure> {
+    // The summary is a DERIVED count: it describes the sections, so it is recomputed here
+    // rather than trusted. A client-supplied summary that disagrees with the document is a
+    // false claim inside the model, and storing it would defeat the validator's cross-check.
+    let mut candidate = input.candidate.clone();
+    let summary_before = candidate.summary.clone();
+    okf::summary::recompute(&mut candidate);
+
     // Every commit path validates before it stores. A future rule that produced a
-    // self-contradicting document turns a silent bad write into a loud refusal here.
-    let report = okf::validate::validate(input.candidate);
+    // self-contradicting document turns a silent bad write into a loud refusal here. The
+    // REGENERATED candidate is what is validated, so the stored bytes carry a correct summary.
+    let report = okf::validate::validate(&candidate);
     if !report.valid {
         return Err(CommitFailure::Invalid {
             errors: report.errors,
@@ -454,7 +463,7 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
     // is refused here - never stored as a silently dangling reference. This is the SAME
     // resolution the resolve endpoint reports on read, so the two cannot drift.
     let mut resolution_errors = Vec::new();
-    for reference in &input.candidate.references {
+    for reference in &candidate.references {
         let reason = check_reference(store, &reference.project, &reference.revision)
             .map_err(CommitFailure::Store)?;
         if let Some(reason) = reason {
@@ -470,7 +479,7 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
         });
     }
 
-    let touched = commit_touched(input.reference, input.candidate);
+    let touched = commit_touched(input.reference, &candidate);
     let guard = CommitGuard {
         holder: input.holder,
         elements: &touched,
@@ -478,7 +487,20 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
         expected_tip: input.tip,
     };
 
-    let okf_hash = store.put_blob(input.bytes).map_err(CommitFailure::Store)?;
+    // The caller's bytes are kept when the summary was already correct (so a well-formed
+    // document's content address is unchanged); when the summary had to be corrected, the
+    // regenerated candidate is re-serialised and that is what is stored.
+    let bytes = if candidate.summary == summary_before {
+        input.bytes.to_vec()
+    } else {
+        serde_json::to_vec(&candidate).map_err(|e| {
+            eprintln!("model could not be serialised: {}", e);
+            CommitFailure::Store(StoreError::Backend(
+                "the model could not be stored".to_string(),
+            ))
+        })?
+    };
+    let okf_hash = store.put_blob(&bytes).map_err(CommitFailure::Store)?;
     let audit = AuditEntry {
         id: 0,
         project: input.project.to_string(),

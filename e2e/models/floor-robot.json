@@ -3,10 +3,13 @@
   "project": "floor-robot",
   "exportedAt": "",
   "summary": {
-    "blocks": 10,
+    "blocks": 11,
     "requirements": 7,
+    "interfaces": 1,
     "signals": 3,
-    "activities": 6
+    "activities": 6,
+    "graphNodes": 20,
+    "graphEdges": 19
   },
   "structure": [
     {

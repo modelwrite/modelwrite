@@ -8,8 +8,7 @@
 use std::collections::BTreeMap;
 
 use okf::types::{
-    Activity, Element, GraphEdge, GraphNode, OkfRoot, Requirement, StateMachine,
-    SubsystemReference, Summary,
+    Activity, Element, GraphEdge, GraphNode, OkfRoot, Requirement, StateMachine, SubsystemReference,
 };
 use serde::Serialize;
 
@@ -229,19 +228,6 @@ fn edges_from_units(units: &[EdgeUnit]) -> Vec<GraphEdge> {
     edges
 }
 
-/// Recompute the derived counts so the merged document cannot contradict itself.
-fn recompute_summary(merged: &mut OkfRoot) {
-    merged.summary = Summary {
-        blocks: merged.structure.len() as u64,
-        requirements: merged.requirements.len() as u64,
-        interfaces: merged.interfaces.len() as u64,
-        signals: merged.signals.len() as u64,
-        activities: merged.activities.len() as u64,
-        graph_nodes: merged.graph.as_ref().map(|g| g.nodes.len()).unwrap_or(0) as u64,
-        graph_edges: merged.graph.as_ref().map(|g| g.edges.len()).unwrap_or(0) as u64,
-    };
-}
-
 pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
     let mut conflicts: Vec<Conflict> = Vec::new();
 
@@ -390,7 +376,7 @@ pub fn merge(base: &OkfRoot, ours: &OkfRoot, theirs: &OkfRoot) -> MergeOutcome {
     } else {
         None
     };
-    recompute_summary(&mut merged);
+    okf::summary::recompute(&mut merged);
 
     MergeOutcome {
         merged: Some(merged),

@@ -213,12 +213,43 @@ pub trait Reasoner {
     fn propose(&self, task: &AgentTask) -> Result<Vec<Proposal>, AgentError>;
 }
 
+/// The validator-and-gate result a human reads BEFORE accepting a model-change proposal:
+/// does the candidate document leave an isolated graph node, a disconnected component, an
+/// uncovered requirement, or a validation error? This is the graph-integration quality bar the
+/// platform claims, computed against the CANDIDATE by the proposal loop (the same checks the
+/// gate runs), never a claim the reasoner makes about its own output. A proposal over any
+/// other material (a loss report, a diff) carries `None`, because there is no candidate
+/// document to check.
+///
+/// `passed` deliberately EXCLUDES the round-trip diff: a proposal is SUPPOSED to differ from
+/// the current model. It means "the candidate would not fail the gate's integration checks".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalCheck {
+    /// True when the candidate has no validation errors, no isolated nodes and exactly one
+    /// connected component - the same integration verdict the gate reports.
+    pub passed: bool,
+    /// The validation errors that would refuse the commit (empty when the candidate is valid).
+    pub validation_errors: Vec<String>,
+    /// The candidate's isolated graph nodes (no edges). Each is invisible to coverage and
+    /// traceability while still appearing in the document.
+    pub isolated_nodes: Vec<String>,
+    /// The number of connected components in the candidate's graph.
+    pub component_count: usize,
+    /// The candidate's requirement ids with no coverage (no Satisfy/Refine/Verify/Allocate edge).
+    pub uncovered_requirements: Vec<String>,
+    /// The current model's uncovered requirement ids, so the human can read a coverage
+    /// REGRESSION as a delta rather than a bare count.
+    pub prior_uncovered_requirements: Vec<String>,
+}
+
 /// The record a human reads before anything is committed.
 ///
-/// It carries the task, the proposals, the agent's identity, a summary, and the
-/// entries the agent had nothing to say about (`gaps`), and it is the audit
-/// artifact: it says who (an agent) proposed what, so a reader a year later can
-/// tell who decided.
+/// It carries the task, the proposals, the agent's identity, a summary, the
+/// entries the agent had nothing to say about (`gaps`), and - for a model-change
+/// proposal - the gate check of the candidate (`check`). It is the audit
+/// artifact: it says who (an agent) proposed what and what the result would
+/// leave behind, so a reader a year later can tell who decided and on what basis.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReviewArtifact {
     pub task: AgentTask,
@@ -229,6 +260,10 @@ pub struct ReviewArtifact {
     /// the agent does not know. A review that hides these gaps is the failure
     /// this platform is built against, so they are named, never buried.
     pub gaps: Vec<String>,
+    /// The validator-and-gate result over the candidate document, present for a model-change
+    /// proposal (so a human sees, before accepting, that the result would leave an isolated
+    /// node or a coverage regression) and absent for every other material.
+    pub check: Option<ProposalCheck>,
 }
 
 impl ReviewArtifact {
@@ -290,6 +325,7 @@ impl ScriptedReasoner {
             agent: self.agent.clone(),
             rationale_summary,
             gaps: Vec::new(),
+            check: None,
         })
     }
 }

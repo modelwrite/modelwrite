@@ -5,8 +5,11 @@
     "summary":  {
                     "blocks":  8,
                     "requirements":  5,
+                    "interfaces":  1,
                     "signals":  2,
-                    "activities":  1
+                    "activities":  1,
+                    "graphNodes":  13,
+                    "graphEdges":  14
                 },
     "structure":  [
                       {

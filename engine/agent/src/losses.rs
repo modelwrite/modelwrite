@@ -147,6 +147,7 @@ pub fn propose_loss_resolutions(
         agent: RESOLVER_AGENT.to_string(),
         rationale_summary,
         gaps,
+        check: None,
     })
 }
 

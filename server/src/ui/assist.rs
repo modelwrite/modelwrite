@@ -12,7 +12,7 @@ use axum::response::Response;
 use maud::{html, Markup};
 use serde::Deserialize;
 
-use agent::{Confidence, Proposal, ProposedAction, ReviewArtifact};
+use agent::{Confidence, Proposal, ProposalCheck, ProposedAction, ReviewArtifact};
 
 use crate::api::{map_store_error, validate_name, verify_actor, ApiState};
 use crate::assist::{
@@ -293,12 +293,16 @@ fn assist_result_page(
 }
 
 /// The review artifact, rendered as the human reads it everywhere: the request, the proposed
-/// changes, and any gaps the reasoner named. The candidate document is the SAME document a
-/// later acceptance applies, but it is not re-rendered here - the changes are what a human
-/// decides on.
+/// changes, the gate check of the candidate (so an isolated node or a coverage regression is
+/// visible BEFORE acceptance), and any gaps the reasoner named. The candidate document is the
+/// SAME document a later acceptance applies, but it is not re-rendered here - the changes are
+/// what a human decides on.
 pub fn review_artifact_markup(artifact: &ReviewArtifact) -> Markup {
     html! {
         p class="meta" { "Request: " (artifact.task.goal) }
+        @if let Some(check) = &artifact.check {
+            (check_markup(check))
+        }
         section class="review-artifact" {
             h2 { "Proposed changes" }
             (proposal_list_markup(&artifact.proposals))
@@ -307,6 +311,49 @@ pub fn review_artifact_markup(artifact: &ReviewArtifact) -> Markup {
                 ul class="gaps" {
                     @for gap in &artifact.gaps { li { (gap) } }
                 }
+            }
+        }
+    }
+}
+
+/// The validator-and-gate result over the candidate, surfaced to the human BEFORE they accept:
+/// an isolated node, a disconnected component, an uncovered requirement or a validation error
+/// is named here rather than left to a later gate run to discover.
+fn check_markup(check: &ProposalCheck) -> Markup {
+    let new_uncovered = check
+        .uncovered_requirements
+        .iter()
+        .filter(|id| !check.prior_uncovered_requirements.contains(id))
+        .count();
+    html! {
+        section class="proposal-check" {
+            h2 { "Gate check of the candidate" }
+            @if check.passed {
+                p class="check-passed" {
+                    "Passes: no validation errors, no isolated nodes, one connected component."
+                }
+            } @else {
+                p class="check-failed" { "Would fail the gate." }
+            }
+            @if !check.validation_errors.is_empty() {
+                h3 { "Validation errors" }
+                ul class="check-errors" {
+                    @for error in &check.validation_errors { li { (error) } }
+                }
+            }
+            @if !check.isolated_nodes.is_empty() {
+                h3 { "Isolated nodes" }
+                p { "Each is invisible to coverage and traceability." }
+                ul class="check-isolated" {
+                    @for id in &check.isolated_nodes { li { code { (id) } } }
+                }
+            }
+            @if check.component_count != 1 {
+                p { "Connected components: " (check.component_count) }
+            }
+            p {
+                "Uncovered requirements: " (check.uncovered_requirements.len())
+                @if new_uncovered > 0 { " (" (new_uncovered) " new since the current model)" }
             }
         }
     }

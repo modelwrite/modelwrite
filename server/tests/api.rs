@@ -35,7 +35,7 @@ fn tiny_okf() -> serde_json::Value {
     serde_json::json!({
         "project": "tiny",
         "exportedAt": "2026-09-17T00:00:00Z",
-        "summary": {},
+        "summary": { "graphNodes": 1 },
         "stateMachine": { "name": "tiny sm", "regions": [] },
         "graph": { "nodes": [{ "id": "b1", "kind": "block", "name": "B1" }], "edges": [] }
     })
@@ -120,6 +120,59 @@ async fn a_commit_stores_the_model_and_moves_the_branch() {
         serde_json::to_vec(&tiny_okf()).unwrap().as_slice(),
         "the stored model must come back byte for byte"
     );
+}
+
+#[tokio::test]
+async fn a_commit_regenerates_a_stale_summary_to_match_its_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    // A document whose summary under-counts its graph: one node, claimed zero.
+    let mut okf = tiny_okf();
+    okf["summary"] = serde_json::json!({ "graphNodes": 0 });
+    okf["structure"] = serde_json::json!([
+        { "id": "b1", "name": "B1", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "" }
+    ]);
+
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({
+                "branch": "main",
+                "author": "alex",
+                "message": "stale summary",
+                "okf": okf
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let fetched = router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/projects/coffee/commits/{}", hash))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let stored = json_body(fetched).await;
+    // The summary is DERIVED, not trusted: the stored model's counts agree with its content.
+    assert_eq!(stored["summary"]["graphNodes"], 1);
+    assert_eq!(stored["summary"]["blocks"], 1);
+    assert_eq!(stored["summary"]["graphEdges"], 0);
+    assert_eq!(stored["summary"]["requirements"], 0);
 }
 
 #[tokio::test]
