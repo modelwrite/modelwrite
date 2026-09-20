@@ -1163,6 +1163,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-binding-sysmlv2"
+version = "0.1.0"
+dependencies = [
+ "mw-binding",
+ "mw-okf",
+ "serde_json",
+]
+
+[[package]]
 name = "mw-binding-xmi"
 version = "0.2.0"
 dependencies = [

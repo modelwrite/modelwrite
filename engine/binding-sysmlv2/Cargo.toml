@@ -1,0 +1,22 @@
+[package]
+name = "mw-binding-sysmlv2"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The SysML v2 textual-notation binding that reads the stated subset into OKF. A viewer: it imports but does not export."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","sysml","sysml-v2","binding","okf"]
+
+[lib]
+name = "binding_sysmlv2"
+
+[dependencies]
+mw-binding = { path = "../binding", version = "0.2.0" }
+mw-okf = { path = "../okf", version = "0.2.0" }
+
+[dev-dependencies]
+mw-binding = { path = "../binding", version = "0.2.0" }
+mw-okf = { path = "../okf", version = "0.2.0" }
+serde_json.workspace = true
