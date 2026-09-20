@@ -18,6 +18,30 @@ function readModel(name) {
   return JSON.parse(fs.readFileSync(path.join(modelsDir, name), 'utf8'));
 }
 
+// A model exercising the symbol paths the API accepts: known kinds, a declared 2525 SIDC and a
+// declared-but-unmappable SIDC. (An unknown kind is rejected by validation, so the neutral-default
+// path is covered by the Rust unit and server tests instead.)
+function symbolDemoModel() {
+  return {
+    project: 'symbol-demo',
+    exportedAt: '2026-09-17T00:00:00Z',
+    summary: {},
+    stateMachine: { name: 'sm', regions: [] },
+    requirements: [],
+    graph: {
+      nodes: [
+        { id: 'b1', kind: 'block', name: 'Pump' },
+        { id: 'a1', kind: 'activity', name: 'Brew' },
+        { id: 's1', kind: 'signal', name: 'Ready' },
+        { id: 'i1', kind: 'interface', name: 'Port' },
+        { id: 't1', kind: 'block', name: 'Friendly vehicle', stereotypes: ['sidc:10310000012000000000'] },
+        { id: 'x1', kind: 'block', name: 'Unmapped', stereotypes: ['sidc:10399000012000000000'] },
+      ],
+      edges: [],
+    },
+  };
+}
+
 async function post(request, url, data) {
   const response = await request.post(url, { data });
   if (!response.ok()) {
@@ -153,5 +177,41 @@ test.describe('process diagram', () => {
     expect(toast).toBeLessThan(complete);
     // The two provisioning steps are one parallel layer, side by side.
     expect(brew).toBe(toast);
+  });
+});
+
+test.describe('symbols', () => {
+  test.beforeAll(async ({ request }) => {
+    await ensureProject(request, 'symbol-demo');
+    await commit(request, 'symbol-demo', symbolDemoModel());
+  });
+
+  test('a glyph is emitted per kind', async ({ page }) => {
+    await page.goto('/ui/projects/symbol-demo/diagram');
+    await expect(page.locator('svg g.node .node-glyph')).toHaveCount(6);
+    // Every kind glyph carries non-empty path data (never a missing or broken mark).
+    const paths = await page.locator('svg g.node .node-glyph path').evaluateAll((els) =>
+      els.map((el) => el.getAttribute('d') || '')
+    );
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.every((d) => d.length > 0)).toBe(true);
+  });
+
+  test('a declared SIDC renders a 2525 frame', async ({ page }) => {
+    await page.goto('/ui/projects/symbol-demo/diagram');
+    const frame = page.locator('svg g.node[data-mw-id="t1"] .mw-2525-frame');
+    await expect(frame).toHaveCount(1);
+    await expect(frame).toHaveAttribute('fill', '#3d8bfd');
+    await expect(page.locator('svg g.node[data-mw-id="t1"] .mw-2525-glyph')).toHaveCount(1);
+  });
+
+  test('an unknown declared symbol is reported, not silently boxed', async ({ page }) => {
+    await page.goto('/ui/projects/symbol-demo/diagram');
+    await expect(page.locator('svg g.node[data-mw-id="x1"]')).toHaveAttribute(
+      'data-mw-unmappable',
+      '10399000012000000000'
+    );
+    await expect(page.locator('.symbol-report')).toBeVisible();
+    await expect(page.locator('.symbol-report')).toContainText('10399000012000000000');
   });
 });

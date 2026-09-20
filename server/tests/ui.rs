@@ -2028,6 +2028,110 @@ async fn a_hostile_label_in_the_diagram_is_escaped() {
     );
 }
 
+/// A model exercising every symbol path: known kinds, an unknown kind, a declared 2525 SIDC and
+/// a declared-but-unmappable SIDC.
+fn symbol_demo_model() -> serde_json::Value {
+    serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "graph": {
+            "nodes": [
+                { "id": "b1", "kind": "block", "name": "Pump" },
+                { "id": "a1", "kind": "activity", "name": "Brew" },
+                { "id": "s1", "kind": "signal", "name": "Ready" },
+                { "id": "i1", "kind": "interface", "name": "Port" },
+                { "id": "u1", "kind": "mystery", "name": "Unknown kind" },
+                { "id": "t1", "kind": "block", "name": "Friendly vehicle", "stereotypes": ["sidc:10310000012000000000"] },
+                { "id": "x1", "kind": "block", "name": "Unmapped", "stereotypes": ["sidc:10399000012000000000"] }
+            ],
+            "edges": []
+        }
+    })
+}
+
+async fn symbol_demo_page(dir: &tempfile::TempDir) -> String {
+    let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
+    seed_model_directly(store.as_ref(), symbol_demo_model());
+    let router = server::app(AppState {
+        store,
+        evidence_dir: dir.path().to_path_buf(),
+        auth: AuthConfig::Open,
+    });
+    let response = router
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    body_text(response).await
+}
+
+#[tokio::test]
+async fn the_diagram_emits_a_glyph_per_kind_and_a_neutral_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let html = symbol_demo_page(&dir).await;
+    let svg = extract_svg(&html);
+    // Every node carries a glyph group (kind mark or declared 2525 symbol).
+    assert_eq!(count(svg, "node-glyph"), 7, "a glyph per node");
+    // An unknown kind degrades to the neutral default (a plain square), never nothing.
+    assert!(
+        svg.contains("M5 5 H19 V19 H5 Z"),
+        "an unknown kind must draw the neutral default glyph"
+    );
+    // Known kinds draw their own glyphs, distinct from the neutral default.
+    assert!(
+        svg.contains("M12 3 L20 7 L20 17 L12 21 L4 17 L4 7 Z"),
+        "the block glyph must be drawn"
+    );
+    assert!(
+        svg.contains("M13 3 L6 13 H10 L9 21 L18 9 H13 Z"),
+        "the signal glyph must be drawn"
+    );
+}
+
+#[tokio::test]
+async fn a_declared_sidc_renders_a_2525_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let html = symbol_demo_page(&dir).await;
+    let svg = extract_svg(&html);
+    // A declared friend-land SIDC draws the standard frame, filled with the friend colour, and
+    // a generic platform glyph.
+    assert!(
+        svg.contains("class='mw-2525-frame'"),
+        "the 2525 frame must be drawn"
+    );
+    assert!(
+        svg.contains("fill='#3d8bfd'"),
+        "the friend affiliation must fill the frame with its standard colour"
+    );
+    assert!(
+        svg.contains("class='mw-2525-glyph'"),
+        "the platform glyph must be drawn"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_declared_symbol_is_reported_not_silently_boxed() {
+    let dir = tempfile::tempdir().unwrap();
+    let html = symbol_demo_page(&dir).await;
+    let svg = extract_svg(&html);
+    // The node is flagged with its declaration, and the page reports it rather than hiding it.
+    assert!(
+        svg.contains("data-mw-unmappable='10399000012000000000'"),
+        "the unmappable node must carry its declared symbol"
+    );
+    assert!(
+        html.contains("symbol-report"),
+        "the report must be rendered"
+    );
+    assert!(
+        html.contains("10399000012000000000"),
+        "the declared symbol must be named in the report"
+    );
+}
+
 #[tokio::test]
 async fn renaming_an_element_carries_its_references() {
     // A rename that does not move the graph is silent corruption: the element stays in the

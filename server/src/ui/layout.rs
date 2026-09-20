@@ -894,24 +894,40 @@ svg g.node .node-kind {
   font-family: var(--font-ui); font-size: 11px; fill: var(--text-2);
   text-transform: uppercase; letter-spacing: 0.04em; pointer-events: none;
 }
-svg g.node[data-kind="block"] .node-rect { stroke: var(--kind-block); }
-svg g.node[data-kind="block"] .node-kind { fill: var(--kind-block); }
-svg g.node[data-kind="actor"] .node-rect { stroke: var(--kind-actor); }
-svg g.node[data-kind="actor"] .node-kind { fill: var(--kind-actor); }
-svg g.node[data-kind="usecase"] .node-rect { stroke: var(--kind-usecase); }
-svg g.node[data-kind="usecase"] .node-kind { fill: var(--kind-usecase); }
-svg g.node[data-kind="requirement"] .node-rect { stroke: var(--kind-requirement); }
-svg g.node[data-kind="requirement"] .node-kind { fill: var(--kind-requirement); }
-svg g.node[data-kind="signal"] .node-rect { stroke: var(--kind-signal); }
-svg g.node[data-kind="signal"] .node-kind { fill: var(--kind-signal); }
-svg g.node[data-kind="interface"] .node-rect { stroke: var(--kind-interface); }
-svg g.node[data-kind="interface"] .node-kind { fill: var(--kind-interface); }
-svg g.node[data-kind="activity"] .node-rect { stroke: var(--kind-activity); }
-svg g.node[data-kind="activity"] .node-kind { fill: var(--kind-activity); }
-svg g.node[data-kind="state"] .node-rect { stroke: var(--kind-state); }
-svg g.node[data-kind="state"] .node-kind { fill: var(--kind-state); }
-svg g.node[data-kind="stateMachine"] .node-rect { stroke: var(--kind-statemachine); }
-svg g.node[data-kind="stateMachine"] .node-kind { fill: var(--kind-statemachine); }
+svg g.node[data-mw-kind="block"] .node-rect { stroke: var(--kind-block); }
+svg g.node[data-mw-kind="block"] .node-kind { fill: var(--kind-block); }
+svg g.node[data-mw-kind="actor"] .node-rect { stroke: var(--kind-actor); }
+svg g.node[data-mw-kind="actor"] .node-kind { fill: var(--kind-actor); }
+svg g.node[data-mw-kind="usecase"] .node-rect { stroke: var(--kind-usecase); }
+svg g.node[data-mw-kind="usecase"] .node-kind { fill: var(--kind-usecase); }
+svg g.node[data-mw-kind="requirement"] .node-rect { stroke: var(--kind-requirement); }
+svg g.node[data-mw-kind="requirement"] .node-kind { fill: var(--kind-requirement); }
+svg g.node[data-mw-kind="signal"] .node-rect { stroke: var(--kind-signal); }
+svg g.node[data-mw-kind="signal"] .node-kind { fill: var(--kind-signal); }
+svg g.node[data-mw-kind="interface"] .node-rect { stroke: var(--kind-interface); }
+svg g.node[data-mw-kind="interface"] .node-kind { fill: var(--kind-interface); }
+svg g.node[data-mw-kind="activity"] .node-rect { stroke: var(--kind-activity); }
+svg g.node[data-mw-kind="activity"] .node-kind { fill: var(--kind-activity); }
+svg g.node[data-mw-kind="state"] .node-rect { stroke: var(--kind-state); }
+svg g.node[data-mw-kind="state"] .node-kind { fill: var(--kind-state); }
+svg g.node[data-mw-kind="stateMachine"] .node-rect { stroke: var(--kind-statemachine); }
+svg g.node[data-mw-kind="stateMachine"] .node-kind { fill: var(--kind-statemachine); }
+
+/* -- node glyphs: kind marks and declared 2525 symbols --------------------- */
+/* The glyph path draws in currentColor, so the node's `color` token (set per kind below)
+   is what colours it; the text keeps its own explicit fill and is unaffected. */
+svg g.node { color: var(--text-3); }
+svg g.node[data-mw-kind="block"] { color: var(--kind-block); }
+svg g.node[data-mw-kind="actor"] { color: var(--kind-actor); }
+svg g.node[data-mw-kind="usecase"] { color: var(--kind-usecase); }
+svg g.node[data-mw-kind="requirement"] { color: var(--kind-requirement); }
+svg g.node[data-mw-kind="signal"] { color: var(--kind-signal); }
+svg g.node[data-mw-kind="interface"] { color: var(--kind-interface); }
+svg g.node[data-mw-kind="activity"] { color: var(--kind-activity); }
+svg g.node[data-mw-kind="state"] { color: var(--kind-state); }
+svg g.node[data-mw-kind="stateMachine"] { color: var(--kind-statemachine); }
+svg g.node .node-glyph { pointer-events: none; }
+svg g.node .mw-2525-unknown { font-family: var(--font-ui); font-weight: 700; fill: #1f2937; pointer-events: none; }
 
 g.mw-selected-node rect { stroke: var(--accent); stroke-width: 3px; }
 g.mw-selected-node .node-name { fill: var(--accent-strong); font-weight: 600; }
@@ -940,6 +956,17 @@ svg g.edge.mw-incident .mw-edge { stroke-width: 2.4px; }
 svg g.dangling .dangling-shape { fill: var(--fail-bg); stroke: var(--fail); stroke-width: 1.5px; }
 svg g.dangling .dangling-label { font-family: var(--font-ui); font-size: 11px; fill: var(--fail); font-weight: 600; pointer-events: none; }
 svg g.dangling .dangling-id { font-family: var(--font-mono); font-size: 10px; fill: var(--fail); pointer-events: none; }
+
+/* -- symbol report: declared-but-unmappable symbols, never silently boxed --- */
+.symbol-report {
+  margin-top: 0.75rem; border: 1px solid var(--border); border-left: 3px solid var(--warn);
+  border-radius: var(--radius); padding: 0.6rem 0.9rem; background: var(--surface);
+}
+.symbol-report h2 { font-size: 13px; margin: 0 0 0.3rem; color: var(--text); }
+.symbol-report p { font-size: 12px; color: var(--text-2); margin: 0 0 0.5rem; }
+.symbol-report ul { margin: 0; padding-left: 1.2rem; }
+.symbol-report li { font-size: 12px; color: var(--text-2); margin-bottom: 0.2rem; }
+.symbol-report code { color: var(--warn); font-family: var(--font-mono); }
 
 
 /* -- composition: subsystems, boundary, process --------------------------- */

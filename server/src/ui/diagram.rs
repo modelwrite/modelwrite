@@ -28,6 +28,7 @@ use axum::response::Response;
 use maud::{html, Markup, PreEscaped};
 
 use graph::layout::{self as graph_layout, DiagramLayout, NodeBox};
+use graph::symbol;
 use okf::types::{Graph, GraphEdge, GraphNode, OkfRoot};
 
 use crate::api::{load_model, map_store_error, ApiState};
@@ -145,6 +146,7 @@ fn diagram_markup(
             DiagramView::Process => process.as_ref().expect("process chosen only when present"),
         };
         let kinds = distinct_kinds(graph);
+        let unmappable = symbol::unmappable_findings(graph);
         html! {
             h1 { "Diagram" }
             p class="meta" {
@@ -160,6 +162,17 @@ fn diagram_markup(
             (diagram_toolbar(project, commit, view, process.is_some(), &kinds))
             div class="diagram-viewport" {
                 (PreEscaped(svg))
+            }
+            @if !unmappable.is_empty() {
+                div class="symbol-report" role="note" aria-label="Unmapped symbols" {
+                    h2 { "Unmapped symbols" }
+                    p { "These elements declare a symbol this build does not draw. They are shown with their kind glyph and label, never silently boxed." }
+                    ul {
+                        @for finding in &unmappable {
+                            li { code { (finding.node_id) } " declares " code { (finding.declared) } }
+                        }
+                    }
+                }
             }
             script src="/ui/app.js" {}
         }
@@ -517,7 +530,6 @@ fn push_node(svg: &mut String, node: &GraphNode, b: &NodeBox) {
         &node.name
     };
     let truncated = graph_layout::truncate_label(display, b.width);
-    let cx = b.center_x();
     let title = format!("{display} ({})", node.id);
     // Requirements keep their historical amber fill (an existing, pinned value the server test
     // asserts); every other kind sits on the white surface, and the KIND is carried by the
@@ -527,24 +539,111 @@ fn push_node(svg: &mut String, node: &GraphNode, b: &NodeBox) {
     } else {
         "#ffffff"
     };
+
+    // The symbol boundary decides the glyph: a declared 2525 symbol, or the kind glyph (neutral
+    // default for an unknown kind). An unmappable declaration still renders - the kind glyph and
+    // the label stay - but it is flagged so the report below can name it, never silently boxed.
+    let resolved = symbol::symbol(&node.kind, &node.stereotypes);
+
+    svg.push_str("<g class='node' data-mw-id='");
+    svg.push_str(&xml_escape(&node.id));
+    svg.push_str("' data-mw-kind='");
+    svg.push_str(&xml_escape(&node.kind));
+    svg.push_str("' data-mw-name='");
+    svg.push_str(&xml_escape(display));
+    if let symbol::Symbol::Unmappable { declared } = &resolved {
+        svg.push_str("' data-mw-unmappable='");
+        svg.push_str(&xml_escape(declared));
+    }
+    svg.push_str("' tabindex='0'>");
     svg.push_str(&format!(
-        "<g class='node' data-mw-id='{}' data-mw-kind='{}' data-mw-name='{}' tabindex='0'><title>{}</title><rect class='node-rect' fill='{}' x='{:.1}' y='{:.1}' width='{:.1}' height='{:.1}' rx='6'/><text class='node-name' x='{:.1}' y='{:.1}' text-anchor='middle'>{}</text><text class='node-kind' x='{:.1}' y='{:.1}' text-anchor='middle'>{}</text></g>",
-        xml_escape(&node.id),
-        xml_escape(&node.kind),
-        xml_escape(display),
+        "<title>{}</title><rect class='node-rect' fill='{}' x='{:.1}' y='{:.1}' width='{:.1}' height='{:.1}' rx='6'/>",
         xml_escape(&title),
         fill,
         b.x,
         b.y,
         b.width,
-        b.height,
-        cx,
+        b.height
+    ));
+
+    // The glyph sits on the left inside the box; the name and kind line shift right of it and
+    // read left-aligned. The text label is never replaced by the glyph.
+    let text_x = match &resolved {
+        symbol::Symbol::MilStd2525 {
+            affiliation,
+            dimension,
+        } => {
+            push_2525(svg, *affiliation, *dimension, b.x + 6.0, b.y + 6.0);
+            b.x + 46.0
+        }
+        symbol::Symbol::Kind(glyph) => {
+            push_kind_glyph(svg, *glyph, b.x + 7.0, b.y + 15.0);
+            b.x + 30.0
+        }
+        symbol::Symbol::Unmappable { .. } => {
+            push_kind_glyph(svg, symbol::kind_glyph(&node.kind), b.x + 7.0, b.y + 15.0);
+            b.x + 30.0
+        }
+    };
+
+    svg.push_str(&format!(
+        "<text class='node-name' x='{:.1}' y='{:.1}' text-anchor='start'>{}</text><text class='node-kind' x='{:.1}' y='{:.1}' text-anchor='start'>{}</text></g>",
+        text_x,
         b.y + 18.0,
         xml_escape(&truncated),
-        cx,
+        text_x,
         b.y + 34.0,
         xml_escape(kind_label(&node.kind))
     ));
+}
+
+/// Draw a monochrome kind glyph: its primary path plus an optional accent, in currentColor so
+/// the token palette colours it, scaled from the authored viewBox down to the rendered size.
+fn push_kind_glyph(svg: &mut String, glyph: symbol::Glyph, x: f64, y: f64) {
+    let scale = 18.0 / glyph.view as f64;
+    svg.push_str(&format!(
+        "<g class='node-glyph' transform='translate({:.2} {:.2}) scale({:.3})'>",
+        x, y, scale
+    ));
+    svg.push_str(&format!("<path d='{}' fill='currentColor'/>", glyph.path));
+    if let Some(accent) = glyph.accent {
+        svg.push_str(&format!("<path d='{}' fill='currentColor'/>", accent));
+    }
+    svg.push_str("</g>");
+}
+
+/// Draw a declared MIL-STD-2525D symbol: the affiliation x dimension frame, filled with the
+/// standard colour and stroked, plus the generic platform glyph - or a "?" for an unknown
+/// affiliation, which by the standard carries no entity.
+fn push_2525(
+    svg: &mut String,
+    affiliation: symbol::Affiliation,
+    dimension: symbol::Dimension,
+    x: f64,
+    y: f64,
+) {
+    let frame = symbol::frame(affiliation, dimension);
+    let scale = 36.0 / symbol::FRAME_VIEW as f64;
+    let dash = if frame.dash {
+        " stroke-dasharray='5 3'"
+    } else {
+        ""
+    };
+    svg.push_str(&format!(
+        "<g class='node-glyph mw-2525' transform='translate({:.2} {:.2}) scale({:.3})'><path class='mw-2525-frame' d='{}' fill='{}' stroke='#1f2937' stroke-width='1.5' vector-effect='non-scaling-stroke'{} />",
+        x, y, scale, frame.path, frame.fill, dash
+    ));
+    if affiliation == symbol::Affiliation::Unknown {
+        svg.push_str(
+            "<text class='mw-2525-unknown' x='50' y='66' text-anchor='middle' font-size='40'>?</text>",
+        );
+    } else {
+        svg.push_str(&format!(
+            "<path class='mw-2525-glyph' d='{}' fill='#1f2937'/>",
+            symbol::platform_glyph(dimension)
+        ));
+    }
+    svg.push_str("</g>");
 }
 
 fn push_dangling(svg: &mut String, id: &str, cx: f64, cy: f64) {
