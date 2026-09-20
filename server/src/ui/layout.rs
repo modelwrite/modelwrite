@@ -1369,7 +1369,7 @@ pub fn shell_with_main_class(
             }
             body {
                 header class="site-header" {
-                    a class="brand" href="/ui" { "modelwrite" }
+                    a class="brand" href="https://modelwrite.org" target="_blank" rel="noopener" { "modelwrite" }
                     @if !nav.projects.is_empty() {
                         details class="switcher" {
                             summary {
