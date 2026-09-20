@@ -172,6 +172,13 @@ fn escape(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            // XML attribute-value normalisation turns a literal LF/CR/TAB into a
+            // space, which would silently corrupt text carrying a real newline (a
+            // requirement body, a block's documentation). Encode them as character
+            // references so they survive the OKF -> XMI -> OKF round trip byte-exact.
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
             _ => out.push(c),
         }
     }
@@ -1389,21 +1396,31 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
         }
     }
 
+    // name_to_id maps an element NAME to its id and is used only for the type of a
+    // NON-part/reference attribute, where a duplicate name cannot corrupt the round
+    // trip: the attribute stores the name, and re-import resolves the written id back
+    // to that same name. Part/reference attributes are matched by name via id_to_name
+    // and written with the edge's precise target id (see the block-emission loop).
     let mut name_to_id: HashMap<&str, &str> = HashMap::new();
+    let mut id_to_name: HashMap<&str, &str> = HashMap::new();
     for el in &root.structure {
         name_to_id.insert(el.name.as_str(), el.id.as_str());
+        id_to_name.insert(el.id.as_str(), el.name.as_str());
     }
     for r in &root.requirements {
         name_to_id.insert(r.name.as_str(), r.id.as_str());
+        id_to_name.insert(r.id.as_str(), r.name.as_str());
     }
 
     // Part/reference edges are reconstructed during block emission: each one
     // becomes a PartProperty/ReferenceProperty stereotype application on the
-    // source block's attribute typed by the target. These maps count how many of
-    // each (source, target) pair remain to be reconstructed, so export refuses
-    // rather than silently drop an edge it cannot rebuild.
-    let mut part_edges: HashMap<(String, String), usize> = HashMap::new();
-    let mut reference_edges: HashMap<(String, String), usize> = HashMap::new();
+    // source block's attribute typed by the target. Each value is the list of
+    // target ids still to be reconstructed for that source block, so export
+    // refuses rather than silently drop an edge it cannot rebuild. Matching is
+    // by the target's NAME (see below): a global name->id map is ambiguous once
+    // two carried elements share a name, which a real vendor model does freely.
+    let mut part_edges: HashMap<String, Vec<String>> = HashMap::new();
+    let mut reference_edges: HashMap<String, Vec<String>> = HashMap::new();
 
     if let Some(graph) = &root.graph {
         // The graph must mirror the structure blocks followed by the requirements,
@@ -1489,11 +1506,16 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
                             e.kind, e.source, e.target
                         )));
                     }
-                    let key = (e.source.clone(), e.target.clone());
                     if e.kind == "part" {
-                        *part_edges.entry(key).or_insert(0) += 1;
+                        part_edges
+                            .entry(e.source.clone())
+                            .or_default()
+                            .push(e.target.clone());
                     } else {
-                        *reference_edges.entry(key).or_insert(0) += 1;
+                        reference_edges
+                            .entry(e.source.clone())
+                            .or_default()
+                            .push(e.target.clone());
                     }
                 }
                 other => {
@@ -1527,47 +1549,55 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
             escape(&el.id)
         ));
         for (i, a) in el.attributes.iter().enumerate() {
-            let type_ref = name_to_id
+            // A part/reference attribute carries its type as the TARGET NAME (the
+            // import resolved the id to a name for the OKF "type" field), while the
+            // edge holds the precise target id. Match the attribute to a pending edge
+            // by name, then write the edge precise id as the type - a global
+            // name->id map would pick the wrong id once two elements share a name.
+            let mut type_ref = name_to_id
                 .get(a.attr_type.as_str())
                 .copied()
-                .unwrap_or(a.attr_type.as_str());
+                .unwrap_or(a.attr_type.as_str())
+                .to_string();
+            let mut applied: Option<&str> = None;
+            if let Some(pending) = part_edges.get_mut(&el.id) {
+                if let Some(pos) = pending
+                    .iter()
+                    .position(|t| id_to_name.get(t.as_str()).copied() == Some(a.attr_type.as_str()))
+                {
+                    type_ref = pending.remove(pos);
+                    applied = Some(model::PART_STEREOTYPE);
+                }
+            }
+            if applied.is_none() {
+                if let Some(pending) = reference_edges.get_mut(&el.id) {
+                    if let Some(pos) = pending.iter().position(|t| {
+                        id_to_name.get(t.as_str()).copied() == Some(a.attr_type.as_str())
+                    }) {
+                        type_ref = pending.remove(pos);
+                        applied = Some(model::REFERENCE_STEREOTYPE);
+                    }
+                }
+            }
             let prop_id = format!("{}-attr-{}", el.id, i);
             out.push_str(&format!(
                 "      <ownedAttribute xmi:type=\"uml:Property\" xmi:id=\"{}\" name=\"{}\" type=\"{}\" aggregation=\"{}\"",
                 escape(&prop_id),
                 escape(&a.name),
-                escape(type_ref),
+                escape(&type_ref),
                 escape(&a.aggregation)
             ));
             if !a.default.is_empty() {
                 out.push_str(&format!(" default=\"{}\"", escape(&a.default)));
             }
             out.push_str("/>\n");
-            // Reconstruct a part/reference edge by marking this attribute with the
-            // matching stereotype. The OKF Attribute carries no stereotype, so the
-            // edge is the only source of truth for which attribute is a part or a
-            // reference; matching on (owner, resolved type) rebuilds it exactly.
-            let key = (el.id.clone(), type_ref.to_string());
-            if let Some(n) = part_edges.get_mut(&key) {
-                if *n > 0 {
-                    *n -= 1;
-                    out.push_str(&format!(
-                        "      <{} xmi:id=\"{}-app\" base_Property=\"{}\"/>\n",
-                        model::PART_STEREOTYPE,
-                        escape(&prop_id),
-                        escape(&prop_id)
-                    ));
-                }
-            } else if let Some(n) = reference_edges.get_mut(&key) {
-                if *n > 0 {
-                    *n -= 1;
-                    out.push_str(&format!(
-                        "      <{} xmi:id=\"{}-app\" base_Property=\"{}\"/>\n",
-                        model::REFERENCE_STEREOTYPE,
-                        escape(&prop_id),
-                        escape(&prop_id)
-                    ));
-                }
+            if let Some(stereotype) = applied {
+                out.push_str(&format!(
+                    "      <{} xmi:id=\"{}-app\" base_Property=\"{}\"/>\n",
+                    stereotype,
+                    escape(&prop_id),
+                    escape(&prop_id)
+                ));
             }
         }
         if !el.documentation.is_empty() {
@@ -1582,7 +1612,8 @@ fn export_document(root: &OkfRoot) -> Result<Vec<u8>, BindingError> {
     // Every part/reference edge must now have been rebuilt as a stereotype
     // application on a matching attribute; a remainder means the edge's target
     // has no attribute to carry it, which export refuses rather than drops.
-    if part_edges.values().any(|&n| n > 0) || reference_edges.values().any(|&n| n > 0) {
+    if part_edges.values().any(|v| !v.is_empty()) || reference_edges.values().any(|v| !v.is_empty())
+    {
         return Err(BindingError::Export(
             "cannot reconstruct a part/reference edge: no block attribute is typed by its target"
                 .to_string(),

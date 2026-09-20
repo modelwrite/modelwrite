@@ -1,3 +1,5 @@
 *.mdzip binary
 *.zip binary
 sample/demo/*.html binary
+*.xmi binary
+

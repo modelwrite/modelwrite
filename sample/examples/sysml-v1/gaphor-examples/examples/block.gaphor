@@ -1,0 +1,383 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gaphor xmlns="http://gaphor.sourceforge.net/model" version="3.0" gaphor-version="2.3.2">
+<Package id="8eba33d8-a27b-11ea-b537-dfaaecc5bf61">
+<name>
+<val>New model</val>
+</name>
+<ownedDiagram>
+<reflist>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedDiagram>
+<ownedType>
+<reflist>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="917f8c8a-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="95b85e80-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="99659d92-a283-11ea-b537-dfaaecc5bf61"/>
+<ref refid="d889291c-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedType>
+</Package>
+<Diagram id="8eba33d9-a27b-11ea-b537-dfaaecc5bf61">
+<name>
+<val>main</val>
+</name>
+<ownedPresentation>
+<reflist>
+<ref refid="901c67bf-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="917f8c8b-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="94a7f262-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="99659d93-a283-11ea-b537-dfaaecc5bf61"/>
+<ref refid="d6d07098-a283-11ea-b537-dfaaecc5bf61"/>
+<ref refid="048ff7fc-a284-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedPresentation>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<canvas>
+<item id="901c67bf-a27b-11ea-b537-dfaaecc5bf61" type="BlockItem">
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 261.21807861328125, 272.9478759765625)</val>
+</matrix>
+<width>
+<val>120.1683349609375</val>
+</width>
+<height>
+<val>72.0</val>
+</height>
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<subject>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</subject>
+</item>
+<item id="917f8c8b-a27b-11ea-b537-dfaaecc5bf61" type="BlockItem">
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 242.57666015625, 467.1666259765625)</val>
+</matrix>
+<width>
+<val>133.9542236328125</val>
+</width>
+<height>
+<val>72.0</val>
+</height>
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<subject>
+<ref refid="917f8c8a-a27b-11ea-b537-dfaaecc5bf61"/>
+</subject>
+</item>
+<item id="94a7f262-a27b-11ea-b537-dfaaecc5bf61" type="AssociationItem">
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<head_subject>
+<ref refid="95b85e81-a27b-11ea-b537-dfaaecc5bf61"/>
+</head_subject>
+<horizontal>
+<val>0</val>
+</horizontal>
+<orthogonal>
+<val>0</val>
+</orthogonal>
+<show_direction>
+<val>0</val>
+</show_direction>
+<subject>
+<ref refid="95b85e80-a27b-11ea-b537-dfaaecc5bf61"/>
+</subject>
+<tail_subject>
+<ref refid="95b85e82-a27b-11ea-b537-dfaaecc5bf61"/>
+</tail_subject>
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 315.25099590599535, 344.9478759765625)</val>
+</matrix>
+<points>
+<val>[(0.0, 0.0), (-0.696064265370353, 122.21875)]</val>
+</points>
+<head-connection>
+<ref refid="901c67bf-a27b-11ea-b537-dfaaecc5bf61"/>
+</head-connection>
+<tail-connection>
+<ref refid="917f8c8b-a27b-11ea-b537-dfaaecc5bf61"/>
+</tail-connection>
+</item>
+<item id="99659d93-a283-11ea-b537-dfaaecc5bf61" type="BlockItem">
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 415.69970703125, 467.1666259765625)</val>
+</matrix>
+<width>
+<val>171.0</val>
+</width>
+<height>
+<val>72.0</val>
+</height>
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<subject>
+<ref refid="99659d92-a283-11ea-b537-dfaaecc5bf61"/>
+</subject>
+</item>
+<item id="d6d07098-a283-11ea-b537-dfaaecc5bf61" type="AssociationItem">
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<head_subject>
+<ref refid="d889291d-a283-11ea-b537-dfaaecc5bf61"/>
+</head_subject>
+<horizontal>
+<val>0</val>
+</horizontal>
+<orthogonal>
+<val>1</val>
+</orthogonal>
+<show_direction>
+<val>0</val>
+</show_direction>
+<subject>
+<ref refid="d889291c-a283-11ea-b537-dfaaecc5bf61"/>
+</subject>
+<tail_subject>
+<ref refid="d889291e-a283-11ea-b537-dfaaecc5bf61"/>
+</tail_subject>
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 353.75286865234375, 344.9478759765625)</val>
+</matrix>
+<points>
+<val>[(0.0, 0.0), (0.0, 40.910888671875), (142.3321500890395, 40.910888671875), (142.3321500890395, 122.21875)]</val>
+</points>
+<head-connection>
+<ref refid="901c67bf-a27b-11ea-b537-dfaaecc5bf61"/>
+</head-connection>
+<tail-connection>
+<ref refid="99659d93-a283-11ea-b537-dfaaecc5bf61"/>
+</tail-connection>
+</item>
+<item id="048ff7fc-a284-11ea-b537-dfaaecc5bf61" type="BlockItem">
+<matrix>
+<val>(1.0, 0.0, 0.0, 1.0, 261.21807861328125, 74.24952697753906)</val>
+</matrix>
+<width>
+<val>247.0</val>
+</width>
+<height>
+<val>180.0</val>
+</height>
+<diagram>
+<ref refid="8eba33d9-a27b-11ea-b537-dfaaecc5bf61"/>
+</diagram>
+<show_parts>
+<val>1</val>
+</show_parts>
+<show_references>
+<val>1</val>
+</show_references>
+<subject>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</subject>
+</item>
+</canvas>
+</Diagram>
+<Block id="901c67be-a27b-11ea-b537-dfaaecc5bf61">
+<name>
+<val>Wheel</val>
+</name>
+<ownedAttribute>
+<reflist>
+<ref refid="95b85e82-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="d889291e-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedAttribute>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<presentation>
+<reflist>
+<ref refid="901c67bf-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="048ff7fc-a284-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</presentation>
+</Block>
+<Block id="917f8c8a-a27b-11ea-b537-dfaaecc5bf61">
+<name>
+<val>InflationValve</val>
+</name>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<presentation>
+<reflist>
+<ref refid="917f8c8b-a27b-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</presentation>
+</Block>
+<Association id="95b85e80-a27b-11ea-b537-dfaaecc5bf61">
+<memberEnd>
+<reflist>
+<ref refid="95b85e81-a27b-11ea-b537-dfaaecc5bf61"/>
+<ref refid="95b85e82-a27b-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</memberEnd>
+<ownedEnd>
+<reflist>
+<ref refid="95b85e81-a27b-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedEnd>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<presentation>
+<reflist>
+<ref refid="94a7f262-a27b-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</presentation>
+</Association>
+<Property id="95b85e81-a27b-11ea-b537-dfaaecc5bf61">
+<association>
+<ref refid="95b85e80-a27b-11ea-b537-dfaaecc5bf61"/>
+</association>
+<owningAssociation>
+<ref refid="95b85e80-a27b-11ea-b537-dfaaecc5bf61"/>
+</owningAssociation>
+<type>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</type>
+</Property>
+<Property id="95b85e82-a27b-11ea-b537-dfaaecc5bf61">
+<aggregation>
+<val>composite</val>
+</aggregation>
+<association>
+<ref refid="95b85e80-a27b-11ea-b537-dfaaecc5bf61"/>
+</association>
+<class_>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</class_>
+<name>
+<val>v</val>
+</name>
+<type>
+<ref refid="917f8c8a-a27b-11ea-b537-dfaaecc5bf61"/>
+</type>
+<upperValue>
+<val>1</val>
+</upperValue>
+<upperValue>
+<val>1</val>
+</upperValue>
+</Property>
+<Block id="99659d92-a283-11ea-b537-dfaaecc5bf61">
+<name>
+<val>TirePressureMonitor</val>
+</name>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<presentation>
+<reflist>
+<ref refid="99659d93-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</presentation>
+</Block>
+<Association id="d889291c-a283-11ea-b537-dfaaecc5bf61">
+<memberEnd>
+<reflist>
+<ref refid="d889291d-a283-11ea-b537-dfaaecc5bf61"/>
+<ref refid="d889291e-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</memberEnd>
+<ownedEnd>
+<reflist>
+<ref refid="d889291d-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</ownedEnd>
+<package>
+<ref refid="8eba33d8-a27b-11ea-b537-dfaaecc5bf61"/>
+</package>
+<presentation>
+<reflist>
+<ref refid="d6d07098-a283-11ea-b537-dfaaecc5bf61"/>
+</reflist>
+</presentation>
+</Association>
+<Property id="d889291d-a283-11ea-b537-dfaaecc5bf61">
+<association>
+<ref refid="d889291c-a283-11ea-b537-dfaaecc5bf61"/>
+</association>
+<owningAssociation>
+<ref refid="d889291c-a283-11ea-b537-dfaaecc5bf61"/>
+</owningAssociation>
+<type>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</type>
+</Property>
+<Property id="d889291e-a283-11ea-b537-dfaaecc5bf61">
+<association>
+<ref refid="d889291c-a283-11ea-b537-dfaaecc5bf61"/>
+</association>
+<class_>
+<ref refid="901c67be-a27b-11ea-b537-dfaaecc5bf61"/>
+</class_>
+<name>
+<val>tpms</val>
+</name>
+<type>
+<ref refid="99659d92-a283-11ea-b537-dfaaecc5bf61"/>
+</type>
+<upperValue>
+<val>1</val>
+</upperValue>
+<upperValue>
+<val>1</val>
+</upperValue>
+</Property>
+<StyleSheet id="4dea8aa8-bade-11ea-8f1c-ff74c5b58427">
+<styleSheet>
+<val>* {
+  font-family: purisa
+}
+
+/****
+ Here you can edit the
+ style of the model.
+ Gaphor supports a
+ subset of CSS3.
+
+ The following proper-
+ ties are supported:
+
+ * padding: Padding
+ * min-width: Number
+ * min-height: Number
+ * line-width: Number
+ * vertical-spacing: Number
+ * border-radius: Number
+ * background-color: Color
+ * font-family: Text
+ * font-size: Number
+ * font-style: normal|italic
+ * font-weight: normal|bold
+ * text-decoration: none|underline
+ * text-align: left|center|right
+ * text-color: Color
+ * color: Color
+ * vertical-align: top|middle|bottom
+ * dash-style: Sequence[Number]
+ * highlight-color: Color
+
+ Color can be a CSS3 color name,
+ a rgb(r, g, b), rgba(r, g, b, a)
+ or hex code (#ff00ff).
+
+ Have fun!
+
+****/
+</val>
+</styleSheet>
+</StyleSheet>
+</gaphor>
