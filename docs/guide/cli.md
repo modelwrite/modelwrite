@@ -17,7 +17,13 @@ on the command line, where it would land in the shell history and the process li
 
 ## Install
 
-From this repository (works today):
+From crates.io (published):
+
+```console
+cargo install mw-cli
+```
+
+Or from this repository:
 
 ```console
 cargo install --path cli
@@ -27,8 +33,10 @@ Or download a prebuilt binary from the GitHub releases page; the `mw` assets are
 `mw-linux-x64`, `mw-linux-arm64`, `mw-darwin-x64`, `mw-darwin-arm64`, and
 `mw-windows-x64.exe`.
 
-The `mw-cli` crate is prepared for crates.io (`cargo install mw-cli`); its first
-crates.io release is pending the engine layer being re-released at a bumped version.
+The engine layer is published alongside the CLI (`mw-okf`, `mw-graph`, `mw-gate`,
+`mw-binding`, `mw-capi`, `mw-binding-xmi`, `mw-agent`, `mw-analytics`,
+`mw-mcp`, `mw-test-support`, `mw-server`), all at 0.2.0. The engine's 1.75 MSRV
+floor is pinned in the engine crates' own manifests (indexmap =2.11.4, zeroize =1.8.2).
 
 ## HTTP mode
 

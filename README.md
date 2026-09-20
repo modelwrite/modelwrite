@@ -57,10 +57,8 @@ The `mw` command line ships as a prebuilt binary on the GitHub releases page
 `mw-windows-x64.exe`), or build it from this repository with `cargo install --path cli`.
 Both modes — HTTP and offline — are documented in [docs/guide/cli.md](docs/guide/cli.md).
 
-The `mw-cli` crate is prepared for crates.io (metadata and version are in place) but is not
-published yet: publishing it requires first re-releasing the engine layer at a bumped
-version, because the engine crates already on crates.io predate the subsystem-reference and
-write-path-convergence work.
+The `mw-cli` crate is published on crates.io (`cargo install mw-cli`), as are the ten
+engine crates and `mw-server`, all at 0.2.0.
 
 - **Crates** — `cargo build --workspace` (see Quickstart above). The service is the
   `mw-server` crate; the CLI is the `mw-cli` crate, which builds the `mw` binary.
