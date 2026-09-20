@@ -393,3 +393,43 @@ fn an_authored_commit_is_not_held_to_migration_rules() {
 
     assert_eq!(commit.provenance, CommitProvenance::Authored);
 }
+
+#[test]
+fn the_store_derives_the_summary_so_every_commit_path_inherits_a_true_summary() {
+    // The summary is DERIVED from the document's own sections, and the derivation lives in
+    // the store's commit path - not in commit_core, not in the offline CLI. This test drives
+    // store.commit_model directly with a document whose summary under-counts its graph, and
+    // the stored document must come back with a true summary. If the derivation were removed
+    // from the store, the stale summary would be committed verbatim and this fails.
+    let (store, _dir) = store();
+    store.create_project("coffee", None).unwrap();
+
+    let (_root, bytes) = candidate();
+    let stale_hash = store.put_blob(&bytes).unwrap();
+    let commit = store
+        .commit_model(
+            "coffee",
+            "main",
+            &stale_hash,
+            "alex",
+            "typed",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // The commit must reference the CORRECTED bytes, not the stale ones the caller stored.
+    assert_ne!(
+        commit.okf_hash, stale_hash,
+        "the summary must have been re-derived from the document"
+    );
+    let stored = store.blob(&commit.okf_hash).unwrap().unwrap();
+    let root: OkfRoot = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(
+        root.summary.graph_nodes, 1,
+        "the stored summary must count the one graph node"
+    );
+    assert_eq!(root.summary.blocks, 0);
+    assert_eq!(root.summary.graph_edges, 0);
+}

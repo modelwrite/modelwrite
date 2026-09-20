@@ -456,6 +456,9 @@ impl Store for PostgresStore {
         audit: Option<&AuditEntry>,
         import: Option<&ImportProvenance>,
     ) -> Result<Commit, StoreError> {
+        // The summary is derived from the document HERE, at the convergence point every
+        // write path reaches, so a commit made through any caller carries a true summary.
+        let okf_hash = super::derived_okf_hash(|h| self.blob(h), |b| self.put_blob(b), okf_hash)?;
         self.with_tx(|tx| {
             if let Some(guard) = guard.as_ref() {
                 enforce_guard(tx, project, guard)?;
@@ -487,7 +490,7 @@ impl Store for PostgresStore {
 
             let parents: Vec<String> = tip.into_iter().collect();
             let created_at = now_epoch();
-            let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+            let hash = super::commit_hash(project, branch, &parents, &okf_hash, author, message);
             let parents_json = serde_json::to_string(&parents).map_err(backend)?;
 
             // Provenance is decided HERE, from the same import the caller supplied, and written
@@ -663,7 +666,7 @@ impl Store for PostgresStore {
                 project: project.to_string(),
                 branch: branch.to_string(),
                 parents,
-                okf_hash: okf_hash.to_string(),
+                okf_hash,
                 author: author.to_string(),
                 message: message.to_string(),
                 created_at,
@@ -684,6 +687,9 @@ impl Store for PostgresStore {
         audit: Option<&AuditEntry>,
         acceptance: &super::AcceptanceProvenance,
     ) -> Result<Commit, StoreError> {
+        // Same convergence point as commit_model: an accepted model's summary is derived
+        // here, so no acceptance path can carry a false self-count.
+        let okf_hash = super::derived_okf_hash(|h| self.blob(h), |b| self.put_blob(b), okf_hash)?;
         self.with_tx(|tx| {
             if let Some(guard) = guard.as_ref() {
                 enforce_guard(tx, project, guard)?;
@@ -715,7 +721,7 @@ impl Store for PostgresStore {
 
             let parents: Vec<String> = tip.into_iter().collect();
             let created_at = now_epoch();
-            let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+            let hash = super::commit_hash(project, branch, &parents, &okf_hash, author, message);
             let parents_json = serde_json::to_string(&parents).map_err(backend)?;
 
             // Provenance is the acceptance itself, written in this transaction so the commit
@@ -802,7 +808,7 @@ impl Store for PostgresStore {
                 project: project.to_string(),
                 branch: branch.to_string(),
                 parents,
-                okf_hash: okf_hash.to_string(),
+                okf_hash,
                 author: author.to_string(),
                 message: message.to_string(),
                 created_at,
@@ -829,6 +835,9 @@ impl Store for PostgresStore {
                 parents.len()
             )));
         }
+        // Same convergence point as commit_model: a merged document's summary is derived
+        // here, so a merge made through any path carries a true summary.
+        let okf_hash = super::derived_okf_hash(|h| self.blob(h), |b| self.put_blob(b), okf_hash)?;
         self.with_tx(|tx| {
             let current_tip: Option<String> = tx
                 .query_opt(
@@ -865,7 +874,7 @@ impl Store for PostgresStore {
 
             let parents: Vec<String> = parents.to_vec();
             let created_at = now_epoch();
-            let hash = super::commit_hash(project, branch, &parents, okf_hash, author, message);
+            let hash = super::commit_hash(project, branch, &parents, &okf_hash, author, message);
             let parents_json = serde_json::to_string(&parents).map_err(backend)?;
 
             // A merge is a write path, not a migration: it is labelled authored, never left for
@@ -891,7 +900,7 @@ impl Store for PostgresStore {
                 project: project.to_string(),
                 branch: branch.to_string(),
                 parents,
-                okf_hash: okf_hash.to_string(),
+                okf_hash,
                 author: author.to_string(),
                 message: message.to_string(),
                 created_at,

@@ -158,6 +158,47 @@ fn offline_commit_then_log_round_trips() {
 }
 
 #[test]
+fn offline_commit_derives_a_true_summary() {
+    // The offline CLI reaches the store directly, bypassing the HTTP commit core, so this is
+    // the convergence test the shared-core refactor exists for: a document whose summary
+    // under-counts its graph must still be stored with a true summary, because the store's
+    // commit path derives it. Before the derivation moved into the store, this committed the
+    // false self-count verbatim.
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("mw.db");
+    let db = db.to_str().unwrap();
+
+    run_ok(&["--db", db, "project", "create", "coffee"]);
+    let mut model = okf_json("coffee");
+    // One graph node, but the summary claims zero: a stale, false self-count.
+    model["summary"] = serde_json::json!({ "blocks": 0, "requirements": 0, "interfaces": 0, "signals": 0, "activities": 0, "graphNodes": 0, "graphEdges": 0 });
+    let path = write_file(dir.path(), "stale.json", &model.to_string());
+    run_ok(&[
+        "--db",
+        db,
+        "commit",
+        "coffee",
+        "--branch",
+        "main",
+        "--message",
+        "stale summary",
+        "--file",
+        path.to_str().unwrap(),
+    ]);
+
+    let store = server::store::sqlite::SqliteStore::open(&dir.path().join("mw.db")).unwrap();
+    let tip = store.branch_tip("coffee", "main").unwrap().unwrap();
+    let commit = store.commit("coffee", &tip).unwrap().unwrap();
+    let blob = store.blob(&commit.okf_hash).unwrap().unwrap();
+    let stored: Value = serde_json::from_slice(&blob).unwrap();
+    assert_eq!(
+        stored["summary"]["graphNodes"], 1,
+        "the offline commit must store a summary that counts its one graph node"
+    );
+    assert_eq!(stored["summary"]["blocks"], 0);
+}
+
+#[test]
 fn offline_artifact_fetches_the_retained_source_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("mw.db");
