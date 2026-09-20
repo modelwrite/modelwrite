@@ -1,7 +1,7 @@
 # idc-1 trial deployment
 
 Status: DONE — modelwrite trial running on idc-1 at https://trial.modelwrite.org,
-seeded, verified from outside, with a nightly sandbox reset. The trial is
+seeded, verified from outside, with an hourly sandbox reset. The trial is
 intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 
 ## Host and service
@@ -98,6 +98,12 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
   live model fleet.
 - Reset: `/opt/modelwrite/deploy/reset-trial.sh`, run by
   `modelwrite-trial-reset.service` (Type=oneshot). It:
+  0. runs a change-detection guard: compares the live SQLite DB against the seed (per
+     project: existence, the branch list, and every branch's tip hash). If they match
+     exactly it logs "no changes since the last reset, skipping" and exits 0 WITHOUT
+     stopping the service, taking a backup, or rebuilding anything. If the state is
+     unreadable (missing manifest, unreadable DB, query error) the guard fails CLOSED and
+     the full reset runs;
   1. builds a FRESH database off to the side by replaying `/opt/modelwrite/seed/manifest.json`
      into a throwaway seed container (`seed-from-manifest.py`), verifying every reproduced
      commit hash against the captured `expectedHash` - the live service keeps serving;
@@ -106,8 +112,9 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
      `/opt/modelwrite/backups/<date>T<time>.db` (keeps the last 48), swaps the fresh DB in,
      restarts, and logs. On any failure the service is restarted on the last good database
      (never left down).
-- Safe to run twice (idempotent). Backups are timestamped (date+time), so every hourly
-  reset is a distinct file.
+- Backups are timestamped (date+time), so every hourly reset is a distinct file. A skip
+  takes NO backup (the outgoing DB is just the seed) and does NOT restart the service, so a
+  quiet hour costs nothing.
 
 ## Seed (canonical + reproducible)
 
@@ -124,7 +131,8 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
 
 ```sh
 sudo journalctl -u modelwrite -f                 # logs
-sudo systemctl start modelwrite-trial-reset.service   # reset by hand
+sudo systemctl start modelwrite-trial-reset.service   # reset by hand (skips if unchanged)
+sudo env FORCE=1 /opt/modelwrite/deploy/reset-trial.sh   # force a reset, ignoring the guard
 sudo systemctl restart modelwrite                # restart
 ```
 
