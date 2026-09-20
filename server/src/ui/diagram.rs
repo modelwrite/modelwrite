@@ -41,15 +41,13 @@ use crate::ui::model::{resolve_hash, view_branch, ModelQuery};
 
 // ---------------------------------------------------------------------------
 // Geometry constants local to the renderer. Node sizes come from the engine
-// layout; these only cover the dangling-marker lane and the edge spread.
+// layout; these only cover the dangling-marker lane (edge routing is in the engine).
 // ---------------------------------------------------------------------------
 
 const MARGIN: f64 = 28.0;
 const DANGLING_W: f64 = 180.0;
 const DANGLING_H: f64 = 48.0;
 const DANG_GAP: f64 = 44.0;
-/// The perpendicular spread between parallel edges that share a source/target pair.
-const SPREAD: f64 = 11.0;
 
 /// The two diagram types. The choice is kept in the URL view query like every other view.
 #[derive(Clone, Copy, PartialEq)]
@@ -365,30 +363,35 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
             None
         }
     };
-    let mut pair_total: HashMap<(&str, &str), usize> = HashMap::new();
-    for edge in &edges {
-        if resolve(&edge.source).is_some() && resolve(&edge.target).is_some() {
-            *pair_total
-                .entry((edge.source.as_str(), edge.target.as_str()))
-                .or_insert(0) += 1;
+    // Route every node-to-node edge together (not one at a time) so anchors spread across a
+    // side, fan-out edges share a trunk, dependency edges take their own lane, and crossings are
+    // marked with a jump. The draw position doubles as the deterministic draw order.
+    let mut requests: Vec<routing::EdgeRequest> = Vec::new();
+    let mut route_for: HashMap<usize, usize> = HashMap::new();
+    for (pos, edge) in edges.iter().enumerate() {
+        let node_to_node = matches!(
+            (resolve(&edge.source), resolve(&edge.target)),
+            (Some(Anchor::Node(_)), Some(Anchor::Node(_)))
+        );
+        if !node_to_node || edge.source == edge.target {
+            continue;
         }
+        requests.push(routing::EdgeRequest {
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            lane: routing::Lane::from_group(edge_group(&edge.kind)),
+            index: pos,
+        });
+        route_for.insert(pos, requests.len() - 1);
     }
-    let mut pair_seen: HashMap<(&str, &str), usize> = HashMap::new();
-    let all_boxes: Vec<&NodeBox> = layout.nodes.iter().collect();
-    for edge in &edges {
+    let routed = routing::route_graph(&layout.nodes, &requests);
+
+    for (pos, edge) in edges.iter().enumerate() {
         let (Some(src), Some(tgt)) = (resolve(&edge.source), resolve(&edge.target)) else {
             continue;
         };
-        let key = (edge.source.as_str(), edge.target.as_str());
-        let total = pair_total[&key];
-        let seen = pair_seen.entry(key).or_insert(0);
-        let offset = if total > 1 {
-            (*seen as f64 - (total as f64 - 1.0) / 2.0) * SPREAD
-        } else {
-            0.0
-        };
-        *seen += 1;
-        push_edge(&mut svg, edge, &src, &tgt, &all_boxes, offset);
+        let route = route_for.get(&pos).map(|&ri| &routed[ri]);
+        push_edge(&mut svg, edge, &src, &tgt, route);
     }
 
     for node_box in &layout.nodes {
@@ -454,8 +457,7 @@ fn push_edge(
     edge: &GraphEdge,
     src: &Anchor<'_>,
     tgt: &Anchor<'_>,
-    all_boxes: &[&NodeBox],
-    offset: f64,
+    route: Option<&routing::RoutedEdge>,
 ) {
     let group = edge_group(&edge.kind);
     // Dependency (Satisfy/…) edges are a secondary relationship: dashed so they read as a layer
@@ -485,18 +487,18 @@ fn push_edge(
             ));
             (cx, top, 0.0, 1.0, cx, top - 28.0)
         }
-        (Anchor::Node(sb), Anchor::Node(tb)) => {
-            let pts = routing::route_offset(sb, tb, all_boxes, offset);
-            push_polyline(svg, &pts, group, dash);
-            let last = pts[pts.len() - 1];
-            let prev = pts[pts.len() - 2];
+        (Anchor::Node(_sb), Anchor::Node(_tb)) => {
+            let r = route.expect("node-to-node edge is routed");
+            push_polyline(svg, &r.points, &r.jumps, group, dash);
+            let last = r.points[r.points.len() - 1];
+            let prev = r.points[r.points.len() - 2];
             (
                 last.0,
                 last.1,
                 last.0 - prev.0,
                 last.1 - prev.1,
-                (pts[0].0 + last.0) / 2.0,
-                (pts[0].1 + last.1) / 2.0 - 5.0,
+                (r.points[0].0 + last.0) / 2.0,
+                (r.points[0].1 + last.1) / 2.0 - 5.0,
             )
         }
         _ => {
@@ -523,16 +525,88 @@ fn push_edge(
     svg.push_str("</g>");
 }
 
-/// Render an orthogonal route as a polyline (no fill; the stroke comes from the stylesheet).
-fn push_polyline(svg: &mut String, pts: &[(f64, f64)], group: &str, dash: &str) {
-    let points: Vec<String> = pts
-        .iter()
-        .map(|(x, y)| format!("{:.1},{:.1}", x, y))
-        .collect();
-    svg.push_str(&format!(
-        "<polyline class='mw-edge {group}' points='{}' fill='none'{dash}/>",
-        points.join(" ")
-    ));
+/// Render an orthogonal route as a polyline, or as a path when it carries crossing jumps (no
+/// fill; the stroke comes from the stylesheet).
+fn push_polyline(
+    svg: &mut String,
+    pts: &[(f64, f64)],
+    jumps: &[routing::Jump],
+    group: &str,
+    dash: &str,
+) {
+    if jumps.is_empty() {
+        let points: Vec<String> = pts
+            .iter()
+            .map(|(x, y)| format!("{:.1},{:.1}", x, y))
+            .collect();
+        svg.push_str(&format!(
+            "<polyline class='mw-edge {group}' points='{}' fill='none'{dash}/>",
+            points.join(" ")
+        ));
+    } else {
+        let d = polyline_path(pts, jumps);
+        svg.push_str(&format!(
+            "<path class='mw-edge {group}' d='{d}' fill='none'{dash}/>"
+        ));
+    }
+}
+
+/// Build an SVG path from an orthogonal polyline, inserting a small arc (a jump) where the edge
+/// crosses another, so a crossing can never be mistaken for a junction.
+fn polyline_path(pts: &[(f64, f64)], jumps: &[routing::Jump]) -> String {
+    const RADIUS: f64 = 4.0;
+    const HEIGHT: f64 = 8.0;
+    let mut d = String::new();
+    if let Some(&(x0, y0)) = pts.first() {
+        d.push_str(&format!("M {:.1} {:.1}", x0, y0));
+    }
+    for i in 0..pts.len().saturating_sub(1) {
+        let a = pts[i];
+        let b = pts[i + 1];
+        let mut seg: Vec<&routing::Jump> = jumps.iter().filter(|j| j.seg == i).collect();
+        if (a.1 - b.1).abs() < 1e-6 {
+            let dir = if b.0 >= a.0 { 1.0 } else { -1.0 };
+            seg.sort_by(|x, y| {
+                (dir * x.x)
+                    .partial_cmp(&(dir * y.x))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for j in seg {
+                let before = j.x - dir * RADIUS;
+                let after = j.x + dir * RADIUS;
+                d.push_str(&format!(" L {:.1} {:.1}", before, j.y));
+                d.push_str(&format!(
+                    " Q {:.1} {:.1} {:.1} {:.1}",
+                    j.x,
+                    j.y - HEIGHT,
+                    after,
+                    j.y
+                ));
+            }
+            d.push_str(&format!(" L {:.1} {:.1}", b.0, b.1));
+        } else {
+            let dir = if b.1 >= a.1 { 1.0 } else { -1.0 };
+            seg.sort_by(|x, y| {
+                (dir * x.y)
+                    .partial_cmp(&(dir * y.y))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for j in seg {
+                let before = j.y - dir * RADIUS;
+                let after = j.y + dir * RADIUS;
+                d.push_str(&format!(" L {:.1} {:.1}", j.x, before));
+                d.push_str(&format!(
+                    " Q {:.1} {:.1} {:.1} {:.1}",
+                    j.x - HEIGHT,
+                    j.y,
+                    j.x,
+                    after
+                ));
+            }
+            d.push_str(&format!(" L {:.1} {:.1}", b.0, b.1));
+        }
+    }
+    d
 }
 
 /// Draw an explicit arrowhead triangle at the tip, oriented along the direction of travel. The
