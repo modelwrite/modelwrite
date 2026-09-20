@@ -139,8 +139,139 @@
       }
     },
     {
+      "name": "repo.find",
+      "summary": "Search a revision's elements by name, id or stereotype fragment, returning each match's id, name and kind. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "hash",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "repo.element",
+      "summary": "Read one element by id from a revision: its attributes and its graph edges. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "hash",
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "repo.coverage",
+      "summary": "Requirement coverage for a revision: covered and uncovered, each named, from the engine's requirement_coverage. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "hash"
+        ]
+      }
+    },
+    {
+      "name": "repo.references",
+      "summary": "A model's typed subsystem references, with an optional resolve flag for each reference's resolve state (the same resolution the UI and API use). Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "resolve": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project",
+          "hash"
+        ]
+      }
+    },
+    {
       "name": "repo.importReport",
       "summary": "Read a migration's loss report and the engine's fidelity measurement, by retained artifact hash. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "artifactHash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "artifactHash"
+        ]
+      }
+    },
+    {
+      "name": "repo.lossSummary",
+      "summary": "A migration's loss report aggregated by construct and verdict with counts, plus paging over the full list. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "artifactHash": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project",
+          "artifactHash"
+        ]
+      }
+    },
+    {
+      "name": "repo.artifact",
+      "summary": "The retained original bytes of a migrated artifact, byte for byte. Repository mode (opt-in): read permission.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -221,6 +352,46 @@
       }
     },
     {
+      "name": "repo.proposals",
+      "summary": "The project's proposals with their decisions and who made them. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "repo.analytics",
+      "summary": "The portfolio question: which models meet which requirements, read from the project analytics route. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "requirements": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "requirements"
+        ]
+      }
+    },
+    {
       "name": "repo.propose",
       "summary": "Record a proposal for a human to review and decide. The agent's output: it persists a proposal (review permission) and never writes a change - a human accepts it. Repository mode (opt-in).",
       "inputSchema": {
@@ -261,6 +432,8 @@
       { "method": "GET", "path": "/projects/:project/commits", "permission": "read", "summary": "List commits on a branch" },
       { "method": "GET", "path": "/projects/:project/commits/:hash", "permission": "read", "summary": "Fetch the OKF document behind a commit" },
       { "method": "GET", "path": "/projects/:project/commits/:hash/record", "permission": "read", "summary": "Fetch a commit's record and provenance" },
+      { "method": "GET", "path": "/projects/:project/commits/:hash/references", "permission": "read", "summary": "Fetch the subsystem references a platform model declares at a commit" },
+      { "method": "GET", "path": "/projects/:project/commits/:hash/references/resolve", "permission": "read", "summary": "Whether every subsystem reference in a platform model resolves, per reference" },
       { "method": "GET", "path": "/projects/:project/commits/:hash/checks", "permission": "write-or-review", "summary": "Read the gate checks recorded against a commit" },
       { "method": "POST", "path": "/projects/:project/branches", "permission": "write", "summary": "Create a branch" },
       { "method": "GET", "path": "/projects/:project/branches", "permission": "read", "summary": "List branches and their tips" },
@@ -272,6 +445,7 @@
       { "method": "GET", "path": "/projects/:project/import/:artifactHash/report", "permission": "read", "summary": "Read an import's loss report and fidelity measurement" },
       { "method": "GET", "path": "/projects/:project/import/:artifactHash/artifact", "permission": "read", "summary": "Fetch the retained source artifact byte for byte" },
       { "method": "POST", "path": "/projects/:project/proposals", "permission": "review", "summary": "Record an agent's proposal (the review artifact IS the body)" },
+      { "method": "GET", "path": "/projects/:project/proposals", "permission": "read", "summary": "List a project's proposals with their decisions, newest first" },
       { "method": "GET", "path": "/projects/:project/proposals/:id", "permission": "read", "summary": "Fetch a proposal by id" },
       { "method": "POST", "path": "/projects/:project/proposals/:id/accept", "permission": "write", "summary": "A human with write accepts a proposal by id" },
       { "method": "POST", "path": "/projects/:project/proposals/:id/refuse", "permission": "write", "summary": "A human with write refuses a proposal by id" },

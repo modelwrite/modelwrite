@@ -118,8 +118,85 @@ fn repository_tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "repo.find",
+            "description": "Search a revision's elements by name, id or stereotype fragment, returning each match's id, name and kind. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" },
+                    "query": { "type": "string" }
+                },
+                "required": ["project", "hash", "query"]
+            }
+        }),
+        json!({
+            "name": "repo.element",
+            "description": "Read one element by id from a revision: its attributes and its graph edges, so an agent can answer a one-line question without pulling the whole model. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" },
+                    "id": { "type": "string" }
+                },
+                "required": ["project", "hash", "id"]
+            }
+        }),
+        json!({
+            "name": "repo.coverage",
+            "description": "Requirement coverage for a revision: covered and uncovered, each named, from the engine's requirement_coverage function (never a reimplementation). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" }
+                },
+                "required": ["project", "hash"]
+            }
+        }),
+        json!({
+            "name": "repo.references",
+            "description": "A model's typed subsystem references, with an optional resolve flag that reports each reference's resolve state via the SAME resolution the UI and API use. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "hash": { "type": "string" },
+                    "resolve": { "type": "boolean" }
+                },
+                "required": ["project", "hash"]
+            }
+        }),
+        json!({
             "name": "repo.importReport",
             "description": "Read a migration's loss report and the engine's fidelity measurement, by retained artifact hash. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "artifactHash": { "type": "string" }
+                },
+                "required": ["project", "artifactHash"]
+            }
+        }),
+        json!({
+            "name": "repo.lossSummary",
+            "description": "A migration's loss report AGGREGATED by construct and verdict with counts, plus paging over the full list - the full list stays available and nothing is dropped. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "artifactHash": { "type": "string" },
+                    "offset": { "type": "integer" },
+                    "limit": { "type": "integer" }
+                },
+                "required": ["project", "artifactHash"]
+            }
+        }),
+        json!({
+            "name": "repo.artifact",
+            "description": "The retained original bytes of a migrated artifact, byte for byte, so an agent can verify a migration rather than trust a summary. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -165,6 +242,31 @@ fn repository_tool_definitions() -> Vec<Value> {
                     "hash": { "type": "string" }
                 },
                 "required": ["project", "hash"]
+            }
+        }),
+        json!({
+            "name": "repo.proposals",
+            "description": "The project's proposals with their decisions and who made them, so an agent can see what happened to what it proposed. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" }
+                },
+                "required": ["project"]
+            }
+        }),
+        json!({
+            "name": "repo.analytics",
+            "description": "The portfolio question: which models meet which requirements, read from the project analytics route. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "requirements": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "commit": { "type": "string" }
+                },
+                "required": ["project", "requirements"]
             }
         }),
         json!({
@@ -270,13 +372,19 @@ fn call_tool(msg: &Value, repo: &Repository) -> Value {
         }
         // Every repository tool routes through the single dispatch in repository::run_tool,
         // which issues only read (GET) routes and the one propose (POST /proposals) route.
-        "repo.projects" | "repo.branches" | "repo.commits" | "repo.read" | "repo.importReport"
-        | "repo.diff" | "repo.audit" | "repo.checks" | "repo.propose" => {
-            match repo.run_tool(name, &args) {
-                Ok(value) => tool_ok(pretty(&value)),
-                Err(e) => tool_error(&e),
-            }
-        }
+        "repo.projects" | "repo.branches" | "repo.commits" | "repo.read" | "repo.find"
+        | "repo.element" | "repo.coverage" | "repo.references" | "repo.importReport"
+        | "repo.lossSummary" | "repo.diff" | "repo.audit" | "repo.checks" | "repo.proposals"
+        | "repo.analytics" | "repo.propose" => match repo.run_tool(name, &args) {
+            Ok(value) => tool_ok(pretty(&value)),
+            Err(e) => tool_error(&e),
+        },
+        // The one repository tool whose answer is raw bytes, not JSON: it must reach the agent
+        // verbatim - byte for byte - so it bypasses the JSON formatter.
+        "repo.artifact" => match repo.run_raw_tool(name, &args) {
+            Ok(text) => tool_ok(text),
+            Err(e) => tool_error(&e),
+        },
         _ => tool_error(&format!("unknown tool: {}", name)),
     }
 }

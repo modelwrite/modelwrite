@@ -151,6 +151,8 @@ project name, commit hash, branch name or artifact hash.
 | GET | /projects/:project/commits | read | List commits on a branch (?branch=, default main) |
 | GET | /projects/:project/commits/:hash | read | Fetch the OKF document behind a commit |
 | GET | /projects/:project/commits/:hash/record | read | Fetch a commit's record and provenance |
+| GET | /projects/:project/commits/:hash/references | read | Fetch the subsystem references a platform model declares at a commit |
+| GET | /projects/:project/commits/:hash/references/resolve | read | Whether every subsystem reference in a platform model resolves, per reference |
 | GET | /projects/:project/commits/:hash/checks | write-or-review | Read the gate checks recorded against a commit |
 | POST | /projects/:project/branches | write | Create a branch |
 | GET | /projects/:project/branches | read | List branches and their tips |
@@ -162,6 +164,7 @@ project name, commit hash, branch name or artifact hash.
 | GET | /projects/:project/import/:artifactHash/report | read | Read an import's loss report and fidelity measurement |
 | GET | /projects/:project/import/:artifactHash/artifact | read | Fetch the retained source artifact byte for byte |
 | POST | /projects/:project/proposals | review | Record an agent's proposal (the body IS the review artifact) |
+| GET | /projects/:project/proposals | read | List a project's proposals with their decisions, newest first |
 | GET | /projects/:project/proposals/:id | read | Fetch a proposal by id |
 | POST | /projects/:project/proposals/:id/accept | write | A human with write accepts a proposal by id |
 | POST | /projects/:project/proposals/:id/refuse | write | A human with write refuses a proposal by id |
@@ -184,11 +187,13 @@ returns the import's loss report and fidelity measurement whether or not it was 
 
 ## The MCP tools
 
-The MCP server (`mw-mcp`) exposes thirteen tools. The first four are document-level: they
+The MCP server (`mw-mcp`) exposes twenty-one tools. The first four are document-level: they
 operate on documents supplied in the request and never touch a repository or the network. The
-remaining nine are the repository tools, opt-in and read-and-propose only. Their names and
+remaining seventeen are the repository tools, opt-in and read-and-propose only. Their names and
 input schemas are in `docs/agents/mcp-tools.json` and are additive. `gate.run` and `repo.diff`
-also accept an optional `strictCoverage` boolean, named in the manifest rather than below.
+also accept an optional `strictCoverage` boolean, `repo.references` an optional `resolve`
+boolean, `repo.lossSummary` optional `offset`/`limit` paging, and `repo.analytics` optional
+`branch`/`commit` selectors - each named in the manifest rather than below.
 
 ### Document tools (always available, no repository, no network)
 
@@ -214,16 +219,31 @@ never a retry.
 | `repo.branches` | `project` | The project's branches and their tips |
 | `repo.commits` | `project` | The commits on a branch (`branch`, default `main`) |
 | `repo.read` | `project`, `hash` | The OKF model behind a commit, with its commit record (provenance) |
+| `repo.find` | `project`, `hash`, `query` | Elements matching a name, id or stereotype fragment: each id, name and kind |
+| `repo.element` | `project`, `hash`, `id` | One element by id: its attributes and its graph edges |
+| `repo.coverage` | `project`, `hash` | Requirement coverage: covered and uncovered, each named, from the engine |
+| `repo.references` | `project`, `hash` | The model's typed subsystem references, and with `resolve` each reference's resolve state |
 | `repo.importReport` | `project`, `artifactHash` | A migration's loss report and fidelity measurement |
+| `repo.lossSummary` | `project`, `artifactHash` | The loss report aggregated by construct and verdict, with paging over the full list |
+| `repo.artifact` | `project`, `artifactHash` | The retained original bytes of a migrated artifact |
 | `repo.diff` | `project`, `reference`, `candidate` | The local gate verdict and evidence for two commits (never records a run) |
 | `repo.audit` | `project` | The append-only audit log |
 | `repo.checks` | `project`, `hash` | The gate checks recorded against a commit |
+| `repo.proposals` | `project` | The project's proposals with their decisions and who made them |
+| `repo.analytics` | `project`, `requirements` | The portfolio answer: which models meet which requirements |
 | `repo.propose` | `project`, `reviewArtifact` | The recorded proposal (the agent's output for a human to decide) |
 
 `repo.diff` reads the two models from the repository and runs the gate LOCALLY with the same
 engine the service uses. It returns the verdict and evidence but never records a run, because
 recording a run is a write (`POST /projects/:project/gate`). `repo.propose` is the agent's real
 job: it persists a proposal (the `review` permission) for a human to accept or refuse by id.
+
+The new tools are all read-only views over what the engine already computes. `repo.coverage` is
+the engine's `requirement_coverage`; `repo.references` with `resolve` is the same resolution the
+UI and the API use; and `repo.lossSummary` aggregates the loss report without dropping an entry -
+the full list stays available through paging. `repo.find`, `repo.element` and `repo.artifact`
+are targeted reads, so an agent can answer "where is the pump?" or verify a migration without
+pulling the whole model.
 
 ## How to connect your agent
 

@@ -16,6 +16,7 @@
 //! the service returns is surfaced here as a clear tool error, never a crash and never a
 //! retry.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
@@ -115,6 +116,17 @@ impl Repository {
     pub(crate) fn run_tool(&self, name: &str, args: &Value) -> Result<Value, String> {
         match &self.client {
             Some(client) => run_tool(name, args, client),
+            None => Err(NOT_CONFIGURED.to_string()),
+        }
+    }
+
+    /// Dispatch the one repository tool whose answer is raw bytes rather than JSON. It is kept
+    /// separate from [Self::run_tool] because its result must reach the agent verbatim - byte
+    /// for byte, never re-serialised through a JSON formatter - so the tool text IS the
+    /// retained artifact.
+    pub(crate) fn run_raw_tool(&self, name: &str, args: &Value) -> Result<String, String> {
+        match &self.client {
+            Some(client) => run_raw_tool(name, args, client),
             None => Err(NOT_CONFIGURED.to_string()),
         }
     }
@@ -509,15 +521,39 @@ impl RepoClient {
                 )
             });
         }
-        let detail = serde_json::from_str::<Value>(&response.body)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-            .unwrap_or_else(|| response.body.clone());
+        let detail = refusal_detail(&response.body);
         Err(format!(
             "the modelwrite service refused {} {} with HTTP {}: {}",
             method, path, response.status, detail
         ))
     }
+
+    /// Send a request and demand a 2xx answer, returning the body as raw text (not parsed as
+    /// JSON). This is the read for the retained-artifact tool: the retained source artifact IS
+    /// the body, byte for byte, and must not be re-serialised or filtered through a JSON
+    /// parser. A non-2xx answer is a refusal, surfaced exactly as [Self::json] surfaces it,
+    /// and exactly once: never a retry.
+    fn raw(&self, method: &str, path: &str, body: Option<&str>) -> Result<String, String> {
+        let response = self.request(method, path, body)?;
+        if (200..300).contains(&response.status) {
+            return Ok(response.body);
+        }
+        let detail = refusal_detail(&response.body);
+        Err(format!(
+            "the modelwrite service refused {} {} with HTTP {}: {}",
+            method, path, response.status, detail
+        ))
+    }
+}
+
+/// The human-readable detail of a non-2xx response: the service's own "error" field when it
+/// is present, otherwise the raw body. Shared by [RepoClient::json] and [RepoClient::raw] so
+/// the two refusals can never drift apart.
+fn refusal_detail(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_else(|| body.to_string())
 }
 
 /// Dispatch one repository tool against the configured client. This is the ONLY place
@@ -554,6 +590,89 @@ fn run_tool(name: &str, args: &Value, client: &RepoClient) -> Result<Value, Stri
             )?;
             Ok(json!({ "commit": record, "document": document }))
         }
+        "repo.find" => {
+            let project = require_str(args, "project")?;
+            let hash = require_str(args, "hash")?;
+            let query = require_str(args, "query")?;
+            let root = load_document(client, project, hash)?;
+            let needle = query.to_lowercase();
+            let mut matches: Vec<Value> = Vec::new();
+            push_matches(&mut matches, "structure", &root.structure, &needle);
+            push_matches(&mut matches, "interfaces", &root.interfaces, &needle);
+            push_matches(&mut matches, "signals", &root.signals, &needle);
+            Ok(json!({
+                "project": project,
+                "hash": hash,
+                "query": query,
+                "matches": matches,
+            }))
+        }
+        "repo.element" => {
+            let project = require_str(args, "project")?;
+            let hash = require_str(args, "hash")?;
+            let id = require_str(args, "id")?;
+            let root = load_document(client, project, hash)?;
+            let (section, element) = find_element(&root, id)
+                .ok_or_else(|| format!("element {} not found in commit {}", id, hash))?;
+            let edges: Vec<&okf::types::GraphEdge> = root
+                .graph
+                .as_ref()
+                .map(|g| {
+                    g.edges
+                        .iter()
+                        .filter(|e| e.source == id || e.target == id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(json!({
+                "project": project,
+                "hash": hash,
+                "id": id,
+                "section": section,
+                "element": element,
+                "edges": edges,
+            }))
+        }
+        "repo.coverage" => {
+            let project = require_str(args, "project")?;
+            let hash = require_str(args, "hash")?;
+            let root = load_document(client, project, hash)?;
+            if root.graph.is_none() {
+                return Err(format!(
+                    "commit {} has no graph section, so no coverage can be computed",
+                    hash
+                ));
+            }
+            // The engine's own coverage report, never a reimplementation: the same function
+            // the gate and the model page call.
+            let coverage = graph::requirement_coverage(&root);
+            serde_json::to_value(coverage)
+                .map_err(|e| format!("coverage does not serialize: {}", e))
+        }
+        "repo.references" => {
+            let project = require_str(args, "project")?;
+            let hash = require_str(args, "hash")?;
+            let resolve = args
+                .get("resolve")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            // The SAME resolution the API and the UI use: with the resolve flag it is the
+            // references/resolve route; without it, the raw typed references.
+            let path = if resolve {
+                format!(
+                    "/projects/{}/commits/{}/references/resolve",
+                    pct(project),
+                    pct(hash)
+                )
+            } else {
+                format!(
+                    "/projects/{}/commits/{}/references",
+                    pct(project),
+                    pct(hash)
+                )
+            };
+            client.json("GET", &path, None)
+        }
         "repo.importReport" => {
             let project = require_str(args, "project")?;
             let artifact_hash = require_str(args, "artifactHash")?;
@@ -566,6 +685,97 @@ fn run_tool(name: &str, args: &Value, client: &RepoClient) -> Result<Value, Stri
                 ),
                 None,
             )
+        }
+        "repo.lossSummary" => {
+            let project = require_str(args, "project")?;
+            let artifact_hash = require_str(args, "artifactHash")?;
+            let offset = args
+                .get("offset")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .max(0) as usize;
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .max(0) as usize;
+            let report = client.json(
+                "GET",
+                &format!(
+                    "/projects/{}/import/{}/report",
+                    pct(project),
+                    pct(artifact_hash)
+                ),
+                None,
+            )?;
+            let mappings = report
+                .get("lossReport")
+                .and_then(|lr| lr.get("mappings"))
+                .and_then(Value::as_array)
+                .ok_or_else(|| "the import report has no loss-report mappings".to_string())?;
+            // Aggregation is a VIEW over what the binding reported: it groups the entries it
+            // was handed and never drops one. The full list stays available through the page.
+            let mut by_verdict: BTreeMap<&str, usize> = BTreeMap::new();
+            let mut by_construct: BTreeMap<&str, (usize, BTreeMap<&str, usize>)> = BTreeMap::new();
+            for mapping in mappings {
+                let verdict = mapping
+                    .get("verdict")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown");
+                let subject = mapping.get("subject").and_then(Value::as_str).unwrap_or("");
+                let construct = construct_of(subject);
+                *by_verdict.entry(verdict).or_default() += 1;
+                let bucket = by_construct.entry(construct).or_default();
+                bucket.0 += 1;
+                *bucket.1.entry(verdict).or_default() += 1;
+            }
+
+            let mut verdict_rows: Vec<Value> = by_verdict
+                .iter()
+                .map(|(verdict, count)| json!({ "verdict": verdict, "count": count }))
+                .collect();
+            verdict_rows.sort_by(|a, b| {
+                b["count"]
+                    .as_u64()
+                    .cmp(&a["count"].as_u64())
+                    .then_with(|| a["verdict"].as_str().cmp(&b["verdict"].as_str()))
+            });
+
+            let mut construct_rows: Vec<Value> = by_construct
+                .iter()
+                .map(|(construct, (total, verdicts))| {
+                    json!({
+                        "construct": construct,
+                        "count": total,
+                        "unmappable": verdicts.get("Unmappable").copied().unwrap_or(0),
+                        "lossy": verdicts.get("Lossy").copied().unwrap_or(0),
+                        "exact": verdicts.get("Exact").copied().unwrap_or(0),
+                    })
+                })
+                .collect();
+            construct_rows.sort_by(|a, b| {
+                b["count"]
+                    .as_u64()
+                    .cmp(&a["count"].as_u64())
+                    .then_with(|| a["construct"].as_str().cmp(&b["construct"].as_str()))
+            });
+
+            let total = mappings.len();
+            let page: Vec<Value> = mappings.iter().skip(offset).take(limit).cloned().collect();
+            Ok(json!({
+                "artifactHash": report.get("artifactHash"),
+                "bindingId": report.get("bindingId"),
+                "bindingVersion": report.get("bindingVersion"),
+                "total": total,
+                "byVerdict": verdict_rows,
+                "byConstruct": construct_rows,
+                "page": {
+                    "offset": offset,
+                    "limit": limit,
+                    "total": total,
+                    "entries": page,
+                },
+            }))
         }
         "repo.diff" => {
             let project = require_str(args, "project")?;
@@ -630,6 +840,30 @@ fn run_tool(name: &str, args: &Value, client: &RepoClient) -> Result<Value, Stri
                 None,
             )
         }
+        "repo.proposals" => {
+            let project = require_str(args, "project")?;
+            client.json(
+                "GET",
+                &format!("/projects/{}/proposals", pct(project)),
+                None,
+            )
+        }
+        "repo.analytics" => {
+            let project = require_str(args, "project")?;
+            let requirements = require_str(args, "requirements")?;
+            let mut path = format!(
+                "/projects/{}/analytics?requirements={}",
+                pct(project),
+                pct(requirements)
+            );
+            if let Some(branch) = arg_str(args, "branch") {
+                path.push_str(&format!("&branch={}", pct(branch)));
+            }
+            if let Some(commit) = arg_str(args, "commit") {
+                path.push_str(&format!("&commit={}", pct(commit)));
+            }
+            client.json("GET", &path, None)
+        }
         "repo.propose" => {
             let project = require_str(args, "project")?;
             let artifact = args
@@ -650,6 +884,98 @@ fn run_tool(name: &str, args: &Value, client: &RepoClient) -> Result<Value, Stri
         }
         _ => Err(format!("unknown repository tool: {}", name)),
     }
+}
+
+/// Dispatch the one raw-bytes tool (repo.artifact) against the configured client. It is the
+/// retained source artifact, returned verbatim - never re-serialised and never parsed as JSON.
+fn run_raw_tool(name: &str, args: &Value, client: &RepoClient) -> Result<String, String> {
+    match name {
+        "repo.artifact" => {
+            let project = require_str(args, "project")?;
+            let artifact_hash = require_str(args, "artifactHash")?;
+            client.raw(
+                "GET",
+                &format!(
+                    "/projects/{}/import/{}/artifact",
+                    pct(project),
+                    pct(artifact_hash)
+                ),
+                None,
+            )
+        }
+        _ => Err(format!("unknown repository tool: {}", name)),
+    }
+}
+
+/// Read and deserialise the OKF document behind a commit, so the read-only model tools
+/// (find, element, coverage) share one read and one error, never a second fetch.
+fn load_document(
+    client: &RepoClient,
+    project: &str,
+    hash: &str,
+) -> Result<okf::types::OkfRoot, String> {
+    let document = client.json(
+        "GET",
+        &format!("/projects/{}/commits/{}", pct(project), pct(hash)),
+        None,
+    )?;
+    serde_json::from_value(document)
+        .map_err(|e| format!("commit {} is not an OKF document: {}", hash, e))
+}
+
+/// Whether an element matches a search fragment: a case-insensitive substring of its id, name,
+/// or any stereotype.
+fn element_matches(element: &okf::types::Element, needle: &str) -> bool {
+    element.name.to_lowercase().contains(needle)
+        || element.id.to_lowercase().contains(needle)
+        || element
+            .stereotypes
+            .iter()
+            .any(|s| s.to_lowercase().contains(needle))
+}
+
+/// Append the elements of one section that match the fragment, each with its id, name and kind
+/// plus the section that disambiguates it.
+fn push_matches(
+    out: &mut Vec<Value>,
+    section: &str,
+    elements: &[okf::types::Element],
+    needle: &str,
+) {
+    for element in elements {
+        if element_matches(element, needle) {
+            out.push(json!({
+                "id": element.id,
+                "name": element.name,
+                "kind": element.kind,
+                "section": section,
+            }));
+        }
+    }
+}
+
+/// Find an element by id across the three element sections, returning the section name so a
+/// caller can tell where the element lives.
+fn find_element<'a>(
+    root: &'a okf::types::OkfRoot,
+    id: &str,
+) -> Option<(&'static str, &'a okf::types::Element)> {
+    if let Some(e) = root.structure.iter().find(|e| e.id == id) {
+        return Some(("structure", e));
+    }
+    if let Some(e) = root.interfaces.iter().find(|e| e.id == id) {
+        return Some(("interfaces", e));
+    }
+    if let Some(e) = root.signals.iter().find(|e| e.id == id) {
+        return Some(("signals", e));
+    }
+    None
+}
+
+/// The leading construct of a loss-report subject: "uml:Port _2026x_1_..." -> "uml:Port". This
+/// is the shared key a loss entry carries to its binding table row.
+fn construct_of(subject: &str) -> &str {
+    subject.split_whitespace().next().unwrap_or(subject)
 }
 
 fn arg_str<'a>(args: &'a Value, name: &str) -> Option<&'a str> {

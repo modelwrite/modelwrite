@@ -34,10 +34,18 @@ fn tools_list_exposes_the_agent_toolset() {
             "repo.branches",
             "repo.commits",
             "repo.read",
+            "repo.find",
+            "repo.element",
+            "repo.coverage",
+            "repo.references",
             "repo.importReport",
+            "repo.lossSummary",
+            "repo.artifact",
             "repo.diff",
             "repo.audit",
             "repo.checks",
+            "repo.proposals",
+            "repo.analytics",
             "repo.propose",
         ]
     );

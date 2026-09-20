@@ -223,6 +223,147 @@ fn repository_mode_reads_a_project_a_model_and_a_loss_report() {
 }
 
 #[test]
+fn the_new_read_only_tools_cover_composition_and_aggregation() {
+    let okf = test_support::load_okf_expected();
+    let (repo, _log) = repo_with(vec![
+        (
+            ("GET", "/projects/coffee/commits/abc123"),
+            (200, okf.as_str()),
+        ),
+        (
+            ("GET", "/projects/coffee/commits/abc123/references/resolve"),
+            (
+                200,
+                r#"{"project":"coffee","commit":"abc123","resolves":true,"references":[{"project":"purchasing-terminal","revision":"r1","role":"payment","resolves":true,"reason":null},{"project":"coffee-machine","revision":"r2","role":"beverage","resolves":true,"reason":null}]}"#,
+            ),
+        ),
+        (
+            ("GET", "/projects/coffee/import/artifact0000/report"),
+            (
+                200,
+                r#"{"artifactHash":"artifact0000","bindingId":"sysml-v1-xmi","bindingVersion":"2.4","lossReport":{"binding":{"id":"sysml-v1-xmi","version":"2.4"},"mappings":[{"subject":"uml:Port p1","verdict":"Unmappable","note":"dropped"},{"subject":"uml:Port p2","verdict":"Lossy","note":"id dropped"},{"subject":"uml:Package pkg1","verdict":"Lossy","note":"flattened"},{"subject":"uml:Package pkg2","verdict":"Exact","note":"declaration"}]},"fidelity":{"equal":false}}"#,
+            ),
+        ),
+        (
+            ("GET", "/projects/coffee/import/artifact0000/artifact"),
+            (
+                200,
+                r#"<xmi:Model xmlns:xmi="http://www.omg.org/spec/XMI/2.1">
+  <ownedMember/>
+</xmi:Model>"#,
+            ),
+        ),
+        (
+            ("GET", "/projects/coffee/proposals"),
+            (
+                200,
+                r#"[{"id":"prop1","project":"coffee","agent":"mw-assist","decision":"accepted","decidedBy":"alex"}]"#,
+            ),
+        ),
+        (
+            ("GET", "/projects/coffee/analytics?requirements=REQ-1"),
+            (
+                200,
+                r#"{"project":"coffee","requirements":["REQ-1"],"covered":1,"uncovered":0,"unknown":0}"#,
+            ),
+        ),
+    ]);
+
+    // References resolve through the SAME route the UI and the API use.
+    let refs = tool_json(&call(
+        &repo,
+        "repo.references",
+        json!({ "project": "coffee", "hash": "abc123", "resolve": true }),
+    ));
+    assert_eq!(refs["resolves"], true);
+    assert_eq!(refs["references"].as_array().unwrap().len(), 2);
+
+    // Coverage is the engine's requirement_coverage, never a reimplementation.
+    let coverage = tool_json(&call(
+        &repo,
+        "repo.coverage",
+        json!({ "project": "coffee", "hash": "abc123" }),
+    ));
+    assert_eq!(coverage["total"], 25);
+    assert!(coverage["covered"].is_number());
+    assert!(coverage["uncovered"].is_array());
+
+    // find searches name/id/stereotype; element reads one result with its edges.
+    let found = tool_json(&call(
+        &repo,
+        "repo.find",
+        json!({ "project": "coffee", "hash": "abc123", "query": "pump" }),
+    ));
+    let matches = found["matches"].as_array().unwrap();
+    assert!(!matches.is_empty(), "find must match 'pump': {}", found);
+    let pump_id = matches[0]["id"].as_str().unwrap().to_string();
+    let element = tool_json(&call(
+        &repo,
+        "repo.element",
+        json!({ "project": "coffee", "hash": "abc123", "id": pump_id }),
+    ));
+    assert!(element["element"]["name"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("pump"));
+    assert!(element["edges"].is_array());
+
+    // lossSummary aggregates by construct and verdict, and pages the full list.
+    let summary = tool_json(&call(
+        &repo,
+        "repo.lossSummary",
+        json!({ "project": "coffee", "artifactHash": "artifact0000" }),
+    ));
+    assert_eq!(summary["total"], 4);
+    assert_eq!(summary["byConstruct"][0]["count"], 2);
+    let verdicts = summary["byVerdict"].as_array().unwrap();
+    let lossy = verdicts.iter().find(|v| v["verdict"] == "Lossy").unwrap();
+    assert_eq!(lossy["count"], 2);
+    let unmappable = verdicts
+        .iter()
+        .find(|v| v["verdict"] == "Unmappable")
+        .unwrap();
+    assert_eq!(unmappable["count"], 1);
+    let paged = tool_json(&call(
+        &repo,
+        "repo.lossSummary",
+        json!({ "project": "coffee", "artifactHash": "artifact0000", "offset": 0, "limit": 2 }),
+    ));
+    assert_eq!(paged["page"]["total"], 4);
+    assert_eq!(paged["page"]["entries"].as_array().unwrap().len(), 2);
+
+    // Proposals and analytics pass through the read routes.
+    let proposals = tool_json(&call(
+        &repo,
+        "repo.proposals",
+        json!({ "project": "coffee" }),
+    ));
+    assert_eq!(proposals[0]["decision"], "accepted");
+    let analytics = tool_json(&call(
+        &repo,
+        "repo.analytics",
+        json!({ "project": "coffee", "requirements": "REQ-1" }),
+    ));
+    assert_eq!(analytics["covered"], 1);
+
+    // The retained artifact is returned verbatim, byte for byte, not JSON-encoded.
+    let artifact = call(
+        &repo,
+        "repo.artifact",
+        json!({ "project": "coffee", "artifactHash": "artifact0000" }),
+    );
+    assert!(
+        !artifact["result"]["isError"].as_bool().unwrap(),
+        "artifact must succeed: {}",
+        artifact
+    );
+    let text = artifact["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("<xmi:Model"));
+    assert!(text.contains("<ownedMember/>"));
+}
+
+#[test]
 fn repository_mode_is_read_and_propose_only_on_the_wire() {
     let okf = test_support::load_okf_expected();
     let (repo, log) = repo_with(vec![
@@ -238,6 +379,13 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
             (200, r#"{"hash":"abc123","provenance":{"kind":"authored"}}"#),
         ),
         (
+            ("GET", "/projects/coffee/commits/abc123/references/resolve"),
+            (
+                200,
+                r#"{"project":"coffee","commit":"abc123","resolves":true,"references":[{"project":"coffee-machine","revision":"r1","role":"beverage","resolves":true,"reason":null}]}"#,
+            ),
+        ),
+        (
             ("GET", "/projects/coffee/commits/abc123/checks"),
             (200, r#"{"commit":"abc123","checked":false,"checks":[]}"#),
         ),
@@ -245,8 +393,17 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
             ("GET", "/projects/coffee/import/artifact0000/report"),
             (
                 200,
-                r#"{"artifactHash":"artifact0000","bindingId":"x","bindingVersion":"1","lossReport":{},"fidelity":{}}"#,
+                r#"{"artifactHash":"artifact0000","bindingId":"x","bindingVersion":"1","lossReport":{"binding":{"id":"x","version":"1"},"mappings":[{"subject":"uml:Port p1","verdict":"Lossy","note":"n"}]},"fidelity":{}}"#,
             ),
+        ),
+        (
+            ("GET", "/projects/coffee/import/artifact0000/artifact"),
+            (200, "<xmi:Model/>"),
+        ),
+        (("GET", "/projects/coffee/proposals"), (200, "[]")),
+        (
+            ("GET", "/projects/coffee/analytics?requirements=REQ-1"),
+            (200, r#"{"covered":1}"#),
         ),
         (("GET", "/projects/coffee/audit"), (200, "[]")),
         (
@@ -267,7 +424,37 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
     );
     call(
         &repo,
+        "repo.find",
+        json!({ "project": "coffee", "hash": "abc123", "query": "pump" }),
+    );
+    call(
+        &repo,
+        "repo.element",
+        json!({ "project": "coffee", "hash": "abc123", "id": "_2026x_1_12a70364_1789363591862_529655_3736" }),
+    );
+    call(
+        &repo,
+        "repo.coverage",
+        json!({ "project": "coffee", "hash": "abc123" }),
+    );
+    call(
+        &repo,
+        "repo.references",
+        json!({ "project": "coffee", "hash": "abc123", "resolve": true }),
+    );
+    call(
+        &repo,
         "repo.importReport",
+        json!({ "project": "coffee", "artifactHash": "artifact0000" }),
+    );
+    call(
+        &repo,
+        "repo.lossSummary",
+        json!({ "project": "coffee", "artifactHash": "artifact0000" }),
+    );
+    call(
+        &repo,
+        "repo.artifact",
         json!({ "project": "coffee", "artifactHash": "artifact0000" }),
     );
     call(
@@ -280,6 +467,12 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
         &repo,
         "repo.checks",
         json!({ "project": "coffee", "hash": "abc123" }),
+    );
+    call(&repo, "repo.proposals", json!({ "project": "coffee" }));
+    call(
+        &repo,
+        "repo.analytics",
+        json!({ "project": "coffee", "requirements": "REQ-1" }),
     );
     call(
         &repo,
@@ -361,21 +554,50 @@ fn repository_tools_without_configuration_answer_not_configured_and_make_no_netw
     let repo = Repository::disabled();
     assert!(!repo.is_configured());
 
-    let resp = call(&repo, "repo.projects", json!({}));
-    assert!(
-        resp.get("error").is_none(),
-        "unexpected transport error: {}",
-        resp
-    );
-    assert_eq!(resp["result"]["isError"], true);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(
-        text.contains("not configured")
-            && text.contains("MW_MCP_SERVICE_URL")
-            && text.contains("MW_MCP_TOKEN"),
-        "the refusal must name the opt-in variables and restate the air gap: {}",
-        text
-    );
+    // Every repository tool, including the new read-only ones, answers "not configured"
+    // without a client and opens no socket: the air gap holds across the whole surface.
+    let repo_tools = [
+        "repo.projects",
+        "repo.branches",
+        "repo.commits",
+        "repo.read",
+        "repo.find",
+        "repo.element",
+        "repo.coverage",
+        "repo.references",
+        "repo.importReport",
+        "repo.lossSummary",
+        "repo.artifact",
+        "repo.diff",
+        "repo.audit",
+        "repo.checks",
+        "repo.proposals",
+        "repo.analytics",
+        "repo.propose",
+    ];
+    for name in repo_tools {
+        let resp = call(&repo, name, json!({}));
+        assert!(
+            resp.get("error").is_none(),
+            "unexpected transport error for {}: {}",
+            name,
+            resp
+        );
+        assert_eq!(
+            resp["result"]["isError"], true,
+            "{} must be inert without configuration",
+            name
+        );
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("not configured")
+                && text.contains("MW_MCP_SERVICE_URL")
+                && text.contains("MW_MCP_TOKEN"),
+            "the refusal for {} must name the opt-in variables and restate the air gap: {}",
+            name,
+            text
+        );
+    }
 
     // The default entry point behaves identically: tools are LISTED (the contract is stable)
     // but inert.
@@ -388,7 +610,7 @@ fn repository_tools_without_configuration_answer_not_configured_and_make_no_netw
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert!(
-        names.contains(&"repo.projects"),
+        names.contains(&"repo.projects") && names.contains(&"repo.coverage"),
         "repo tools stay listed without config"
     );
 }
