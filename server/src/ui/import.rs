@@ -25,7 +25,9 @@ use binding::{BindingInfo, Direction, LossReport, Mapping, MappingVerdict};
 
 use crate::api::{map_store_error, validate_name, verify_actor, ApiState};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
-use crate::binding_api::{decode_artifact, import_core, ImportCore, ImportOutcome};
+use crate::binding_api::{
+    accept_import_core, decode_artifact, import_core, ImportCore, ImportOutcome,
+};
 use crate::binding_registry;
 use crate::error::ApiError;
 use crate::store::Commit;
@@ -295,8 +297,10 @@ pub async fn submit_import(
                 &identity,
                 mechanism,
                 &project,
-                &form,
                 &artifact_hash,
+                &form.branch,
+                &form.message,
+                &form.holder,
                 &loss_report,
                 &unaccepted,
                 &nav,
@@ -322,6 +326,9 @@ enum StreamImportResult {
     },
     Blocking {
         artifact_hash: String,
+        branch: String,
+        message: String,
+        holder: String,
         loss_report: LossReport,
     },
     TooLarge {
@@ -374,18 +381,28 @@ pub async fn submit_import_upload(
         ),
         Ok(StreamImportResult::Blocking {
             artifact_hash,
+            branch,
+            message,
+            holder,
             loss_report,
-        }) => layout::html_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            upload_blocking_page(
-                &identity,
-                mechanism,
-                &project,
-                &artifact_hash,
-                &loss_report,
-                &nav,
-            ),
-        ),
+        }) => {
+            let unaccepted: Vec<Mapping> = loss_report.blocking().into_iter().cloned().collect();
+            layout::html_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                blocking_page(
+                    &identity,
+                    mechanism,
+                    &project,
+                    &artifact_hash,
+                    &branch,
+                    &message,
+                    &holder,
+                    &loss_report,
+                    &unaccepted,
+                    &nav,
+                ),
+            )
+        }
         Ok(StreamImportResult::TooLarge { received }) => layout::html_response(
             StatusCode::PAYLOAD_TOO_LARGE,
             too_large_page(
@@ -572,7 +589,213 @@ async fn perform_stream_import(
             ..
         } => Ok(StreamImportResult::Blocking {
             artifact_hash,
+            branch,
+            message,
+            holder,
             loss_report,
+        }),
+    }
+}
+
+/// The values the hash-based acceptance form carries: the retained artifact's hash plus the
+/// commit metadata the original import already captured, and the checked losses. There is no
+/// artifact and no binding field: both are recovered from the import record the hash names.
+struct AcceptForm {
+    artifact_hash: String,
+    branch: String,
+    message: String,
+    holder: String,
+    accept_losses: Vec<String>,
+}
+
+impl AcceptForm {
+    fn from_form(form: &HashMap<String, String>) -> Self {
+        let artifact_hash = form.get("artifactHash").cloned().unwrap_or_default();
+        let branch = form
+            .get("branch")
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_BRANCH.to_string());
+        let message = form.get("message").cloned().unwrap_or_default();
+        let holder = form.get("holder").cloned().unwrap_or_default();
+        let accept_losses = parse_accept_losses(form);
+        AcceptForm {
+            artifact_hash,
+            branch,
+            message,
+            holder,
+            accept_losses,
+        }
+    }
+}
+
+/// What a hash-based acceptance produced. A blocking refusal is a RESULT here, not an error,
+/// exactly as in the paste and stream forms: it carries the losses still awaiting a decision.
+enum AcceptImportResult {
+    Committed {
+        commit: Box<Commit>,
+        artifact_hash: String,
+        loss_report: LossReport,
+    },
+    Blocking {
+        artifact_hash: String,
+        loss_report: LossReport,
+        unaccepted: Vec<Mapping>,
+    },
+}
+
+/// POST /ui/projects/:project/import/accept - complete a refused import from its RETAINED
+/// artifact. The form carries the artifact hash and the checked losses (plus the commit
+/// metadata already captured on the original import); the bytes are re-read from the blob
+/// store by hash, so the person never uploads the file again.
+pub async fn accept_import_form(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    form: Result<Form<HashMap<String, String>>, axum::extract::rejection::FormRejection>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
+        Ok(nav) => nav,
+        Err(error) => {
+            return layout::error_page(
+                error.status,
+                Some(&identity.subject),
+                mechanism,
+                &error.message,
+            );
+        }
+    };
+    let form = match form {
+        Ok(Form(form)) => form,
+        Err(rejection) => {
+            return layout::error_page(
+                rejection.status(),
+                Some(&identity.subject),
+                mechanism,
+                &rejection.body_text(),
+            );
+        }
+    };
+    // Preserve the commit metadata before the import runs, so an incomplete acceptance
+    // re-renders the form intact rather than dropping the branch and message.
+    let accept = AcceptForm::from_form(&form);
+    match perform_accept_import(&state, &identity, &project, &form) {
+        Ok(AcceptImportResult::Committed {
+            commit,
+            artifact_hash,
+            loss_report,
+        }) => layout::html_response(
+            StatusCode::CREATED,
+            committed_page(
+                &identity,
+                mechanism,
+                &project,
+                &commit,
+                &artifact_hash,
+                &loss_report,
+                &nav,
+            ),
+        ),
+        Ok(AcceptImportResult::Blocking {
+            artifact_hash,
+            loss_report,
+            unaccepted,
+        }) => layout::html_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            blocking_page(
+                &identity,
+                mechanism,
+                &project,
+                &artifact_hash,
+                &accept.branch,
+                &accept.message,
+                &accept.holder,
+                &loss_report,
+                &unaccepted,
+                &nav,
+            ),
+        ),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+/// The hash-based acceptance itself: permission and scope first, then the SAME
+/// [accept_import_core] the JSON endpoint calls, so the workbench and the API cannot diverge.
+fn perform_accept_import(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    form: &HashMap<String, String>,
+) -> Result<AcceptImportResult, ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    let input = AcceptForm::from_form(form);
+    if input.artifact_hash.is_empty() {
+        return Err(ApiError::bad_request("an artifact hash is required"));
+    }
+    if input.accept_losses.is_empty() {
+        return Err(ApiError::bad_request(
+            "at least one accepted loss is required",
+        ));
+    }
+    validate_name("branch name", &input.branch)?;
+    if input.message.trim().is_empty() {
+        return Err(ApiError::bad_request("commit message must not be empty"));
+    }
+    let author = identity.subject.clone();
+    let holder = if input.holder.is_empty() {
+        None
+    } else {
+        Some(input.holder.as_str())
+    };
+    verify_actor(&state.auth, identity, holder)?;
+
+    match accept_import_core(
+        state.store.as_ref(),
+        project,
+        &input.artifact_hash,
+        &input.branch,
+        &author,
+        &input.message,
+        holder,
+        &input.accept_losses,
+        &identity.subject,
+        state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
+    )? {
+        ImportOutcome::Committed {
+            commit,
+            artifact_hash,
+            loss_report,
+            ..
+        } => Ok(AcceptImportResult::Committed {
+            commit: Box::new(*commit),
+            artifact_hash,
+            loss_report,
+        }),
+        ImportOutcome::Blocking {
+            artifact_hash,
+            loss_report,
+            unaccepted,
+            ..
+        } => Ok(AcceptImportResult::Blocking {
+            artifact_hash,
+            loss_report,
+            unaccepted,
         }),
     }
 }
@@ -606,43 +829,6 @@ fn too_large_page(
         p { a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/import" } { "Back to import" } }
     };
     let title = format!("modelwrite — {} — import refused: too large", project);
-    layout::shell(
-        &title,
-        nav,
-        Some(&identity.subject),
-        identity.may(Permission::Administer),
-        mechanism,
-        body,
-    )
-}
-
-/// The refusal page for a streamed import with blocking losses. The artifact was retained
-/// before the refusal; accepting the losses means submitting the file again with the losses
-/// named (the retained artifact is not re-read from the form, because the file was streamed).
-#[allow(clippy::too_many_arguments)]
-fn upload_blocking_page(
-    identity: &Identity,
-    mechanism: &str,
-    project: &str,
-    artifact_hash: &str,
-    loss_report: &LossReport,
-    nav: &layout::Nav,
-) -> Markup {
-    let body = html! {
-        h1 { "Import refused: blocking losses" }
-        p {
-            "This import is lossy and nothing was committed. The source artifact was "
-            "retained and content-addressed before the refusal."
-        }
-        (retained_markup(artifact_hash, None))
-        (loss_report_markup(loss_report))
-        (fidelity_note_markup())
-        p {
-            "To commit the migration, submit the file again with the losses you accept, or "
-            "use the import API and name the accepted losses."
-        }
-    };
-    let title = format!("modelwrite — {} — import refused", project);
     layout::shell(
         &title,
         nav,
@@ -877,8 +1063,10 @@ fn blocking_page(
     identity: &Identity,
     mechanism: &str,
     project: &str,
-    form: &ImportForm,
     artifact_hash: &str,
+    branch: &str,
+    message: &str,
+    holder: &str,
     loss_report: &LossReport,
     unaccepted: &[Mapping],
     nav: &layout::Nav,
@@ -889,13 +1077,14 @@ fn blocking_page(
         p {
             "This import is lossy and nothing was committed. The source artifact was "
             "retained and content-addressed. Accept the losses below by name to commit the "
-            "migration; a loss left unchecked refuses the import again."
+            "migration; a loss left unchecked refuses the import again. Accepting re-reads "
+            "the retained bytes by their hash - you do not upload the file again."
         }
         (retained_markup(artifact_hash, None))
         (loss_report_markup(loss_report))
         (fidelity_note_markup())
         h2 { "Accept the losses and import" }
-        (accept_form_markup(project, form, &blocking, unaccepted))
+        (accept_form_markup(project, artifact_hash, branch, message, holder, &blocking, unaccepted))
     };
     let title = format!("modelwrite — {} — import refused", project);
     layout::shell(
@@ -943,19 +1132,22 @@ fn committed_page(
 /// The acceptance form: the original inputs carried as hidden fields, plus one checkbox per
 /// blocking loss. A checkbox that was already accepted on a prior submit stays checked, so a
 /// partial acceptance is never thrown away on the next attempt.
+#[allow(clippy::too_many_arguments)]
 fn accept_form_markup(
     project: &str,
-    form: &ImportForm,
+    artifact_hash: &str,
+    branch: &str,
+    message: &str,
+    holder: &str,
     blocking: &[&Mapping],
     unaccepted: &[Mapping],
 ) -> Markup {
     html! {
-        form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/import" } class="import-form" {
-            input type="hidden" name="binding" value=(form.binding.as_str());
-            input type="hidden" name="branch" value=(form.branch.as_str());
-            input type="hidden" name="message" value=(form.message.as_str());
-            input type="hidden" name="holder" value=(form.holder.as_str());
-            input type="hidden" name="artifact" value=(form.artifact.as_str());
+        form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/import/accept" } class="import-form" {
+            input type="hidden" name="artifactHash" value=(artifact_hash);
+            input type="hidden" name="branch" value=(branch);
+            input type="hidden" name="message" value=(message);
+            input type="hidden" name="holder" value=(holder);
             ul class="loss-accept" {
                 @for (index, mapping) in blocking.iter().enumerate() {
                     li {

@@ -428,6 +428,67 @@ pub fn import_core(
     })
 }
 
+/// The ONE implementation of accepting a refused import from its retained artifact: load the
+/// import record (the binding that read it), re-read the retained bytes by hash, and re-run
+/// the migration through the SAME import_core with the accepted losses. The caller names only
+/// the hash and the losses; the artifact is never re-uploaded. A missing import record is a
+/// named 404, and a record whose retained artifact is gone is a named failure naming the hash
+/// - never a fall back to asking for a file.
+#[allow(clippy::too_many_arguments)]
+pub fn accept_import_core(
+    store: &dyn Store,
+    project: &str,
+    artifact_hash: &str,
+    branch: &str,
+    author: &str,
+    message: &str,
+    holder: Option<&str>,
+    accept_losses: &[String],
+    actor: &str,
+    mechanism: &str,
+    authorizer: &str,
+) -> Result<ImportOutcome, ApiError> {
+    // The record carries the binding that read this artifact; the hash alone cannot name which
+    // migration to re-run, so a missing record is a named 404, not a file prompt.
+    let record = store
+        .import_report(project, artifact_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("import {} for project {}", artifact_hash, project))
+        })?;
+    let binding = format!("{}@{}", record.binding_id, record.binding_version);
+
+    // Rule 1 in reverse: the retained bytes ARE the source. If they are missing, the platform
+    // lost the thing it promised to retain, and the acceptance is refused by name.
+    let artifact = store
+        .blob(artifact_hash)
+        .map_err(map_store_error)?
+        .ok_or_else(|| {
+            ApiError::internal(format!(
+                "the retained artifact {} is missing; the import cannot be accepted from it",
+                artifact_hash
+            ))
+        })?;
+
+    import_core(
+        store,
+        project,
+        &ImportCore {
+            binding: &binding,
+            branch,
+            author,
+            message,
+            artifact: &artifact,
+            accept_losses,
+            holder,
+            actor,
+            mechanism,
+            authorizer,
+            acceptance: None,
+        },
+    )
+}
+
 pub async fn import_artifact(
     identity: Identity,
     State(state): State<ApiState>,
@@ -493,7 +554,11 @@ pub async fn import_artifact(
             })),
         )
             .into_response()),
-        ImportOutcome::Blocking { unaccepted, .. } => {
+        ImportOutcome::Blocking {
+            artifact_hash,
+            unaccepted,
+            ..
+        } => {
             let blocking_json: Vec<Value> = unaccepted
                 .iter()
                 .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
@@ -502,6 +567,7 @@ pub async fn import_artifact(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({
                     "error": "the import has blocking losses that must be accepted by name",
+                    "artifactHash": artifact_hash,
                     "blocking": blocking_json
                 })),
             )
@@ -759,6 +825,109 @@ pub async fn import_artifact_stream(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({
                     "error": "the import has blocking losses that must be accepted by name",
+                    "artifactHash": artifact_hash,
+                    "blocking": blocking_json
+                })),
+            )
+                .into_response())
+        }
+    }
+}
+
+/// The body of an acceptance request: the artifact hash is in the path, and the caller
+/// supplies the accepted loss names plus the commit metadata. Nothing else is required - the
+/// retained bytes and the binding are recovered from the import record the hash names.
+#[derive(Deserialize)]
+pub struct AcceptImportRequest {
+    #[serde(default, rename = "acceptLosses")]
+    pub accept_losses: Vec<String>,
+    #[serde(default)]
+    pub branch: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub message: String,
+    pub holder: Option<String>,
+}
+
+/// POST /projects/:project/import/:artifactHash/accept - complete a refused import from its
+/// retained artifact. The request carries the artifact hash (in the path) and the accepted
+/// loss names; the bytes are re-read from the blob store by hash, so the caller never
+/// re-uploads the artifact.
+pub async fn accept_import_artifact(
+    identity: Identity,
+    State(state): State<ApiState>,
+    Path((project, artifact_hash)): Path<(String, String)>,
+    Json(body): Json<AcceptImportRequest>,
+) -> Result<Response, ApiError> {
+    if !identity.may(Permission::Write) {
+        return Err(ApiError::forbidden("write permission required"));
+    }
+    if !identity.may_reach(&project) {
+        return Err(ApiError::forbidden("project not in scope"));
+    }
+    if body.accept_losses.is_empty() {
+        return Err(ApiError::bad_request(
+            "at least one accepted loss is required",
+        ));
+    }
+    let author = resolve_author(&state.auth, &identity, &body.author)?;
+    verify_actor(&state.auth, &identity, body.holder.as_deref())?;
+    let branch = if body.branch.is_empty() {
+        "main".to_string()
+    } else {
+        body.branch.clone()
+    };
+    validate_name("branch name", &branch)?;
+    let message = if body.message.trim().is_empty() {
+        let short = artifact_hash.get(..8).unwrap_or(&artifact_hash);
+        format!("accept blocking losses for import {}", short)
+    } else {
+        body.message.clone()
+    };
+
+    match accept_import_core(
+        state.store.as_ref(),
+        &project,
+        &artifact_hash,
+        &branch,
+        &author,
+        &message,
+        body.holder.as_deref(),
+        &body.accept_losses,
+        &identity.subject,
+        state.auth.mechanism(),
+        state.auth.authorizer().unwrap_or(""),
+    )? {
+        ImportOutcome::Committed {
+            commit,
+            artifact_hash,
+            loss_report,
+            fidelity,
+            ..
+        } => Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "commit": commit_json(&commit),
+                "artifactHash": artifact_hash,
+                "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
+                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+            })),
+        )
+            .into_response()),
+        ImportOutcome::Blocking {
+            artifact_hash,
+            unaccepted,
+            ..
+        } => {
+            let blocking_json: Vec<Value> = unaccepted
+                .iter()
+                .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                .collect();
+            Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "the acceptance is incomplete: blocking losses not accepted",
                     "artifactHash": artifact_hash,
                     "blocking": blocking_json
                 })),

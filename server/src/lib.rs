@@ -168,6 +168,10 @@ pub fn app_with_limit(state: AppState, max_body_bytes: u64) -> Router {
             "/ui/projects/:project/import/upload",
             post(ui::import::submit_import_upload),
         )
+        .route(
+            "/ui/projects/:project/import/accept",
+            post(ui::import::accept_import_form),
+        )
         .route("/ui/projects/:project/gate", get(ui::gate::gate_list))
         .route("/ui/projects/:project/checks", get(ui::gate::gate_list))
         .route(
@@ -236,6 +240,10 @@ pub fn app_with_limit(state: AppState, max_body_bytes: u64) -> Router {
         .route(
             "/projects/:project/import/stream",
             post(binding_api::import_artifact_stream),
+        )
+        .route(
+            "/projects/:project/import/:artifactHash/accept",
+            post(binding_api::accept_import_artifact),
         )
         .route(
             "/projects/:project/import/:artifactHash/report",
