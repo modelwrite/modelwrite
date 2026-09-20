@@ -48,3 +48,38 @@ That gives a user the whole ecosystem of renderers, keeps this platform's claim 
 ## The decision rule, stated once
 
 **Adopt a library when it computes something we can verify. Do not adopt one when it owns the mapping from model to picture** - because that mapping is the thing this platform promises is faithful.
+
+---
+
+# Appendix: the `rust-sugiyama` evaluation, and its outcome
+
+**Outcome: evaluated, licence-clean, 1.75-buildable, and REJECTED for this workload. The hand-rolled deterministic layout stays.**
+
+## What was measured
+
+- **Licence:** MIT. Compatible.
+- **MSRV:** `cargo +1.75.0 build -p mw-graph` succeeded with the crate added - **but only because the workspace already pins `indexmap = =2.11.4`**, which unifies the crate's transitive `indexmap` requirement. In a bare crate without that pin it resolves `indexmap 2.14.2` (edition 2024) and fails at 1.75. The engine floor is preserved by an existing pin, not by the crate.
+- **Determinism:** identical output across four processes and three in-process runs on the corpus. **But the crate's own source states that "order of elements in a row cannot be guaranteed"** - a hash-iteration dependency. Determinism here is **observed, not contractual**.
+
+## Why it was rejected
+
+The crate is a **generic** Sugiyama layout with no SysML awareness. On this project's real corpus:
+
+- the 33 child-to-parent association edges cycle against the part tree and would be **collapsed as cycles**;
+- there is no **containment weighting**, so parents drift from their children;
+- there is no **process** view, which is a first-class diagram here;
+- it returns grid units rather than pixel extents for node sizing, plus a list of disjoint subgraphs the caller must merge;
+- it **panics on the corpus's two dangling edges** - and dangling edges are exactly the case this platform must REPORT rather than crash on.
+
+Adopting it would mean re-implementing edge semantics, containment weighting, the process layout, node sizing and dangling handling **on top of it** - more work than the implementation it would replace.
+
+## The decision rule, applied
+
+*Adopt a library when it computes something we can verify.* A layout is verifiable, so the crate deserved the trial - and the trial produced the answer. What we need is not "a Sugiyama layout" but **"a deterministic, SysML-aware arrangement of THIS model's nodes"**, and that includes semantics the crate does not have.
+
+Two properties settled it:
+
+1. **DETERMINISM BY CONSTRUCTION beats determinism by observation.** The committed layout sorts every iteration and breaks ties by node id, and is unit-tested for byte-identical output. A library that is *usually* stable is not the same artefact as one that cannot vary.
+2. **DANGLING EDGES ARE A REPORTED CASE, NOT A PANIC.** The platform exists to name what does not resolve; a layout engine that panics on the corpus's two dangling edges contradicts the product.
+
+The implementation stays behind the one-file module boundary (`engine/graph/src/layout.rs`), so if a future crate is deterministic by contract and SysML-aware, switching remains a single-file change.
