@@ -834,6 +834,106 @@ li.allocation { overflow-wrap: anywhere; }
 svg .kind-header { fill: var(--text-2); }
 svg g.node text { font-family: var(--font-ui); }
 g.mw-selected-node rect { stroke: var(--accent); stroke-width: 3px; }
+
+/* -- composition: subsystems, boundary, process --------------------------- */
+
+ul.subsystems {
+  list-style: none; margin: 0; padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+li.subsystem-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  margin: 0;
+}
+.subsystem-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.subsystem-head .covered, .subsystem-head .uncovered { margin-left: auto; }
+.role-chip {
+  display: inline-block;
+  font-weight: 600; font-size: 11px;
+  padding: 0.04rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface-1);
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.subsystem-project { font-weight: 650; font-size: 14px; color: var(--text); }
+.subsystem-revision { color: var(--text-2); font-size: 12px; margin-top: 0.15rem; }
+.subsystem-revision code { color: var(--text-2); }
+.subsystem-reason { color: var(--fail); font-size: 12px; margin: 0.4rem 0 0; }
+.subsystem-bounds { margin-top: 0.5rem; }
+.bounds-label {
+  display: block; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3); margin-bottom: 0.25rem;
+}
+.subsystem-bounds code.bound {
+  display: inline-block;
+  font-size: 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.02rem 0.4rem;
+  margin: 0 0.2rem 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+.composition-summary { color: var(--text-2); font-size: 13px; margin: 0 0 0.75rem; }
+
+.boundary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+.boundary-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+}
+.boundary-panel h3 { margin-top: 0; }
+.boundary-measured { border-left: 3px solid var(--pass); }
+.boundary-asserted { border-left: 3px solid var(--warn); }
+.boundary-panel ul { margin: 0; padding-left: 1.1rem; }
+.boundary-panel li { margin-bottom: 0.35rem; font-size: 13px; }
+
+.process-flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.flow-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.flow-arrow { align-self: center; color: var(--text-3); font-size: 18px; }
+.flow-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  min-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.step-name { font-weight: 650; font-size: 13px; }
+.step-satisfies { color: var(--text-2); font-size: 12px; }
+.flow-parallel-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3); text-align: center;
+}
+
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {
@@ -846,6 +946,7 @@ pub fn html_response(status: StatusCode, markup: Markup) -> Response {
 pub const SECTIONS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("structure", "Structure"),
+    ("composition", "Composition"),
     ("requirements", "Requirements"),
     ("traceability", "Traceability"),
     ("diagram", "Diagram"),

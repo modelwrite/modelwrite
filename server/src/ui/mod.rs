@@ -18,6 +18,7 @@ use axum::http::{header, StatusCode};
 use axum::response::Response;
 
 pub mod assist;
+pub mod composition;
 pub mod create;
 pub mod diagram;
 pub mod edit;

@@ -87,6 +87,10 @@ pub fn app(state: AppState) -> Router {
             get(ui::model::structure_page),
         )
         .route(
+            "/ui/projects/:project/composition",
+            get(ui::composition::composition_page),
+        )
+        .route(
             "/ui/projects/:project/requirements",
             get(ui::model::requirements_page),
         )

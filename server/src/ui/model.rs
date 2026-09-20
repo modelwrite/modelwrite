@@ -59,14 +59,14 @@ pub async fn model_page(
 /// A project has either no model at all (nothing committed to any branch), or a model at
 /// the resolved commit. The empty case is a state to act on, not an error.
 #[allow(clippy::large_enum_variant)]
-enum LoadedView {
+pub(crate) enum LoadedView {
     Empty,
     Model { commit: Commit, root: OkfRoot },
 }
 
 /// The shared read path for every commit-scoped view: the SAME identity, Read-permission and
 /// project-scope decisions as the JSON handlers, then the commit and its parsed document.
-fn load_view(
+pub(crate) fn load_view(
     state: &ApiState,
     identity: &Identity,
     project: &str,
