@@ -166,19 +166,19 @@
     <div class="stat"><span class="stat__num">148</span><span class="stat__label"><code>packagedElement</code> read from the XMI</span></div>
     <div class="stat"><span class="stat__num">57</span><span class="stat__label"><code>ownedAttribute</code> read from the XMI</span></div>
     <div class="stat"><span class="stat__num">28</span><span class="stat__label">traceability links carried: 20 Satisfy, 3 Allocate, 4 Refine, 1 Verify</span></div>
-    <div class="stat"><span class="stat__num stat__num--fail">270</span><span class="stat__label">content losses, every one Unmappable and named</span></div>
+    <div class="stat"><span class="stat__num stat__num--fail">252</span><span class="stat__label">blocking content losses &mdash; 124 unmappable, 128 lossy, every one named</span></div>
   </div>
 
   <div class="prose" style="margin-top:1.75rem">
-    <p>Importing it produces 34 structure elements (the Blocks), 25 requirements, 59 graph nodes and
-    28 graph edges. It also produces 270 content losses. Requirements and their traceability are now
-    carried, where the first measurement carried none. Ports, Operations, Associations, visibility
-    and other attributes are still reported as unmappable: named, never dropped in silence, but not
-    carried.</p>
+    <p>Importing it produces 41 structure elements (the Blocks), 25 requirements, 66 graph nodes and
+    95 graph edges. It also produces 252 blocking content losses: 124 constructs that cannot be
+    mapped, and 128 values that would be dropped. Requirements and their traceability are carried,
+    where the first measurement carried none. Ports, Operations, Associations, visibility and other
+    attributes are still reported as unmappable: named, never dropped in silence, but not carried.</p>
   </div>
 
   <div class="callout">
-    <h3>Migrating a MagicDraw or CATIA Magic model without those 270 losses is not supported yet.</h3>
+    <h3>Migrating a MagicDraw or CATIA Magic model without those 252 losses is not supported yet.</h3>
     <p>Named is not the same as carried. An unmappable loss is reported so you can decide about it.
     It is still a loss, and this page will not round it down.</p>
   </div>
@@ -245,7 +245,7 @@
       </div>
       <p>A Reasoner trait, proposals a human reads, agent actions distinguishable in the audit log,
       and an enforced rule that an agent cannot write. A human with the write role accepts a proposal
-      through an import-scoped route.</p>
+      from the proposals page, and the commit records both parties.</p>
     </article>
 
     <article class="card">
@@ -273,7 +273,7 @@
   <div class="section__head">
     <p class="eyebrow">04 / Limits</p>
     <h2 id="limits-h">What it does not do</h2>
-    <p>Competitors do not publish this section. It is the reason to believe the rest of the page.</p>
+    <p>Each of these is a limit of the current release, and each one is checkable from the repository.</p>
   </div>
 
   <ul class="limits">
@@ -288,19 +288,21 @@
     <li>
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
-        <h3>The agent loop is not wired end to end.</h3>
-        <p>Nothing outside <code>engine/agent</code> consumes the reasoner&rsquo;s proposals, so a
-        proposal does not reach the server on its own and a human drives the accept route. Acceptance
-        is import-scoped: migration loss-report proposals only.</p>
+        <h3>There is no numeric or physical simulation.</h3>
+        <p>Model-level analysis and simulation are supported: coverage, traceability, composition and
+        process. FEA, thermal and fluid solvers are not part of this platform and are not planned.
+        Modelwrite reasons about the model, not about the physics.</p>
       </div>
     </li>
     <li>
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
         <h3>Real vendor migration is not complete.</h3>
-        <p>The reader carries requirements and their traceability. It still loses 270 things on the
-        first real MagicDraw model: Ports, Operations, Associations, visibility and other attributes.
-        Named rather than dropped in silence, but not carried.</p>
+        <p>A 36&nbsp;MB Cameo export &mdash; the Thirty Meter Telescope model, 362 blocks, 633 edges
+        &mdash; imports and round-trips exactly, and reports 45,725 named losses for the constructs it
+        does not carry. Named rather than dropped in silence. A model of that size is not yet fully
+        migrated, and SysML v2 textual notation is carried as a viewer: it reads, it does not write
+        back.</p>
       </div>
     </li>
     <li>
