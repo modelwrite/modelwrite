@@ -261,6 +261,39 @@ fn two_entries_sharing_a_subject_are_two_decisions() {
 }
 
 #[test]
+fn the_real_model_names_every_blocking_loss_with_a_unique_identity() {
+    // The coffee-machine MagicDraw export (real-world/mdzip/model.xmi) has 252
+    // blocking losses. Five distinct <useCase xmi:idref=.../> references used to
+    // collapse to ONE "useCase <no xmi:id> [unmappable]" identity because the
+    // subject under-specified them, so entry_identity was not injective. The
+    // binding now names each reference by its idref, so every entry has its own
+    // identity: 252 entries, 252 unique identities.
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../real-world/mdzip/model.xmi"
+    );
+    let bytes = std::fs::read(path).expect("the coffee-machine XMI must be committed");
+    let (_root, report) = XmiBinding::new()
+        .import(&bytes)
+        .expect("the real model must import");
+
+    let blocking = report.blocking();
+    assert_eq!(blocking.len(), 252, "pin the current real-model loss count");
+
+    let mut identities: Vec<String> = blocking.iter().map(|m| entry_identity(m)).collect();
+    identities.sort_unstable();
+    let unique = identities.len();
+    identities.dedup();
+    assert_eq!(
+        unique,
+        identities.len(),
+        "entry_identity must be injective: {} entries must yield {} unique identities",
+        blocking.len(),
+        unique
+    );
+}
+
+#[test]
 fn the_artifact_states_the_measurement_boundary() {
     let report = report_for("coffee-grinder.xmi");
     let artifact = propose_loss_resolutions(&report, &accept_everything(&report))

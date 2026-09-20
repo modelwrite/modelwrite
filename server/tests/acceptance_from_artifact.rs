@@ -403,6 +403,10 @@ async fn the_coffee_machine_xmi_import_accepts_from_hash() {
     unique.sort();
     unique.dedup();
     let unique_count = unique.len();
+    assert_eq!(
+        unique_count, blocking_count,
+        "every blocking entry must carry a unique entry identity"
+    );
 
     let accepted = router
         .clone()
@@ -441,6 +445,112 @@ async fn the_coffee_machine_xmi_import_accepts_from_hash() {
         Some(&bytes[..]),
         "the retained coffee-machine artifact must be byte-identical"
     );
+}
+
+#[tokio::test]
+async fn accepting_one_use_case_reference_does_not_accept_its_twins() {
+    // The coffee-machine model owns five use cases as five <useCase xmi:idref=.../>
+    // references. Before the subject fix those five collapsed to one identity, so a
+    // human could not accept one without accepting the other four. Now each names its
+    // idref, and accepting ONE of them must leave the other four blocking - the
+    // acceptance key names exactly one loss.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    create_project(&router, "coffee").await;
+
+    let path = format!(
+        "{}/../real-world/mdzip/model.xmi",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let bytes = std::fs::read(path).expect("the coffee-machine XMI must be committed");
+
+    let refused = router
+        .clone()
+        .oneshot(post_json(
+            "/projects/coffee/import",
+            serde_json::json!({
+                "artifact": String::from_utf8(bytes).unwrap(),
+                "binding": "sysml-v1-xmi@2.4",
+                "branch": "main",
+                "message": "import coffee-machine",
+                "acceptLosses": []
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let refused_body = json_body(refused).await;
+    let artifact_hash = refused_body["artifactHash"].as_str().unwrap().to_string();
+    let blocking = refused_body["blocking"].as_array().unwrap().clone();
+
+    let use_case_identities: Vec<String> = blocking
+        .iter()
+        .filter(|m| m["subject"].as_str().unwrap().starts_with("useCase "))
+        .map(|m| {
+            let subject = m["subject"].as_str().unwrap();
+            let verdict = m["verdict"].as_str().unwrap().to_lowercase();
+            format!("{} [{}]", subject, verdict)
+        })
+        .collect();
+    assert_eq!(
+        use_case_identities.len(),
+        5,
+        "the five useCase references must be five distinct identities, got: {:?}",
+        use_case_identities
+    );
+    let mut distinct = use_case_identities.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(
+        distinct.len(),
+        5,
+        "no two useCase references may share an identity"
+    );
+
+    // Accept exactly ONE useCase reference; the other four must stay blocking.
+    let accepted = router
+        .clone()
+        .oneshot(post_json(
+            &format!("/projects/coffee/import/{}/accept", artifact_hash),
+            serde_json::json!({
+                "acceptLosses": [use_case_identities[0]],
+                "branch": "main",
+                "message": "accept one useCase reference"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let accepted_body = json_body(accepted).await;
+    let remaining: Vec<String> = accepted_body["blocking"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            let subject = m["subject"].as_str().unwrap();
+            let verdict = m["verdict"].as_str().unwrap().to_lowercase();
+            format!("{} [{}]", subject, verdict)
+        })
+        .collect();
+    let remaining_use_cases: Vec<&String> = remaining
+        .iter()
+        .filter(|id| id.starts_with("useCase "))
+        .collect();
+    assert_eq!(
+        remaining_use_cases.len(),
+        4,
+        "accepting one useCase reference must leave the other four blocking, got: {:?}",
+        remaining_use_cases
+    );
+    assert!(
+        !remaining.contains(&use_case_identities[0]),
+        "the accepted useCase reference must no longer be blocking"
+    );
+
+    // Nothing committed: an incomplete acceptance refuses, it never silently
+    // accepts the four un-named twins.
+    let store = server::store::sqlite::SqliteStore::open(&dir.path().join("mw.db")).unwrap();
+    assert!(store.commits_on("coffee", "main").unwrap().is_empty());
 }
 
 #[tokio::test]

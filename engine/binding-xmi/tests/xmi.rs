@@ -193,6 +193,41 @@ fn an_unknown_element_and_attribute_are_named_not_dropped() {
 }
 
 #[test]
+fn an_unknown_element_with_only_an_idref_is_named_by_its_reference() {
+    // MagicDraw serialises a Class's owned use cases as <useCase xmi:idref=.../>
+    // reference elements carrying no xmi:type and no xmi:id, only the idref of the
+    // use case they point at. Five such references to five distinct use cases used
+    // to collapse to one "useCase <no xmi:id>" identity, so the report could not
+    // tell them apart. Each is now named by its idref, so two references are two
+    // distinguishable losses and an acceptance of one cannot accept the other.
+    let (_root, loss) = import("idref-element.xmi");
+
+    let references: Vec<&str> = loss
+        .mappings
+        .iter()
+        .filter(|m| m.verdict == MappingVerdict::Unmappable && m.subject.starts_with("useCase"))
+        .map(|m| m.subject.as_str())
+        .collect();
+
+    assert_eq!(
+        references.len(),
+        2,
+        "two useCase references must be two entries, got: {:?}",
+        references
+    );
+    assert!(
+        references.contains(&"useCase idref=uc-select-coffee"),
+        "the first reference must name its idref, got: {:?}",
+        references
+    );
+    assert!(
+        references.contains(&"useCase idref=uc-make-coffee"),
+        "the second reference must name its idref, got: {:?}",
+        references
+    );
+}
+
+#[test]
 fn a_malformed_document_is_a_clean_error_not_a_panic() {
     let bytes = fixture("malformed.xmi");
     let result = XmiBinding::new().import(bytes.as_bytes());

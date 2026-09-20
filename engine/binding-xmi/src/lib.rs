@@ -783,10 +783,20 @@ impl Importer {
             }
             _ => {
                 let element_name = type_full.as_deref().unwrap_or(tag.as_str()).to_string();
-                let id_part = if id.is_empty() {
-                    "<no xmi:id>".to_string()
-                } else {
+                // An unknown element is named by its xmi:id. When that is absent,
+                // fall back to the xmi:idref (a reference element such as MagicDraw's
+                // <useCase xmi:idref=.../> owned member) and then the name, so several
+                // distinct references do not collapse to one "<no xmi:id>" identity.
+                // The identity must name one loss unambiguously: five useCase
+                // references pointing at five different use cases are five losses.
+                let id_part = if !id.is_empty() {
                     id.clone()
+                } else if let Some(reference) = attr_ns(node, Some(XMI_NS), "idref") {
+                    format!("idref={reference}")
+                } else if let Some(name) = attr(node, "name").filter(|n| !n.is_empty()) {
+                    name.to_string()
+                } else {
+                    "<no xmi:id>".to_string()
                 };
                 self.losses.push(Mapping {
                     subject: format!("{element_name} {id_part}"),
