@@ -507,14 +507,7 @@ fn push_edge(
                 "<line class='mw-edge {group}' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}'{dash}/>",
                 sx, sy, tx, ty
             ));
-            (
-                tx,
-                ty,
-                dx,
-                dy,
-                (sx + tx) / 2.0,
-                (sy + ty) / 2.0 - 5.0,
-            )
+            (tx, ty, dx, dy, (sx + tx) / 2.0, (sy + ty) / 2.0 - 5.0)
         }
     };
 

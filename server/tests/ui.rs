@@ -2133,6 +2133,63 @@ async fn an_unknown_declared_symbol_is_reported_not_silently_boxed() {
 }
 
 #[tokio::test]
+async fn the_diagram_routes_node_to_node_edges_orthogonally() {
+    // Two children of one parent land in different rows of the child layer, so the parent->child
+    // edges leave and arrive at different heights. Each such edge must be an orthogonal polyline,
+    // never a straight diagonal that could wander through a box.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let model = serde_json::json!({
+        "project": "coffee",
+        "exportedAt": "2026-09-17T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [],
+        "graph": {
+            "nodes": [
+                { "id": "p", "kind": "block", "name": "Parent" },
+                { "id": "c1", "kind": "block", "name": "Child One" },
+                { "id": "c2", "kind": "block", "name": "Child Two" }
+            ],
+            "edges": [
+                { "source": "p", "target": "c1", "kind": "part", "label": "" },
+                { "source": "p", "target": "c2", "kind": "part", "label": "" }
+            ]
+        }
+    });
+    router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "seed", "okf": model }),
+        ))
+        .await
+        .unwrap();
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/diagram"))
+        .await
+        .unwrap();
+    let html = body_text(response).await;
+    let svg = extract_svg(&html);
+    assert!(
+        svg.contains("<polyline class='mw-edge"),
+        "node-to-node edges must be orthogonal polylines, got:\n{}",
+        svg
+    );
+    assert!(
+        !svg.contains("<line class='mw-edge"),
+        "a node-to-node edge must never be a straight line, got:\n{}",
+        svg
+    );
+}
+
+#[tokio::test]
 async fn renaming_an_element_carries_its_references() {
     // A rename that does not move the graph is silent corruption: the element stays in the
     // document, vanishes from coverage and traceability, and the author has no way to put it

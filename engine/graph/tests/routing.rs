@@ -55,10 +55,17 @@ fn diagonal_edge_routes_orthogonally() {
     let pts = routing::route(&s, &t, &[&s, &t]);
     assert!(pts.len() >= 3, "a diagonal needs an elbow");
     for pair in pts.windows(2) {
-        assert!(seg_axis_aligned(pair[0], pair[1]), "segments are axis-aligned");
+        assert!(
+            seg_axis_aligned(pair[0], pair[1]),
+            "segments are axis-aligned"
+        );
     }
     assert_eq!(pts[0], (100.0, 25.0), "leaves source right side centre");
-    assert_eq!(pts[pts.len() - 1], (200.0, 175.0), "arrives target left side centre");
+    assert_eq!(
+        pts[pts.len() - 1],
+        (200.0, 175.0),
+        "arrives target left side centre"
+    );
 }
 
 #[test]
@@ -198,23 +205,35 @@ fn cafe_stand_graph() -> Graph {
             gedge("act-toast", "act-complete", "include", "when FoodReady"),
             gedge("act-pay", "act-brew", "dependency", "Satisfy"),
             gedge("act-pay", "act-toast", "dependency", "Satisfy"),
-            gedge("act-complete", "req-no-early-provision", "dependency", "Satisfy"),
+            gedge(
+                "act-complete",
+                "req-no-early-provision",
+                "dependency",
+                "Satisfy",
+            ),
             gedge("act-complete", "req-service-time", "dependency", "Satisfy"),
             gedge("act-pay", "req-one-payment", "dependency", "Satisfy"),
             gedge("act-pay", "act-clear-floor", "triggers", "service begins"),
-            gedge("act-clear-floor", "act-complete", "include", "continues during service"),
-            gedge("act-clear-floor", "req-floor-clear", "dependency", "Satisfy"),
+            gedge(
+                "act-clear-floor",
+                "act-complete",
+                "include",
+                "continues during service",
+            ),
+            gedge(
+                "act-clear-floor",
+                "req-floor-clear",
+                "dependency",
+                "Satisfy",
+            ),
         ],
     }
 }
 
 /// Every routed edge (both endpoints placed) must keep clear of every non-endpoint box.
 fn assert_no_edge_crosses_a_box(graph: &Graph, layout: &DiagramLayout) {
-    let box_by_id: std::collections::HashMap<&str, &NodeBox> = layout
-        .nodes
-        .iter()
-        .map(|n| (n.id.as_str(), n))
-        .collect();
+    let box_by_id: std::collections::HashMap<&str, &NodeBox> =
+        layout.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let all: Vec<&NodeBox> = layout.nodes.iter().collect();
     for edge in &graph.edges {
         let (Some(s), Some(t)) = (
@@ -258,4 +277,3 @@ fn cafe_stand_process_edges_avoid_every_box() {
     let layout = layout::process_layout(&g).expect("cafe-stand has a process flow");
     assert_no_edge_crosses_a_box(&g, &layout);
 }
-
