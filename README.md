@@ -11,8 +11,8 @@ AI.
 
 The user guide lives in [docs/guide/](docs/guide/README.md). It covers what
 modelwrite is and is not, the mental model (concepts), the click paths (tasks),
-the MCP contract for AI agents (agents), the honest FAQ, the standing limits, and
-troubleshooting. Start at docs/guide/README.md.
+the MCP contract for AI agents (agents), the command line (cli), the honest FAQ, the
+standing limits, and troubleshooting. Start at docs/guide/README.md.
 
 ## Website
 
@@ -32,7 +32,7 @@ step, no external requests. It is deployed to GitHub Pages by
 - docs/ — the OKF 1.0 spec, the design documents, and the evidence annex
 - server/ — the `mw-server` HTTP service (SQLite or PostgreSQL backend)
 - cli/ — the `mw` command line, which reaches the service over plain HTTP or
-  opens a SQLite store directly for offline use:
+  opens a SQLite store directly for offline use (see [docs/guide/cli.md](docs/guide/cli.md)):
   `mw --db modelwrite.db project create coffee`
 - deploy/ — the container image, a Docker Compose trial stack, and a Helm chart
 
@@ -52,9 +52,15 @@ Expected output: GATE PASS.
 
 ## Install and run
 
-The Rust crates are not published to crates.io — both declare `publish = false`
-(`server/Cargo.toml`, `cli/Cargo.toml`) — so there is no working `cargo install`.
-Build from this repository:
+The `mw` command line ships as a prebuilt binary on the GitHub releases page
+(`mw-linux-x64`, `mw-linux-arm64`, `mw-darwin-x64`, `mw-darwin-arm64`,
+`mw-windows-x64.exe`), or build it from this repository with `cargo install --path cli`.
+Both modes — HTTP and offline — are documented in [docs/guide/cli.md](docs/guide/cli.md).
+
+The `mw-cli` crate is prepared for crates.io (metadata and version are in place) but is not
+published yet: publishing it requires first re-releasing the engine layer at a bumped
+version, because the engine crates already on crates.io predate the subsystem-reference and
+write-path-convergence work.
 
 - **Crates** — `cargo build --workspace` (see Quickstart above). The service is the
   `mw-server` crate; the CLI is the `mw-cli` crate, which builds the `mw` binary.

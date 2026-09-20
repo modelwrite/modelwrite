@@ -3,17 +3,21 @@
 Modelwrite is an open-source platform for systems engineering that turns legacy SysML
 models into a portable, provable JSON format called OKF. Every model is a versioned,
 content-addressed commit, and every claim about a model traces to a recorded gate run a
-reviewer can reproduce. It ships a workbench for authoring and reviewing models, and an MCP
-server an AI agent drives to read and propose changes it can never commit on its own.
+reviewer can reproduce. It ships a workbench for authoring and reviewing models, an MCP
+server an AI agent drives to read and propose changes it can never commit on its own, and
+the mw command line that reaches the service over HTTP or a SQLite store directly for
+offline, scripted use.
 
 ## Who this guide is for
 
-Two readers, both first class.
+Three readers, all first class.
 
 - A systems engineer who has never seen modelwrite, and wants to know what it is, what it
   will and will not do, and how to drive it.
 - An AI agent, and the person wiring one up, that reads models and records proposals
   through MCP.
+- A pipeline operator, CI job, or air-gapped site that drives modelwrite from a shell with
+  no server running and no port open.
 
 Start with [concepts](concepts.md) for the mental model, then [tasks](tasks.md) for the
 click paths. Agents start at [mcp-agents](mcp-agents.md).
@@ -60,6 +64,7 @@ models by reference rather than by copying them.
 - [concepts.md](concepts.md): the mental model, short.
 - [tasks.md](tasks.md): do this, then that.
 - [mcp-agents.md](mcp-agents.md): the MCP contract for an agent and the person wiring one up.
+- [cli.md](cli.md): the mw command line, HTTP and offline.
 - [faq.md](faq.md): the honest answers.
 - [limits.md](limits.md): what it does not do, in one place.
 - [troubleshooting.md](troubleshooting.md): what a failure means, and what to do.

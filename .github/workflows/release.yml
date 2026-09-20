@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 name: release
 
-# Builds the mw-mcp binary for every platform the npm package downloads, then
-# attaches them to the GitHub Release for the pushed tag. The npm package's
-# postinstall script fetches exactly these assets by name, so the asset names
-# here must stay in step with packages/modelwrite-mcp/install.js.
+# Builds the mw-mcp and mw binaries for every platform the npm package (mw-mcp) and
+# cargo-install users (mw) download, then attaches them to the GitHub Release for the
+# pushed tag. The npm package's postinstall script fetches the mw-mcp assets by exact
+# name, so those names here must stay in step with packages/modelwrite-mcp/install.js.
 
 on:
   push:
@@ -22,28 +22,33 @@ jobs:
       matrix:
         include:
           # Native runners everywhere except Linux/arm64, which cross-compiles
-          # on an amd64 runner; mw-mcp is a pure-Rust binary, so it only needs
+          # on an amd64 runner; both binaries are pure-Rust, so they only need
           # the target toolchain and, for that one job, a cross linker.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: mw-mcp-linux-x64
+            cli_asset: mw-linux-x64
             linker: ""
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             asset: mw-mcp-linux-arm64
+            cli_asset: mw-linux-arm64
             linker: aarch64-linux-gnu-gcc
           # macos-15-intel is the Intel macOS runner now that macos-13 is retired.
           - os: macos-15-intel
             target: x86_64-apple-darwin
             asset: mw-mcp-darwin-x64
+            cli_asset: mw-darwin-x64
             linker: ""
           - os: macos-latest
             target: aarch64-apple-darwin
             asset: mw-mcp-darwin-arm64
+            cli_asset: mw-darwin-arm64
             linker: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             asset: mw-mcp-windows-x64.exe
+            cli_asset: mw-windows-x64.exe
             linker: ""
     steps:
       - uses: actions/checkout@v4
@@ -59,16 +64,27 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
         run: cargo build --release --locked -p mw-mcp --target "${{ matrix.target }}"
-      - name: collect the binary under its release asset name
+      - name: build the mw binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --locked -p mw-cli --target "${{ matrix.target }}"
+      - name: collect the binaries under their release asset names
         shell: bash
         run: |
-          src="target/${{ matrix.target }}/release/mw-mcp"
-          if [ -f "$src.exe" ]; then src="$src.exe"; fi
-          cp "$src" "${{ matrix.asset }}"
+          mcp_src="target/${{ matrix.target }}/release/mw-mcp"
+          if [ -f "$mcp_src.exe" ]; then mcp_src="$mcp_src.exe"; fi
+          cp "$mcp_src" "${{ matrix.asset }}"
+          cli_src="target/${{ matrix.target }}/release/mw"
+          if [ -f "$cli_src.exe" ]; then cli_src="$cli_src.exe"; fi
+          cp "$cli_src" "${{ matrix.cli_asset }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.cli_asset }}
+          path: ${{ matrix.cli_asset }}
 
   release:
     needs: build

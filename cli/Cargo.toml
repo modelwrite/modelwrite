@@ -4,20 +4,24 @@ version = "0.1.0"
 edition.workspace = true
 rust-version = "1.88"
 license.workspace = true
-publish = false
+description = "The mw command line: reach a modelwrite service over plain HTTP or a local SQLite store directly, with commit, merge, gate and lock enforced offline."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite","cli","okf","mbse","offline"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "mw"
 path = "src/main.rs"
 
 [dependencies]
-mw-server = { path = "../server", default-features = false }
-mw-okf = { path = "../engine/okf" }
-mw-gate = { path = "../engine/gate" }
+mw-server = { path = "../server", version = "0.1.0", default-features = false }
+mw-okf = { path = "../engine/okf", version = "0.1.0" }
+mw-gate = { path = "../engine/gate", version = "0.1.0" }
 serde_json.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../engine/test-support" }
+mw-test-support = { path = "../engine/test-support", version = "0.1.0" }
 axum.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
