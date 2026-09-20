@@ -831,9 +831,113 @@ li.allocation { overflow-wrap: anywhere; }
 
 /* -- diagram ------------------------------------------------------------- */
 
-svg .kind-header { fill: var(--text-2); }
-svg g.node text { font-family: var(--font-ui); }
+main.mw-diagram { max-width: none; padding: 1.25rem 1.5rem; }
+
+.diagram-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.view-toggle {
+  display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; background: var(--surface);
+}
+.view-option { padding: 0.3rem 0.75rem; font-size: 12.5px; color: var(--text-2); }
+.view-option:hover { color: var(--text); text-decoration: none; }
+.view-option.current { background: var(--accent-tint); color: var(--accent-strong); font-weight: 600; }
+.diagram-controls { display: inline-flex; gap: 0.3rem; align-items: center; }
+.diagram-controls button, .kind-filter {
+  font-family: var(--font-ui); font-size: 12.5px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+  border-radius: var(--radius-sm); padding: 0.22rem 0.6rem; cursor: pointer;
+}
+.diagram-controls button:hover, .kind-filter:hover { border-color: var(--accent); color: var(--text); }
+.kind-filter.active { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
+.kind-count { color: var(--text-3); font-size: 11px; }
+.mw-diagram-search {
+  font-family: var(--font-ui); font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.22rem 0.6rem; width: 12rem; background: var(--surface); color: var(--text);
+}
+
+.diagram-viewport {
+  overflow: auto;
+  height: calc(100vh - 16rem);
+  min-height: 26rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  position: relative;
+}
+.mw-diagram-svg { display: block; width: 100%; height: 100%; cursor: grab; }
+.mw-diagram-svg.dragging { cursor: grabbing; }
+
+.diagram-props {
+  position: absolute; top: 0.75rem; right: 0.75rem; width: 15rem; max-width: calc(100% - 1.5rem);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+}
+.diagram-props h3 { font-size: 14px; font-weight: 650; margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+.diagram-props dl { margin: 0; }
+.diagram-props dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); margin-top: 0.4rem; }
+.diagram-props dt:first-child { margin-top: 0; }
+.diagram-props dd { margin: 0.05rem 0 0; font-size: 12.5px; overflow-wrap: anywhere; color: var(--text); }
+
+svg g.node { cursor: pointer; }
+svg g.node .node-rect { stroke: var(--text-3); stroke-width: 1.5px; }
+svg g.node .node-name {
+  font-family: var(--font-ui); font-size: 13px; fill: var(--text); pointer-events: none;
+}
+svg g.node .node-kind {
+  font-family: var(--font-ui); font-size: 11px; fill: var(--text-2);
+  text-transform: uppercase; letter-spacing: 0.04em; pointer-events: none;
+}
+svg g.node[data-kind="block"] .node-rect { stroke: var(--kind-block); }
+svg g.node[data-kind="block"] .node-kind { fill: var(--kind-block); }
+svg g.node[data-kind="actor"] .node-rect { stroke: var(--kind-actor); }
+svg g.node[data-kind="actor"] .node-kind { fill: var(--kind-actor); }
+svg g.node[data-kind="usecase"] .node-rect { stroke: var(--kind-usecase); }
+svg g.node[data-kind="usecase"] .node-kind { fill: var(--kind-usecase); }
+svg g.node[data-kind="requirement"] .node-rect { stroke: var(--kind-requirement); }
+svg g.node[data-kind="requirement"] .node-kind { fill: var(--kind-requirement); }
+svg g.node[data-kind="signal"] .node-rect { stroke: var(--kind-signal); }
+svg g.node[data-kind="signal"] .node-kind { fill: var(--kind-signal); }
+svg g.node[data-kind="interface"] .node-rect { stroke: var(--kind-interface); }
+svg g.node[data-kind="interface"] .node-kind { fill: var(--kind-interface); }
+svg g.node[data-kind="activity"] .node-rect { stroke: var(--kind-activity); }
+svg g.node[data-kind="activity"] .node-kind { fill: var(--kind-activity); }
+svg g.node[data-kind="state"] .node-rect { stroke: var(--kind-state); }
+svg g.node[data-kind="state"] .node-kind { fill: var(--kind-state); }
+svg g.node[data-kind="stateMachine"] .node-rect { stroke: var(--kind-statemachine); }
+svg g.node[data-kind="stateMachine"] .node-kind { fill: var(--kind-statemachine); }
+
 g.mw-selected-node rect { stroke: var(--accent); stroke-width: 3px; }
+g.mw-selected-node .node-name { fill: var(--accent-strong); font-weight: 600; }
+g.node.mw-hover rect { stroke-width: 2.5px; }
+g.node.mw-filtered-out { display: none; }
+g.node.mw-search-match .node-rect { stroke: var(--warn); stroke-width: 3px; }
+/* Hover a node: it and its immediate neighbours stay bright, everything else dims. */
+svg.dimmed g.node { opacity: 0.18; }
+svg.dimmed g.node.mw-active { opacity: 1; }
+
+svg .mw-edge { fill: none; stroke: var(--text-3); stroke-width: 1.3px; }
+svg .mw-edge.containment { stroke: var(--text-2); }
+svg .mw-edge.dependency { stroke: var(--accent); }
+svg .mw-edge.flow { stroke: var(--kind-activity); }
+svg .arrow-accent { fill: var(--accent); }
+svg .arrow-containment { fill: var(--text-2); }
+svg .arrow-flow { fill: var(--kind-activity); }
+svg .arrow-neutral { fill: var(--text-3); }
+svg g.edge .edge-label {
+  display: none; font-family: var(--font-ui); font-size: 11px; fill: var(--text-2);
+  pointer-events: none;
+}
+svg g.edge.mw-incident .edge-label, svg g.edge.mw-selected .edge-label { display: block; }
+svg g.edge.mw-incident .mw-edge { stroke-width: 2.4px; }
+
+svg g.dangling .dangling-shape { fill: var(--fail-bg); stroke: var(--fail); stroke-width: 1.5px; }
+svg g.dangling .dangling-label { font-family: var(--font-ui); font-size: 11px; fill: var(--fail); font-weight: 600; pointer-events: none; }
+svg g.dangling .dangling-id { font-family: var(--font-mono); font-size: 10px; fill: var(--fail); pointer-events: none; }
+
 
 /* -- composition: subsystems, boundary, process --------------------------- */
 

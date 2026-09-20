@@ -31,6 +31,9 @@ use crate::ui::layout;
 pub struct ModelQuery {
     pub branch: Option<String>,
     pub commit: Option<String>,
+    /// The diagram view: `structure` (default) or `process`.
+    #[serde(default)]
+    pub view: Option<String>,
 }
 
 /// `GET /ui/projects/:project/model?branch=&commit=` - the model an engineer came to see.

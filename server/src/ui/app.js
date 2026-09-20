@@ -91,24 +91,297 @@
     window.history.replaceState(null, '', url.toString());
   }
 
-  // ---- diagram page: honour ?select=<id> on arrival ------------------------
+  // ---- diagram page: pan / zoom / select / filter / search -----------------
 
   function enhanceDiagramPage() {
-    var key = readSelectFromUrl();
-    if (!key) {
+    var svg = document.querySelector('svg.mw-diagram-svg');
+    if (!svg) {
       return;
     }
-    var nodes = document.querySelectorAll('svg g.node');
-    for (var i = 0; i < nodes.length; i += 1) {
-      if (nodes[i].getAttribute('data-mw-id') === key) {
-        nodes[i].classList.add('mw-selected-node');
-        if (typeof nodes[i].scrollIntoView === 'function') {
-          nodes[i].scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
+    var viewport = svg.parentElement;
+    var nodeEls = svg.querySelectorAll('g.node');
+    var edgeEls = svg.querySelectorAll('g.edge');
+
+    // The camera is the viewBox: an x y w h window in SVG user units. The server renders the
+    // full diagram (fit-to-view) and the enhancement pans/zooms by moving that window, so the
+    // page is still a complete, laid-out picture with JavaScript disabled.
+    var fullW = 1;
+    var fullH = 1;
+    if (svg.viewBox && svg.viewBox.baseVal) {
+      fullW = svg.viewBox.baseVal.width || 1;
+      fullH = svg.viewBox.baseVal.height || 1;
+    }
+    var vb = { x: 0, y: 0, w: fullW, h: fullH };
+
+    function applyViewBox() {
+      svg.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h);
+    }
+
+    function fitToView() {
+      vb.x = 0;
+      vb.y = 0;
+      vb.w = fullW;
+      vb.h = fullH;
+      applyViewBox();
+    }
+
+    function svgPoint(clientX, clientY) {
+      var pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      var ctm = svg.getScreenCTM();
+      if (!ctm) {
+        return null;
+      }
+      return pt.matrixTransform(ctm.inverse());
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(Math.max(value, min), max);
+    }
+
+    function zoomAt(clientX, clientY, factor) {
+      var p = svgPoint(clientX, clientY);
+      var fx = p ? (p.x - vb.x) / vb.w : 0.5;
+      var fy = p ? (p.y - vb.y) / vb.h : 0.5;
+      var nw = clamp(vb.w * factor, fullW / 40, fullW * 40);
+      var nh = clamp(vb.h * factor, fullH / 40, fullH * 40);
+      vb.x = (p ? p.x : vb.x + fx * vb.w) - fx * nw;
+      vb.y = (p ? p.y : vb.y + fy * vb.h) - fy * nh;
+      vb.w = nw;
+      vb.h = nh;
+      applyViewBox();
+    }
+
+    function zoomBy(factor) {
+      var rect = viewport.getBoundingClientRect();
+      zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+    }
+
+    function panBy(dxPx, dyPx) {
+      var scale = vb.w / (viewport.clientWidth || 1);
+      vb.x -= dxPx * scale;
+      vb.y -= dyPx * scale;
+      applyViewBox();
+    }
+
+    function centerOn(nodeEl) {
+      var rect = nodeEl.querySelector('rect');
+      if (!rect) {
         return;
       }
+      var cx = parseFloat(rect.getAttribute('x')) + parseFloat(rect.getAttribute('width')) / 2;
+      var cy = parseFloat(rect.getAttribute('y')) + parseFloat(rect.getAttribute('height')) / 2;
+      vb.x = clamp(cx - vb.w / 2, 0, Math.max(0, fullW - vb.w));
+      vb.y = clamp(cy - vb.h / 2, 0, Math.max(0, fullH - vb.h));
+      applyViewBox();
+    }
+
+    // The selection card, overlaid in the viewport corner, mirrors the model page's
+    // properties pane for the node under the cursor/click.
+    var props = el('aside', 'diagram-props');
+    var propsTitle = el('h3', 'mw-props-title', 'Selection');
+    var propsList = el('dl', 'mw-props-list');
+    props.appendChild(propsTitle);
+    props.appendChild(propsList);
+    viewport.appendChild(props);
+
+    function incidentEdges(nodeEl) {
+      var id = nodeEl.getAttribute('data-mw-id');
+      var out = [];
+      each(edgeEls, function (edge) {
+        if (
+          edge.getAttribute('data-mw-source') === id ||
+          edge.getAttribute('data-mw-target') === id
+        ) {
+          out.push(edge);
+        }
+      });
+      return out;
+    }
+
+    function markIncident(nodeEl, on) {
+      each(incidentEdges(nodeEl), function (edge) {
+        edge.classList.toggle('mw-incident', on);
+      });
+    }
+
+    function selectNode(nodeEl) {
+      each(nodeEls, function (n) {
+        n.classList.remove('mw-selected-node');
+      });
+      each(edgeEls, function (edge) {
+        edge.classList.remove('mw-incident');
+      });
+      nodeEl.classList.add('mw-selected-node');
+      markIncident(nodeEl, true);
+      setSelectParam(nodeEl.getAttribute('data-mw-id'));
+
+      var name = nodeEl.getAttribute('data-mw-name') || nodeEl.getAttribute('data-mw-id');
+      var kind = nodeEl.getAttribute('data-mw-kind') || '';
+      propsTitle.textContent = name;
+      propsList.textContent = '';
+      appendRow(propsList, 'id', nodeEl.getAttribute('data-mw-id'));
+      appendRow(propsList, 'name', name);
+      appendRow(propsList, 'kind', kind);
+    }
+
+    function neighbourIds(nodeEl) {
+      var id = nodeEl.getAttribute('data-mw-id');
+      var set = {};
+      each(edgeEls, function (edge) {
+        if (edge.getAttribute('data-mw-source') === id) {
+          set[edge.getAttribute('data-mw-target')] = true;
+        } else if (edge.getAttribute('data-mw-target') === id) {
+          set[edge.getAttribute('data-mw-source')] = true;
+        }
+      });
+      return set;
+    }
+
+    function highlightNeighbours(nodeEl) {
+      var id = nodeEl.getAttribute('data-mw-id');
+      var others = neighbourIds(nodeEl);
+      svg.classList.add('dimmed');
+      each(nodeEls, function (n) {
+        var nid = n.getAttribute('data-mw-id');
+        if (nid === id || others[nid]) {
+          n.classList.add('mw-active');
+        }
+      });
+      markIncident(nodeEl, true);
+    }
+
+    function clearHighlight() {
+      svg.classList.remove('dimmed');
+      each(nodeEls, function (n) {
+        n.classList.remove('mw-active');
+      });
+      each(edgeEls, function (edge) {
+        edge.classList.remove('mw-incident');
+      });
+    }
+
+    // ---- node wiring: click selects, hover highlights the neighbourhood ----
+    each(nodeEls, function (nodeEl) {
+      nodeEl.addEventListener('mouseenter', function () {
+        nodeEl.classList.add('mw-hover');
+        highlightNeighbours(nodeEl);
+      });
+      nodeEl.addEventListener('mouseleave', function () {
+        nodeEl.classList.remove('mw-hover');
+        clearHighlight();
+      });
+      nodeEl.addEventListener('click', function (event) {
+        event.stopPropagation();
+        selectNode(nodeEl);
+      });
+    });
+
+    // ---- kind filter chips ----
+    var activeKinds = {};
+    each(document.querySelectorAll('.kind-filter'), function (chip) {
+      chip.addEventListener('click', function () {
+        var kind = chip.getAttribute('data-mw-kind');
+        if (activeKinds[kind]) {
+          delete activeKinds[kind];
+          chip.classList.remove('active');
+        } else {
+          activeKinds[kind] = true;
+          chip.classList.add('active');
+        }
+        var hasActive = Object.keys(activeKinds).length > 0;
+        each(nodeEls, function (n) {
+          var hide = hasActive && !activeKinds[n.getAttribute('data-mw-kind')];
+          n.classList.toggle('mw-filtered-out', hide);
+        });
+      });
+    });
+
+    // ---- search highlight ----
+    var search = document.querySelector('.mw-diagram-search');
+    if (search) {
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        each(nodeEls, function (n) {
+          var hay = (
+            (n.getAttribute('data-mw-name') || '') + ' ' +
+            (n.getAttribute('data-mw-id') || '') + ' ' +
+            (n.getAttribute('data-mw-kind') || '')
+          ).toLowerCase();
+          var match = q !== '' && hay.indexOf(q) !== -1;
+          n.classList.toggle('mw-search-match', match);
+        });
+      });
+    }
+
+    // ---- zoom / fit buttons ----
+    var zoomIn = document.querySelector('.mw-zoom-in');
+    var zoomOut = document.querySelector('.mw-zoom-out');
+    var fit = document.querySelector('.mw-fit');
+    if (zoomIn) {
+      zoomIn.addEventListener('click', function () { zoomBy(1.3); });
+    }
+    if (zoomOut) {
+      zoomOut.addEventListener('click', function () { zoomBy(1 / 1.3); });
+    }
+    if (fit) {
+      fit.addEventListener('click', fitToView);
+    }
+
+    // ---- wheel zoom around the cursor ----
+    viewport.addEventListener(
+      'wheel',
+      function (event) {
+        event.preventDefault();
+        var factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+        zoomAt(event.clientX, event.clientY, factor);
+      },
+      { passive: false }
+    );
+
+    // ---- drag to pan (on the background, not on nodes/edges) ----
+    var dragging = false;
+    var lastX = 0;
+    var lastY = 0;
+    viewport.addEventListener('mousedown', function (event) {
+      var target = event.target;
+      if (target.closest && (target.closest('g.node') || target.closest('g.edge'))) {
+        return;
+      }
+      dragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      svg.classList.add('dragging');
+      event.preventDefault();
+    });
+    window.addEventListener('mousemove', function (event) {
+      if (!dragging) {
+        return;
+      }
+      panBy(event.clientX - lastX, event.clientY - lastY);
+      lastX = event.clientX;
+      lastY = event.clientY;
+    });
+    window.addEventListener('mouseup', function () {
+      if (dragging) {
+        dragging = false;
+        svg.classList.remove('dragging');
+      }
+    });
+
+    // ---- honour a ?select= deep link (the page already opens fit-to-view) ----
+    var key = readSelectFromUrl();
+    if (key) {
+      each(nodeEls, function (nodeEl) {
+        if (nodeEl.getAttribute('data-mw-id') === key) {
+          selectNode(nodeEl);
+          centerOn(nodeEl);
+        }
+      });
     }
   }
+
 
   // ---- model page: containment tree | content | properties -----------------
 
