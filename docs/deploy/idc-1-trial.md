@@ -12,17 +12,18 @@ intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 - Public hostname: `trial.modelwrite.org` -> hatch tunnel -> `http://localhost:3102`
 - Data: `/opt/modelwrite/data` (SQLite `modelwrite.db` + `evidence/`), owned 65532:65532,
   bind-mounted to `/data` in the container.
-- Env file: `/opt/modelwrite/deploy/modelwrite.env` (mode 600) — `MW_AUTH_TOKEN=` (blanked),
-  `MW_ALLOW_OPEN=yes`, and `MW_BIND=0.0.0.0` (in-container bind; loopback is enforced by
-  `-p 127.0.0.1:3102:8080`). The trial is intentionally open; the old token is recorded in
-  the deployment report only, never in this repo.
+- Env file: `/opt/modelwrite/deploy/modelwrite.env` (mode 600) — `MW_AUTH_TOKEN=` (blanked:
+  the line is present but empty), `MW_ALLOW_OPEN=yes`, and `MW_BIND=0.0.0.0` (in-container
+  bind; host loopback is enforced by `-p 127.0.0.1:3102:8080`). The trial is intentionally
+  open. The old token value is preserved in a comment line in that same env file and in
+  `.superpowers/sdd/idc-1-trial-deploy-2-report.md`, never in this repo.
 
 ## Source pinned
 
 - Repository: `https://github.com/modelwrite/modelwrite.git` (public)
-- Commit built from: `d66261e8483a98f64322aab1236d7afe5ea41519`
-  (`fix(binding-xmi): name idref-only unknown elements by their reference`)
-- Image: `modelwrite/modelwrite:idc-1-trial` (id `7f429a4147a2`, ~149 MB), built on the
+- Commit built from: `195cbf84090a68d994900baa2b3acae7ba998479`
+  (`ui: the wordmark links to the website rather than to the project list`)
+- Image: `modelwrite/modelwrite:idc-1-trial` (id `73211ddac82b`, ~149 MB), built on the
   host from the public repo — no registry pull, no registry credentials.
 
 > **Why not the v0.2.0 tag.** The tag predates the S2 crossModelEdges feature
@@ -42,14 +43,27 @@ docker build --cpuset-cpus=0-3 -f deploy/Dockerfile -t modelwrite/modelwrite:idc
 
 ## Auth (intentionally OPEN)
 
-The trial is OPEN by decision (2026-09-21): `MW_AUTH_TOKEN` is blanked and
-`MW_ALLOW_OPEN=yes`, so every request is accepted as an anonymous admin and the UI works
-in a plain browser with no header. This is deliberate; it is bounded by the hourly reset
-below, which is now load-bearing.
+The trial is OPEN by decision (2026-09-21): `MW_AUTH_TOKEN` is blanked (the line is
+present but its value is empty), so the server runs in open mode and accepts every request
+as an anonymous admin — the UI works in a plain browser with no header. The server binds
+`MW_BIND=0.0.0.0` (non-loopback) so it is reachable inside the container, and in open mode a
+non-loopback bind is refused unless `MW_ALLOW_OPEN=yes` is set (both the container entrypoint
+and `server::resolve_bind` enforce this). `MW_ALLOW_OPEN=yes` is therefore the explicit
+opt-in that permits the open bind, not an override of the token. This is deliberate; it is
+bounded by the hourly reset below, which is now load-bearing.
 
-- To re-enable auth: restore the `MW_AUTH_TOKEN` line and remove `MW_ALLOW_OPEN=yes` in
-  `/opt/modelwrite/deploy/modelwrite.env`, then `sudo systemctl restart modelwrite`.
-  The token value is recorded in the deployment report (`.superpowers/sdd/...`), never here.
+- To re-enable auth, make this one-line change in `/opt/modelwrite/deploy/modelwrite.env` —
+  set the token value back into the blank line (the value is preserved in the
+  `#   MW_AUTH_TOKEN=…` comment line directly above it, and in
+  `.superpowers/sdd/idc-1-trial-deploy-2-report.md`) and delete the `MW_ALLOW_OPEN=yes`
+  line, then `sudo systemctl restart modelwrite`:
+  `MW_AUTH_TOKEN=<token value>`. A non-empty `MW_AUTH_TOKEN` switches the server from open
+  to static auth (the `MW_ALLOW_OPEN` gate only applies while auth is open), so setting the
+  token is the change that actually re-enables auth; deleting `MW_ALLOW_OPEN=yes` is the
+  clean-state complement.
+- Do NOT delete the blank `MW_AUTH_TOKEN=` line: `deploy/capture-seed.py` reads it and
+  raises `MW_AUTH_TOKEN not found` if the line is absent. The line stays, blank, so the
+  capture and reset scripts keep working in open mode.
 - While static auth is on, `/health` and `/version` stay public; identity is
   `{ subject: "admin", roles: ["admin"] }`, and a configured-mode commit must name its own
   verified subject as `author` (the seed uses `author: "admin"`; a non-matching name is
