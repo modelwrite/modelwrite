@@ -28,6 +28,7 @@ use axum::response::Response;
 use maud::{html, Markup, PreEscaped};
 
 use graph::layout::{self as graph_layout, DiagramLayout, NodeBox};
+use graph::routing;
 use graph::symbol;
 use okf::types::{Graph, GraphEdge, GraphNode, OkfRoot};
 
@@ -373,6 +374,7 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
         }
     }
     let mut pair_seen: HashMap<(&str, &str), usize> = HashMap::new();
+    let all_boxes: Vec<&NodeBox> = layout.nodes.iter().collect();
     for edge in &edges {
         let (Some(src), Some(tgt)) = (resolve(&edge.source), resolve(&edge.target)) else {
             continue;
@@ -386,7 +388,7 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
             0.0
         };
         *seen += 1;
-        push_edge(&mut svg, edge, &src, &tgt, offset);
+        push_edge(&mut svg, edge, &src, &tgt, &all_boxes, offset);
     }
 
     for node_box in &layout.nodes {
@@ -447,48 +449,75 @@ fn border_point(b: &NodeBox, toward: (f64, f64)) -> (f64, f64) {
     (cx + dx * s, cy + dy * s)
 }
 
-fn push_edge(svg: &mut String, edge: &GraphEdge, src: &Anchor<'_>, tgt: &Anchor<'_>, offset: f64) {
+fn push_edge(
+    svg: &mut String,
+    edge: &GraphEdge,
+    src: &Anchor<'_>,
+    tgt: &Anchor<'_>,
+    all_boxes: &[&NodeBox],
+    offset: f64,
+) {
     let group = edge_group(&edge.kind);
-    let (sx, sy) = anchor_point(src, tgt.center());
-    let (tx, ty) = anchor_point(tgt, src.center());
-
-    let dx = tx - sx;
-    let dy = ty - sy;
-    let length = (dx * dx + dy * dy).sqrt().max(1e-6);
-    let (ox, oy) = if offset != 0.0 {
-        (-dy / length * offset, dx / length * offset)
+    // Dependency (Satisfy/…) edges are a secondary relationship: dashed so they read as a layer
+    // beneath the flow, never confused with it.
+    let dash = if group == "dependency" {
+        " stroke-dasharray='5 3'"
     } else {
-        (0.0, 0.0)
-    };
-    let (x1, y1) = (sx + ox, sy + oy);
-    let (x2, y2) = (tx + ox, ty + oy);
-
-    let (label_x, label_y, head_x, head_y, head_dx, head_dy, line) = if edge.source == edge.target
-        && matches!(src, Anchor::Node(_))
-        && (sx - tx).abs() < 0.5
-        && (sy - ty).abs() < 0.5
-    {
-        let (cx, cy) = src.center();
-        let top = cy - 24.0;
-        let path = format!(
-            "<path class='mw-edge {group}' d='M {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}' fill='none'/>",
-            cx, top, cx - 30.0, top - 24.0, cx + 30.0, top - 24.0, cx, top
-        );
-        (cx, top - 28.0, cx, top, 0.0, 1.0, path)
-    } else {
-        let l = format!(
-            "<line class='mw-edge {group}' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}'/>",
-            x1, y1, x2, y2
-        );
-        ((x1 + x2) / 2.0, (y1 + y2) / 2.0 - 5.0, x2, y2, dx, dy, l)
+        ""
     };
 
     svg.push_str(&format!(
-        "<g class='edge' data-mw-source='{}' data-mw-target='{}' data-mw-kind='{}'>{line}",
+        "<g class='edge' data-mw-source='{}' data-mw-target='{}' data-mw-kind='{}'>",
         xml_escape(&edge.source),
         xml_escape(&edge.target),
         xml_escape(&edge.kind)
     ));
+
+    // A self-loop, an orthogonal route between two nodes, or a straight line to a dangling marker.
+    let (head_x, head_y, head_dx, head_dy, label_x, label_y) = match (src, tgt) {
+        (Anchor::Node(sb), Anchor::Node(tb)) if edge.source == edge.target => {
+            let cx = sb.center_x();
+            let cy = sb.center_y();
+            let top = cy - 24.0;
+            svg.push_str(&format!(
+                "<path class='mw-edge {group}' d='M {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}' fill='none'/>",
+                cx, top, cx - 30.0, top - 24.0, cx + 30.0, top - 24.0, cx, top
+            ));
+            (cx, top, 0.0, 1.0, cx, top - 28.0)
+        }
+        (Anchor::Node(sb), Anchor::Node(tb)) => {
+            let pts = routing::route_offset(sb, tb, all_boxes, offset);
+            push_polyline(svg, &pts, group, dash);
+            let last = pts[pts.len() - 1];
+            let prev = pts[pts.len() - 2];
+            (
+                last.0,
+                last.1,
+                last.0 - prev.0,
+                last.1 - prev.1,
+                (pts[0].0 + last.0) / 2.0,
+                (pts[0].1 + last.1) / 2.0 - 5.0,
+            )
+        }
+        _ => {
+            let (sx, sy) = anchor_point(src, tgt.center());
+            let (tx, ty) = anchor_point(tgt, src.center());
+            let (dx, dy) = (tx - sx, ty - sy);
+            svg.push_str(&format!(
+                "<line class='mw-edge {group}' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}'{dash}/>",
+                sx, sy, tx, ty
+            ));
+            (
+                tx,
+                ty,
+                dx,
+                dy,
+                (sx + tx) / 2.0,
+                (sy + ty) / 2.0 - 5.0,
+            )
+        }
+    };
+
     push_arrowhead(svg, head_x, head_y, head_dx, head_dy, group);
     if !edge.label.is_empty() {
         svg.push_str(&format!(
@@ -499,6 +528,18 @@ fn push_edge(svg: &mut String, edge: &GraphEdge, src: &Anchor<'_>, tgt: &Anchor<
         ));
     }
     svg.push_str("</g>");
+}
+
+/// Render an orthogonal route as a polyline (no fill; the stroke comes from the stylesheet).
+fn push_polyline(svg: &mut String, pts: &[(f64, f64)], group: &str, dash: &str) {
+    let points: Vec<String> = pts
+        .iter()
+        .map(|(x, y)| format!("{:.1},{:.1}", x, y))
+        .collect();
+    svg.push_str(&format!(
+        "<polyline class='mw-edge {group}' points='{}' fill='none'{dash}/>",
+        points.join(" ")
+    ));
 }
 
 /// Draw an explicit arrowhead triangle at the tip, oriented along the direction of travel. The

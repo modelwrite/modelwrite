@@ -1,0 +1,522 @@
+{
+  "okf": "1.0",
+  "project": "microduck",
+  "exportedAt": "",
+  "summary": {
+    "blocks": 8,
+    "requirements": 6,
+    "signals": 2,
+    "activities": 5
+  },
+  "structure": [
+    {
+      "id": "microduck",
+      "name": "MicroDuck",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [
+        {
+          "name": "manipulator",
+          "type": "Gripper Arm",
+          "aggregation": "composite",
+          "default": ""
+        },
+        {
+          "name": "vision",
+          "type": "Camera",
+          "aggregation": "composite",
+          "default": ""
+        },
+        {
+          "name": "drive",
+          "type": "Wheeled Base",
+          "aggregation": "composite",
+          "default": ""
+        }
+      ],
+      "documentation": "An open-source, low-cost trainable robot (Pollen Robotics / Hugging Face). It can GRASP and lift an object, which the scooping floor robot cannot."
+    },
+    {
+      "id": "gripper-arm",
+      "name": "Gripper Arm",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Two-finger gripper on a short arm: picks a cup up rather than sweeping it."
+    },
+    {
+      "id": "gripper-camera",
+      "name": "Gripper Camera",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Wrist camera used to align the grasp."
+    },
+    {
+      "id": "wheeled-base",
+      "name": "Wheeled Base",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Small indoor base. Smooth floor only - it does not clear mats, sills or spills."
+    },
+    {
+      "id": "battery-pack",
+      "name": "Battery Pack",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Small pack; shorter shift than the floor robot, so more returns to dock."
+    },
+    {
+      "id": "trainer-interface",
+      "name": "Trainer Interface",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Open-source training path: staff teach a new grasp or route by demonstration."
+    },
+    {
+      "id": "basket",
+      "name": "Carry Basket",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Holds several cups once picked."
+    },
+    {
+      "id": "duck-dock",
+      "name": "Dock",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Charging and stow point."
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "if-trainer",
+      "name": "Trainer Interface Port",
+      "kind": "interface",
+      "stereotypes": [
+        "InterfaceBlock"
+      ],
+      "attributes": [],
+      "documentation": "How staff teach a new behaviour."
+    }
+  ],
+  "signals": [
+    {
+      "id": "sig-grasp-ok",
+      "name": "GraspConfirmed",
+      "kind": "signal",
+      "stereotypes": [
+        "Signal"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "sig-grasp-failed",
+      "name": "GraspFailed",
+      "kind": "signal",
+      "stereotypes": [
+        "Signal"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "requirements": [
+    {
+      "id": "req-duck-pick",
+      "name": "Pick Up Cup",
+      "kind": "requirement",
+      "reqId": "MD-1",
+      "reqText": "The robot shall grasp and lift a dropped cup, including a cup beneath a table or beside a chair leg, where sweeping cannot reach.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-duck-stack",
+      "name": "Handles Stacked Cups",
+      "kind": "requirement",
+      "reqId": "MD-2",
+      "reqText": "The robot shall separate and collect stacked or nested cups without crushing them.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-duck-cost",
+      "name": "Unit Cost",
+      "kind": "requirement",
+      "reqId": "MD-3",
+      "reqText": "The robot shall cost no more than 500 per unit so that several can be deployed for the price of one floor robot.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-duck-open",
+      "name": "Open and Trainable",
+      "kind": "requirement",
+      "reqId": "MD-4",
+      "reqText": "The robot's software and behaviours shall be open and trainable by staff, so a new grasp does not require the vendor.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-duck-floor",
+      "name": "Smooth Floor Only",
+      "kind": "requirement",
+      "reqId": "MD-5",
+      "reqText": "The robot shall operate on smooth indoor floor and shall refuse terrain it cannot cross rather than risk a fall.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": "A LIMITATION stated as a requirement, so the trade study can weigh it."
+    },
+    {
+      "id": "req-duck-shift",
+      "name": "Extended Shift",
+      "kind": "requirement",
+      "reqId": "MD-6",
+      "reqText": "The robot shall operate for at least 3 hours between charges, acknowledging that its pack is smaller than the floor robot's.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "stateMachine": {
+    "name": "microduck-states",
+    "regions": []
+  },
+  "activities": [
+    {
+      "id": "act-duck-patrol",
+      "name": "Patrol Floor",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "microduck",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Slow patrol of the smooth-floor areas."
+    },
+    {
+      "id": "act-duck-detect",
+      "name": "Detect Cup",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "microduck",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Find a cup, including under a table."
+    },
+    {
+      "id": "act-duck-grasp",
+      "name": "Grasp Cup",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "microduck",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Align, close the gripper, lift, confirm the grasp."
+    },
+    {
+      "id": "act-duck-retry",
+      "name": "Retry Grasp",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "microduck",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "A failed grasp is retried; a repeatedly failed grasp is reported to staff rather than forced."
+    },
+    {
+      "id": "act-duck-deposit",
+      "name": "Deposit Cups",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "cafe-stand",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Empty the carry basket at the collection point."
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "microduck",
+        "kind": "block",
+        "name": "MicroDuck",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "gripper-arm",
+        "kind": "block",
+        "name": "Gripper Arm",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "wheeled-base",
+        "kind": "block",
+        "name": "Wheeled Base",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "trainer-interface",
+        "kind": "block",
+        "name": "Trainer Interface",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "act-duck-patrol",
+        "kind": "activity",
+        "name": "Patrol Floor",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-duck-detect",
+        "kind": "activity",
+        "name": "Detect Cup",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-duck-grasp",
+        "kind": "activity",
+        "name": "Grasp Cup",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-duck-retry",
+        "kind": "activity",
+        "name": "Retry Grasp",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-duck-deposit",
+        "kind": "activity",
+        "name": "Deposit Cups",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "req-duck-pick",
+        "kind": "requirement",
+        "name": "Pick Up Cup",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-duck-stack",
+        "kind": "requirement",
+        "name": "Handles Stacked Cups",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-duck-cost",
+        "kind": "requirement",
+        "name": "Unit Cost",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-duck-open",
+        "kind": "requirement",
+        "name": "Open and Trainable",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-duck-floor",
+        "kind": "requirement",
+        "name": "Smooth Floor Only",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-duck-shift",
+        "kind": "requirement",
+        "name": "Extended Shift",
+        "stereotypes": [
+          "Requirement"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "source": "microduck",
+        "target": "gripper-arm",
+        "kind": "part",
+        "label": "manipulator"
+      },
+      {
+        "source": "microduck",
+        "target": "wheeled-base",
+        "kind": "part",
+        "label": "drive"
+      },
+      {
+        "source": "microduck",
+        "target": "trainer-interface",
+        "kind": "part",
+        "label": "trainer"
+      },
+      {
+        "source": "act-duck-patrol",
+        "target": "act-duck-detect",
+        "kind": "include",
+        "label": "then"
+      },
+      {
+        "source": "act-duck-detect",
+        "target": "act-duck-grasp",
+        "kind": "triggers",
+        "label": "on cup found"
+      },
+      {
+        "source": "act-duck-grasp",
+        "target": "act-duck-retry",
+        "kind": "include",
+        "label": "if grasp fails"
+      },
+      {
+        "source": "act-duck-retry",
+        "target": "act-duck-grasp",
+        "kind": "include",
+        "label": "retry"
+      },
+      {
+        "source": "act-duck-grasp",
+        "target": "act-duck-deposit",
+        "kind": "triggers",
+        "label": "when basket full"
+      },
+      {
+        "source": "act-duck-grasp",
+        "target": "req-duck-pick",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "act-duck-grasp",
+        "target": "req-duck-stack",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "microduck",
+        "target": "req-duck-cost",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "trainer-interface",
+        "target": "req-duck-open",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "wheeled-base",
+        "target": "req-duck-floor",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "microduck",
+        "target": "req-duck-shift",
+        "kind": "dependency",
+        "label": "Satisfy"
+      }
+    ]
+  },
+  "references": []
+}
