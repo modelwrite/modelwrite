@@ -8,11 +8,16 @@
 //! conflicting merge as a resolvable page showing base, ours and theirs for every conflict
 //! rather than as an error page: a 409 is information, not a failure.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use maud::{html, Markup};
 use serde::Deserialize;
+
+use graph::requirement_coverage;
+use okf::types::{OkfRoot, Requirement, SubsystemReference};
 
 use crate::api::{load_model, map_store_error, validate_name, verify_actor, ApiState};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
@@ -128,6 +133,9 @@ fn render_compare_page(
     let report = okf::diff::diff(&reference, &candidate);
     let outcome = gate::run(&reference, &candidate, false);
     let isolated = isolated_nodes(&outcome.evidence);
+    let from_label = side_label(from, &from_hash);
+    let to_label = side_label(to, &to_hash);
+    let impact = impact_panel(&from_label, &to_label, &reference, &candidate);
 
     let body = html! {
         h1 { "Compare" }
@@ -137,6 +145,7 @@ fn render_compare_page(
             " → to " code { (short_hash(&to_hash)) }
             @if let Some(commit) = &to_commit { " · " (commit.message.as_str()) }
         }
+        @if let Some(panel) = impact { (panel) }
         section id="diff" class="model-section" {
             h2 { "Diff" }
             @if report.equal {
@@ -382,6 +391,379 @@ fn edge_display(key: &str) -> String {
         }
     } else {
         key.to_string()
+    }
+}
+// ---------------------------------------------------------------------------
+// The variant impact panel.
+
+/// One subsystem reference rendered as a row, keyed by its role: the project@revision each
+/// side pins, and whether the two sides differ.
+struct ImpactRef {
+    role: String,
+    from: Option<(String, String)>,
+    to: Option<(String, String)>,
+    changed: bool,
+}
+
+/// The coverage state of a platform requirement across the two compared versions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImpactState {
+    Both,
+    FromOnly,
+    ToOnly,
+    Neither,
+}
+
+impl ImpactState {
+    fn data(self) -> &'static str {
+        match self {
+            ImpactState::Both => "both",
+            ImpactState::FromOnly => "from",
+            ImpactState::ToOnly => "to",
+            ImpactState::Neither => "neither",
+        }
+    }
+}
+
+struct ImpactRequirement {
+    req_id: String,
+    name: String,
+    state: ImpactState,
+}
+
+/// A short, human label for one compare side: the branch name as typed, or a shortened hash
+/// when the endpoint was itself a commit hash.
+fn side_label(endpoint: &str, resolved: &str) -> String {
+    if endpoint == resolved {
+        short_hash(endpoint).to_string()
+    } else {
+        endpoint.to_string()
+    }
+}
+
+/// The variant impact panel for a PLATFORM comparison: the two sides' references (role-keyed,
+/// changed choices marked) and each platform requirement's coverage state on each side — the
+/// ENGINE's [graph::requirement_coverage] over each version's own graph, never a
+/// reimplementation — plus a plain summary and the honest measured-vs-asserted boundary.
+/// Returns `None` when neither side declares a subsystem reference, so there is no variant
+/// impact to show.
+fn impact_panel(
+    from_label: &str,
+    to_label: &str,
+    reference: &OkfRoot,
+    candidate: &OkfRoot,
+) -> Option<Markup> {
+    if reference.references.is_empty() && candidate.references.is_empty() {
+        return None;
+    }
+
+    let rows = reference_rows(reference, candidate);
+    let requirements = requirement_rows(reference, candidate);
+    let summary = summary_line(&requirements, from_label, to_label);
+
+    Some(html! {
+        section id="impact" class="model-section" {
+            h2 { "Variant impact" }
+            p class="meta" {
+                "Which platform requirements each side satisfies, and where the two versions' subsystem choices differ."
+            }
+
+            h3 { "References" }
+            table class="impact-refs" {
+                thead {
+                    tr {
+                        th { "role" }
+                        th { "from · " (from_label) }
+                        th { "to · " (to_label) }
+                    }
+                }
+                tbody {
+                    @for row in &rows {
+                        tr class=(if row.changed { "impact-ref changed" } else { "impact-ref" })
+                           data-role=(row.role.as_str())
+                           data-changed=(if row.changed { "true" } else { "false" }) {
+                            td class="impact-role" { span class="role-chip" { (row.role.as_str()) } }
+                            td class="impact-side" { (reference_cell(&row.from)) }
+                            td class="impact-side" {
+                                (reference_cell(&row.to))
+                                @if row.changed { span class="impact-changed" { "changed" } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            h3 { "Requirements" }
+            ul class="impact-reqs" {
+                @for req in &requirements {
+                    li class="impact-req"
+                       data-state=(req.state.data())
+                       data-req-id=(req.req_id.as_str()) {
+                        code class="impact-req-id" { (req.req_id.as_str()) }
+                        span class="impact-req-name" { (req.name.as_str()) }
+                        span class=(state_chip_class(req.state)) {
+                            (state_chip_text(req.state, from_label, to_label))
+                        }
+                    }
+                }
+            }
+
+            p class="impact-summary" { (summary.as_str()) }
+
+            (impact_boundary())
+        }
+    })
+}
+
+/// `project@short-revision`, or an absent marker when one side has no reference for a role.
+fn reference_cell(value: &Option<(String, String)>) -> Markup {
+    match value {
+        Some((project, revision)) => html! {
+            span class="impact-project" { (project.as_str()) }
+            code title=(revision.as_str()) { "@" (short_hash(revision.as_str())) }
+        },
+        None => html! { span class="none" { "—" } },
+    }
+}
+
+/// The two sides' references as role-keyed rows. A role whose project or revision differs is
+/// marked changed; a role present on only one side reads as a change too (added or removed).
+fn reference_rows(reference: &OkfRoot, candidate: &OkfRoot) -> Vec<ImpactRef> {
+    let from_map: BTreeMap<&str, &SubsystemReference> = reference
+        .references
+        .iter()
+        .map(|r| (r.role.as_str(), r))
+        .collect();
+    let to_map: BTreeMap<&str, &SubsystemReference> = candidate
+        .references
+        .iter()
+        .map(|r| (r.role.as_str(), r))
+        .collect();
+
+    let mut roles: BTreeSet<&str> = BTreeSet::new();
+    roles.extend(from_map.keys().copied());
+    roles.extend(to_map.keys().copied());
+
+    roles
+        .into_iter()
+        .map(|role| {
+            let from = from_map
+                .get(role)
+                .map(|r| (r.project.clone(), r.revision.clone()));
+            let to = to_map
+                .get(role)
+                .map(|r| (r.project.clone(), r.revision.clone()));
+            ImpactRef {
+                role: role.to_string(),
+                changed: from != to,
+                from,
+                to,
+            }
+        })
+        .collect()
+}
+
+/// Each platform requirement (the union across both sides) with its coverage state, from the
+/// ENGINE's [graph::requirement_coverage] over each version's own graph. A requirement that
+/// is absent on one side is simply not satisfied there.
+fn requirement_rows(reference: &OkfRoot, candidate: &OkfRoot) -> Vec<ImpactRequirement> {
+    let from_uncovered = uncovered_ids(reference);
+    let to_uncovered = uncovered_ids(candidate);
+    let from_by_id: BTreeMap<&str, &Requirement> = reference
+        .requirements
+        .iter()
+        .map(|r| (r.id.as_str(), r))
+        .collect();
+    let to_by_id: BTreeMap<&str, &Requirement> = candidate
+        .requirements
+        .iter()
+        .map(|r| (r.id.as_str(), r))
+        .collect();
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut rows = Vec::new();
+    for req in reference
+        .requirements
+        .iter()
+        .chain(candidate.requirements.iter())
+    {
+        if !seen.insert(req.id.clone()) {
+            continue;
+        }
+        let from_present = from_by_id.contains_key(req.id.as_str());
+        let to_present = to_by_id.contains_key(req.id.as_str());
+        let from_satisfied = from_present && !from_uncovered.contains(req.id.as_str());
+        let to_satisfied = to_present && !to_uncovered.contains(req.id.as_str());
+        let state = match (from_satisfied, to_satisfied) {
+            (true, true) => ImpactState::Both,
+            (true, false) => ImpactState::FromOnly,
+            (false, true) => ImpactState::ToOnly,
+            (false, false) => ImpactState::Neither,
+        };
+        let display = to_by_id
+            .get(req.id.as_str())
+            .or_else(|| from_by_id.get(req.id.as_str()))
+            .copied()
+            .unwrap_or(req);
+        let req_id = if display.req_id.trim().is_empty() {
+            display.id.clone()
+        } else {
+            display.req_id.clone()
+        };
+        rows.push(ImpactRequirement {
+            req_id,
+            name: display.name.clone(),
+            state,
+        });
+    }
+    rows
+}
+
+/// The requirement ids the ENGINE reports as uncovered on one side, or empty when that side
+/// carries no graph (there is then no coverage to report).
+fn uncovered_ids(root: &OkfRoot) -> HashSet<String> {
+    match root.graph.as_ref() {
+        Some(_) => requirement_coverage(root).uncovered.into_iter().collect(),
+        None => HashSet::new(),
+    }
+}
+
+/// The plain-words summary: one clause per coverage state.
+fn summary_line(requirements: &[ImpactRequirement], from_label: &str, to_label: &str) -> String {
+    let both: Vec<&str> = requirements
+        .iter()
+        .filter(|r| r.state == ImpactState::Both)
+        .map(|r| r.req_id.as_str())
+        .collect();
+    let from_only: Vec<&str> = requirements
+        .iter()
+        .filter(|r| r.state == ImpactState::FromOnly)
+        .map(|r| r.req_id.as_str())
+        .collect();
+    let to_only: Vec<&str> = requirements
+        .iter()
+        .filter(|r| r.state == ImpactState::ToOnly)
+        .map(|r| r.req_id.as_str())
+        .collect();
+    let neither: Vec<&str> = requirements
+        .iter()
+        .filter(|r| r.state == ImpactState::Neither)
+        .map(|r| r.req_id.as_str())
+        .collect();
+
+    let mut parts: Vec<String> = Vec::new();
+    if !both.is_empty() {
+        parts.push(group_phrase(&both, "satisfied in both versions"));
+    }
+    if !from_only.is_empty() {
+        parts.push(group_phrase(
+            &from_only,
+            &format!("satisfied only in {}", from_label),
+        ));
+    }
+    if !to_only.is_empty() {
+        parts.push(group_phrase(
+            &to_only,
+            &format!("satisfied only in {}", to_label),
+        ));
+    }
+    if !neither.is_empty() {
+        parts.push(group_phrase(&neither, "satisfied in neither version"));
+    }
+    if parts.is_empty() {
+        "No platform requirements to compare.".to_string()
+    } else {
+        format!("{}.", parts.join("; "))
+    }
+}
+
+/// "Requirement CS-1 is satisfied in both versions" / "Requirements CS-1 and CS-2 are …",
+/// with the subject and verb agreeing.
+fn group_phrase(ids: &[&str], predicate: &str) -> String {
+    let subject = if ids.len() == 1 {
+        "Requirement"
+    } else {
+        "Requirements"
+    };
+    let verb = if ids.len() == 1 { "is" } else { "are" };
+    format!("{} {} {} {}", subject, join_ids(ids), verb, predicate)
+}
+
+/// "CS-1", "CS-1 and CS-2", or "CS-1, CS-2 and CS-3".
+fn join_ids(ids: &[&str]) -> String {
+    match ids {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [a, b] => format!("{} and {}", a, b),
+        _ => {
+            let (last, rest) = ids.split_last().expect("a non-empty id list");
+            format!("{} and {}", rest.join(", "), last)
+        }
+    }
+}
+
+/// The chip class for a requirement's coverage state: the green/red engine chips for "both"
+/// and "neither", the amber partial chip for a one-sided difference.
+fn state_chip_class(state: ImpactState) -> &'static str {
+    match state {
+        ImpactState::Both => "impact-state covered",
+        ImpactState::Neither => "impact-state uncovered",
+        ImpactState::FromOnly | ImpactState::ToOnly => "impact-state impact-partial",
+    }
+}
+
+/// The chip label for a requirement's coverage state, naming the side for a one-sided
+/// difference.
+fn state_chip_text(state: ImpactState, from_label: &str, to_label: &str) -> String {
+    match state {
+        ImpactState::Both => "both".to_string(),
+        ImpactState::FromOnly => format!("{} only", from_label),
+        ImpactState::ToOnly => format!("{} only", to_label),
+        ImpactState::Neither => "neither".to_string(),
+    }
+}
+
+/// The honest boundary: what this panel computed (the platform model's own coverage on each
+/// side, and the reference differences) and what it did not (coverage proved inside a
+/// referenced subsystem), in the same measured-vs-asserted discipline as the composition
+/// page.
+fn impact_boundary() -> Markup {
+    html! {
+        div class="impact-boundary" {
+            h3 { "What this panel proves — and what it does not" }
+            p class="meta" {
+                "Coverage is computed over each version's own graph; what a referenced subsystem satisfies internally is not."
+            }
+            div class="boundary-grid" {
+                div class="boundary-panel boundary-measured" {
+                    h3 { "Computed" }
+                    ul {
+                        li {
+                            "the platform model's own requirement coverage on each side, from the engine's "
+                            code { "requirement_coverage" } " over that version's graph"
+                        }
+                        li {
+                            "the subsystem reference differences, shown role → project@revision and marked where they change"
+                        }
+                    }
+                }
+                div class="boundary-panel boundary-asserted" {
+                    h3 { "Not computed — asserted, not proved" }
+                    ul {
+                        li {
+                            "coverage proved inside a referenced subsystem: a platform requirement satisfied by an activity allocated to a role is not proved to be satisfied by the bound element inside that subsystem"
+                        }
+                        li {
+                            "where a difference in a requirement's state is explained by a changed reference, it is explained by the change but not proved by it"
+                        }
+                    }
+                }
+            }
+            p class="fidelity-note" {
+                "An activity's link to a specific element inside a subsystem is carried by its "
+                code { "allocatedTo" } " attribute (a role name), not a first-class cross-model edge, so coverage inside the referenced subsystems is not computed here."
+            }
+        }
     }
 }
 

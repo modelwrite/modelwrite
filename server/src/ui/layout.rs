@@ -1035,6 +1035,57 @@ li.subsystem-card {
 .boundary-asserted { border-left: 3px solid var(--warn); }
 .boundary-panel ul { margin: 0; padding-left: 1.1rem; }
 .boundary-panel li { margin-bottom: 0.35rem; font-size: 13px; }
+/* -- variant impact (compare) -------------------------------------------- */
+
+.impact-refs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0 0 1rem;
+}
+.impact-refs th {
+  text-align: left;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.impact-refs td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border-muted);
+  vertical-align: top;
+}
+.impact-ref.changed td { background: var(--warn-bg); }
+.impact-role { font-weight: 600; white-space: nowrap; }
+.impact-side { color: var(--text-2); }
+.impact-side .impact-project { color: var(--text); font-weight: 600; }
+.impact-side code { color: var(--text-2); }
+
+.impact-changed, .impact-partial {
+  display: inline-block;
+  font-weight: 600; font-size: 11px;
+  padding: 0.04rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.impact-changed { margin-left: 0.4rem; }
+
+ul.impact-reqs { list-style: none; margin: 0 0 0.75rem; padding: 0; }
+li.impact-req {
+  display: flex; align-items: baseline; gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border-muted);
+}
+li.impact-req .impact-req-id { font-family: var(--font-mono); font-weight: 600; }
+li.impact-req .impact-req-name { color: var(--text-2); font-size: 13px; }
+.impact-state { margin-left: auto; }
+
+.impact-summary { color: var(--text); font-size: 13px; margin: 0.25rem 0 0.75rem; }
 
 .process-flow {
   display: flex;
