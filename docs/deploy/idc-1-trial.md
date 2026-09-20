@@ -1,7 +1,8 @@
 # idc-1 trial deployment
 
 Status: DONE — modelwrite trial running on idc-1 at https://trial.modelwrite.org,
-seeded, verified from outside, with a nightly sandbox reset.
+seeded, verified from outside, with a nightly sandbox reset. The trial is
+intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 
 ## Host and service
 
@@ -11,9 +12,10 @@ seeded, verified from outside, with a nightly sandbox reset.
 - Public hostname: `trial.modelwrite.org` -> hatch tunnel -> `http://localhost:3102`
 - Data: `/opt/modelwrite/data` (SQLite `modelwrite.db` + `evidence/`), owned 65532:65532,
   bind-mounted to `/data` in the container.
-- Env file: `/opt/modelwrite/deploy/modelwrite.env` (mode 600) — `MW_AUTH_TOKEN` and
-  `MW_BIND=0.0.0.0` (in-container bind; loopback is enforced by `-p 127.0.0.1:3102:8080`).
-  The token is recorded in the deployment report only, never in this repo.
+- Env file: `/opt/modelwrite/deploy/modelwrite.env` (mode 600) — `MW_AUTH_TOKEN=` (blanked),
+  `MW_ALLOW_OPEN=yes`, and `MW_BIND=0.0.0.0` (in-container bind; loopback is enforced by
+  `-p 127.0.0.1:3102:8080`). The trial is intentionally open; the old token is recorded in
+  the deployment report only, never in this repo.
 
 ## Source pinned
 
@@ -38,13 +40,20 @@ docker build --cpuset-cpus=0-3 -f deploy/Dockerfile -t modelwrite/modelwrite:idc
 `--cpuset-cpus=0-3` bounds the cargo build to 4 CPUs. idc-1 runs the live vLLM fleet
 (two RTX 3090s at full utilisation); an unbounded build would starve it.
 
-## Auth
+## Auth (intentionally OPEN)
 
-- `MW_AUTH_TOKEN` (static bearer token) gates every request — JSON API and `/ui` pages
-  alike — with `401` unless `Authorization: Bearer <token>` is present. `/health` and
-  `/version` stay public. Identity is `{ subject: "admin", roles: ["admin"] }`.
-- A configured-mode commit must name its own verified subject as `author`, so the seed
-  uses `author: "admin"` (a non-matching name is refused with 403).
+The trial is OPEN by decision (2026-09-21): `MW_AUTH_TOKEN` is blanked and
+`MW_ALLOW_OPEN=yes`, so every request is accepted as an anonymous admin and the UI works
+in a plain browser with no header. This is deliberate; it is bounded by the nightly reset
+below, which is now load-bearing.
+
+- To re-enable auth: restore the `MW_AUTH_TOKEN` line and remove `MW_ALLOW_OPEN=yes` in
+  `/opt/modelwrite/deploy/modelwrite.env`, then `sudo systemctl restart modelwrite`.
+  The token value is recorded in the deployment report (`.superpowers/sdd/...`), never here.
+- While static auth is on, `/health` and `/version` stay public; identity is
+  `{ subject: "admin", roles: ["admin"] }`, and a configured-mode commit must name its own
+  verified subject as `author` (the seed uses `author: "admin"`; a non-matching name is
+  refused with 403).
 
 ## Seeded content
 
@@ -75,8 +84,8 @@ The hostname was moved from a workstation cloudflared tunnel to idc-1's hatch tu
   `~/.cloudflared/modelwrite-trial.yml` no longer claims the hostname.
 
 Verified from the workstation: `https://trial.modelwrite.org/health` returns
-`{"authMode":"static","status":"ok"}` and `/projects` returns the six models (with the
-token) / 401 (without), proving it is idc-1, not the local 8080 (open-mode) trial.
+`{"authMode":"open","status":"ok"}` and `/projects` returns the six models with no token,
+proving it is idc-1 (the local 8080 trial was left unchanged).
 
 ## Nightly reset (sandbox)
 
@@ -126,8 +135,9 @@ Not built. The shape is parameterised so a second instance can be added without 
 redesign: copy `modelwrite.service`, the reset units and `reset-trial.sh` with a
 different `PORT`, `DATA_DIR`, seed-container port and `SERVICE` name.
 
-## Browser note
+## Open mode note
 
-There is no login form: a human visitor must send `Authorization: Bearer <token>` as a
-header (curl/CLI works; a browser needs a header-setting extension). A public hostname
-would need Cloudflare Access (or equivalent) to inject the header.
+The trial is intentionally OPEN (no token): a browser click on
+https://trial.modelwrite.org renders the workbench directly. This is by decision, and it
+is bounded by the nightly reset above, which is now load-bearing (the reset and its
+backup of the outgoing DB return the trial to the six seeded models).
