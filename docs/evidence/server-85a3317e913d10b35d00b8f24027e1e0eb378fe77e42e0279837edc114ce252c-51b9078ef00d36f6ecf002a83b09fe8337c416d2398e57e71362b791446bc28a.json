@@ -1,0 +1,165 @@
+{
+  "candidateHash": "2751cc1fbd037424a096c738507657b1ab7bb10653f0b7a923edbd8b9049c8fb",
+  "composition": {
+    "boundary": {
+      "asserted": [
+        "the combined system-of-systems, as a whole, has the global graph property (connected, coverage-complete, orphan-free); proving it would require importing every subsystem, which is the copy R1 forbids"
+      ],
+      "measured": [
+        "every subsystem reference resolves at its pinned revision",
+        "every integrated revision was itself gated",
+        "every platform requirement is covered within the platform model"
+      ]
+    },
+    "coverage": {
+      "crossModelOnly": [],
+      "local": [
+        "req-floor-clear",
+        "req-no-early-provision",
+        "req-one-payment",
+        "req-service-time"
+      ]
+    },
+    "resolution": [
+      {
+        "bounds": [
+          "eftpos",
+          "secure-element",
+          "receipt-printer",
+          "card-reader"
+        ],
+        "kind": "measured",
+        "project": "purchasing-terminal",
+        "reason": null,
+        "resolves": true,
+        "revision": "86a14a8128ee2a02085a56bf83a2504f12774e25a0a1d28005daf1fe1e9ee1ea",
+        "role": "payment"
+      },
+      {
+        "bounds": [
+          "_2026x_1_12a70364_1789363229077_574630_3720",
+          "_2026x_1_12a70364_1789357175665_504215_3638"
+        ],
+        "kind": "measured",
+        "project": "coffee-machine",
+        "reason": null,
+        "resolves": true,
+        "revision": "d427e847bf4d875d06fc7f2a5b47bb0a3dc53855a61850195c4ec78e7d45fc36",
+        "role": "beverage"
+      },
+      {
+        "bounds": [
+          "heating-element",
+          "lower-plate",
+          "latch"
+        ],
+        "kind": "measured",
+        "project": "sandwich-toaster",
+        "reason": null,
+        "resolves": true,
+        "revision": "6cc2b58d6f827363d032965ead2d7ecc33e95dfdab1089f9586423959b3bf9ac",
+        "role": "food"
+      },
+      {
+        "bounds": [
+          "gripper-arm",
+          "gripper-camera",
+          "microduck"
+        ],
+        "kind": "measured",
+        "project": "microduck",
+        "reason": null,
+        "resolves": true,
+        "revision": "dddf2978977cc4273d399db0bb271eea2689d0fa9b8e963eacfda64785c3acb2",
+        "role": "floor-care"
+      }
+    ],
+    "wasGated": [
+      {
+        "gated": false,
+        "kind": "measured",
+        "project": "purchasing-terminal",
+        "revision": "86a14a8128ee2a02085a56bf83a2504f12774e25a0a1d28005daf1fe1e9ee1ea",
+        "role": "payment"
+      },
+      {
+        "gated": true,
+        "kind": "measured",
+        "project": "coffee-machine",
+        "revision": "d427e847bf4d875d06fc7f2a5b47bb0a3dc53855a61850195c4ec78e7d45fc36",
+        "role": "beverage"
+      },
+      {
+        "gated": false,
+        "kind": "measured",
+        "project": "sandwich-toaster",
+        "revision": "6cc2b58d6f827363d032965ead2d7ecc33e95dfdab1089f9586423959b3bf9ac",
+        "role": "food"
+      },
+      {
+        "gated": false,
+        "kind": "measured",
+        "project": "microduck",
+        "revision": "dddf2978977cc4273d399db0bb271eea2689d0fa9b8e963eacfda64785c3acb2",
+        "role": "floor-care"
+      }
+    ]
+  },
+  "coverage": {
+    "allocated": 0,
+    "covered": 4,
+    "refined": 0,
+    "satisfied": 4,
+    "total": 4,
+    "uncovered": [],
+    "verified": 0
+  },
+  "failures": [
+    "roundtrip: 1 missing elements, 2 extra elements, 0 missing edges, 0 extra edges, 0 changed attributes",
+    "integration: 1 isolated nodes",
+    "integration: 3 connected components",
+    "reference to purchasing-terminal@86a14a81 is not gated: the pinned revision has no passing gate record",
+    "reference to sandwich-toaster@6cc2b58d is not gated: the pinned revision has no passing gate record",
+    "reference to microduck@dddf2978 is not gated: the pinned revision has no passing gate record"
+  ],
+  "gateVersion": "0.1.0",
+  "integration": {
+    "componentCount": 3,
+    "componentSizes": [
+      10,
+      3,
+      1
+    ],
+    "isolated": [
+      "menu-block"
+    ]
+  },
+  "okfVersion": "1.0",
+  "passed": false,
+  "referenceHash": "1b6af09cc6b0e5c68a43a329d4cad0f410c4b4806ea0ddab74ee93d07fd3c6b8",
+  "roundtrip": {
+    "changedAttributes": [],
+    "equal": false,
+    "extraEdges": [],
+    "extraElements": [
+      "activity:6",
+      "reference:microduck"
+    ],
+    "missingEdges": [],
+    "missingElements": [
+      "reference:floor-robot"
+    ]
+  },
+  "strictCoverage": false,
+  "validationErrors": [],
+  "validationWarnings": [
+    "interface if-customer has no node in the graph, so it is invisible to coverage and traceability",
+    "signal sig-payment-approved has no node in the graph, so it is invisible to coverage and traceability",
+    "signal sig-beverage-ready has no node in the graph, so it is invisible to coverage and traceability",
+    "signal sig-food-ready has no node in the graph, so it is invisible to coverage and traceability",
+    "summary graph counts (1/0) do not match graph section (14/15)",
+    "summary requirements 3 do not match requirements length 4",
+    "summary activities 5 do not match activities length 7",
+    "summary interfaces 0 do not match interfaces length 1"
+  ]
+}

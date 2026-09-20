@@ -1,0 +1,76 @@
+{
+  "candidateHash": "1ee38b1e896c962cef803dd4b4674adcd61f9ada99a6163fe423cf3112185cb6",
+  "composition": {
+    "boundary": {
+      "asserted": [
+        "the combined system-of-systems, as a whole, has the global graph property (connected, coverage-complete, orphan-free); proving it would require importing every subsystem, which is the copy R1 forbids"
+      ],
+      "measured": [
+        "every subsystem reference resolves at its pinned revision",
+        "every integrated revision was itself gated",
+        "every platform requirement is covered within the platform model"
+      ]
+    },
+    "coverage": {
+      "crossModelOnly": [],
+      "local": [
+        "req-cook-temperature",
+        "req-non-stick",
+        "req-seal-and-cut",
+        "req-standby",
+        "req-thermal-safety"
+      ]
+    },
+    "resolution": [],
+    "wasGated": []
+  },
+  "coverage": {
+    "allocated": 0,
+    "covered": 5,
+    "refined": 1,
+    "satisfied": 4,
+    "total": 5,
+    "uncovered": [],
+    "verified": 0
+  },
+  "failures": [
+    "roundtrip: 0 missing elements, 2 extra elements, 0 missing edges, 0 extra edges, 0 changed attributes",
+    "integration: 1 isolated nodes",
+    "integration: 2 connected components"
+  ],
+  "gateVersion": "0.1.0",
+  "integration": {
+    "componentCount": 2,
+    "componentSizes": [
+      13,
+      1
+    ],
+    "isolated": [
+      "cap-test-block-1"
+    ]
+  },
+  "okfVersion": "1.0",
+  "passed": false,
+  "referenceHash": "b1a251c92b47f29b0da74d727035315edb55702f56fb75eae61c675e142e58ed",
+  "roundtrip": {
+    "changedAttributes": [],
+    "equal": false,
+    "extraEdges": [],
+    "extraElements": [
+      "graphnode:cap-test-block-1",
+      "structure:cap-test-block-1"
+    ],
+    "missingEdges": [],
+    "missingElements": []
+  },
+  "strictCoverage": false,
+  "validationErrors": [],
+  "validationWarnings": [
+    "interface mains-inlet has no node in the graph, so it is invisible to coverage and traceability",
+    "signal sig-power-on has no node in the graph, so it is invisible to coverage and traceability",
+    "signal sig-at-temperature has no node in the graph, so it is invisible to coverage and traceability",
+    "summary graph counts (0/0) do not match graph section (14/14)",
+    "summary blocks 8 do not match structure length 9",
+    "summary interfaces 0 do not match interfaces length 1"
+  ]
+}

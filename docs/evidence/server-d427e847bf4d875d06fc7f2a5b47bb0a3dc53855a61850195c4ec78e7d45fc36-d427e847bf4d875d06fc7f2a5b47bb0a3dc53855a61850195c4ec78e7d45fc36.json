@@ -1,0 +1,84 @@
+{
+  "candidateHash": "a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b",
+  "composition": {
+    "boundary": {
+      "asserted": [
+        "the combined system-of-systems, as a whole, has the global graph property (connected, coverage-complete, orphan-free); proving it would require importing every subsystem, which is the copy R1 forbids"
+      ],
+      "measured": [
+        "every subsystem reference resolves at its pinned revision",
+        "every integrated revision was itself gated",
+        "every platform requirement is covered within the platform model"
+      ]
+    },
+    "coverage": {
+      "crossModelOnly": [],
+      "local": [
+        "_2026x_1_12a70364_1789522470210_613186_5619",
+        "_2026x_1_12a70364_1789522470213_487063_5622",
+        "_2026x_1_12a70364_1789522470217_232543_5625",
+        "_2026x_1_12a70364_1789522470220_757311_5628",
+        "_2026x_1_12a70364_1789522470227_43173_5631",
+        "_2026x_1_12a70364_1789522470229_653956_5634",
+        "_2026x_1_12a70364_1789522470232_505575_5637",
+        "_2026x_1_12a70364_1789522470236_795679_5640",
+        "_2026x_1_12a70364_1789522470238_822356_5643",
+        "_2026x_1_12a70364_1789522470240_748943_5646",
+        "_2026x_1_12a70364_1789522470243_75877_5649",
+        "_2026x_1_12a70364_1789522470249_829935_5654",
+        "_2026x_1_12a70364_1789522470251_936773_5657",
+        "_2026x_1_12a70364_1789522470252_176734_5660",
+        "_2026x_1_12a70364_1789602694801_483599_6108"
+      ]
+    },
+    "resolution": [],
+    "wasGated": []
+  },
+  "coverage": {
+    "allocated": 0,
+    "covered": 15,
+    "refined": 3,
+    "satisfied": 20,
+    "total": 25,
+    "uncovered": [
+      "_2026x_1_12a70364_1789522470201_737876_5617",
+      "_2026x_1_12a70364_1789522470246_238622_5652",
+      "_2026x_1_12a70364_1789522470268_212057_5663",
+      "_2026x_1_12a70364_1789522470269_5755_5665",
+      "_2026x_1_12a70364_1789522470270_589609_5667",
+      "_2026x_1_12a70364_1789522470271_475286_5670",
+      "_2026x_1_12a70364_1789522470272_63721_5673",
+      "_2026x_1_12a70364_1789522470273_392927_5676",
+      "_2026x_1_12a70364_1789522470274_644308_5679",
+      "_2026x_1_12a70364_1789522470275_767711_5681"
+    ],
+    "verified": 1
+  },
+  "failures": [],
+  "gateVersion": "0.1.0",
+  "integration": {
+    "componentCount": 1,
+    "componentSizes": [
+      99
+    ],
+    "isolated": []
+  },
+  "okfVersion": "1.0",
+  "passed": true,
+  "referenceHash": "a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b",
+  "roundtrip": {
+    "changedAttributes": [],
+    "equal": true,
+    "extraEdges": [],
+    "extraElements": [],
+    "missingEdges": [],
+    "missingElements": []
+  },
+  "strictCoverage": false,
+  "validationErrors": [],
+  "validationWarnings": [
+    "legacy OKF without version marker; exporters should emit okf 1.0",
+    "dangling edge endpoint _2026x_1_12a70364_1789524431087_459748_5711 (source of a dependency edge)",
+    "dangling edge endpoint _2026x_1_12a70364_1789524431091_435540_5713 (source of a dependency edge)"
+  ]
+}
