@@ -43,11 +43,11 @@ async function commit(request, project, okf) {
   return (await response.json()).hash;
 }
 
-// Seed the three subsystems, then cafe-stand as the platform whose references point at the
+// Seed the four subsystems, then cafe-stand as the platform whose references point at the
 // actual subsystem commit hashes (the hashes are content addresses over project+branch+okf,
 // so they are rewritten after seeding rather than taken from the fixture).
 async function seedPlatform(request) {
-  for (const name of ['purchasing-terminal', 'coffee-machine', 'sandwich-toaster', 'cafe-stand']) {
+  for (const name of ['purchasing-terminal', 'coffee-machine', 'sandwich-toaster', 'floor-robot', 'cafe-stand']) {
     await post(request, '/projects', { name });
   }
 
@@ -60,6 +60,9 @@ async function seedPlatform(request) {
     ),
     'sandwich-toaster': await commit(
       request, 'sandwich-toaster', readModel('sandwich-toaster.json')
+    ),
+    'floor-robot': await commit(
+      request, 'floor-robot', readModel('floor-robot.json')
     ),
   };
 

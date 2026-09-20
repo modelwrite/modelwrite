@@ -24,7 +24,7 @@ use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::Commit;
 use crate::ui::layout;
-use crate::ui::model::{load_view, LoadedView, ModelQuery};
+use crate::ui::model::{load_view, view_branch, LoadedView, ModelQuery};
 
 struct SubsystemCard {
     project: String,
@@ -93,7 +93,7 @@ fn render_composition_page(
         LoadedView::Model { commit, root } => {
             let mut nav = nav;
             nav.section = Some("composition");
-            nav.branch = Some(commit.branch.clone());
+            nav.branch = Some(view_branch(query, &commit));
             nav.commit = Some(commit.hash.clone());
             composition_markup(state, identity, project, &commit, &root, &nav)
         }

@@ -477,8 +477,13 @@ pub async fn create_branch(
         &name,
         &from,
     ) {
-        Ok(()) => Redirect::to(&format!("/ui/projects/{}", crate::ui::urlencode(&project)))
-            .into_response(),
+        // Land the caller ON the new version, with the version in the address.
+        Ok(()) => Redirect::to(&format!(
+            "/ui/projects/{}/overview?branch={}",
+            crate::ui::urlencode(&project),
+            crate::ui::urlencode(&name)
+        ))
+        .into_response(),
         Err(error) => {
             let api = map_store_error(error);
             render_project_page_refused(

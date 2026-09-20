@@ -8,13 +8,16 @@
 //! or an error therefore cannot execute as markup: the only unescaped content is the
 //! developer-written stylesheet, wrapped in `maud::PreEscaped` on purpose.
 
+use std::collections::HashSet;
+
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::api::{map_store_error, ApiState};
-use crate::auth::Identity;
+use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
+use crate::store::{Commit, Store};
 
 const STYLE: &str = r#"
 /* =========================================================================
@@ -1038,6 +1041,69 @@ li.subsystem-card {
   color: var(--text-3); text-align: center;
 }
 
+/* -- chrome: the version selector and version actions -------------------- */
+/* The version selector is a plain <details> disclosure inside the context bar,
+   exactly like the model switcher in the top bar: server-rendered links, no
+   JavaScript, the choice carried in the URL. */
+
+.context-bar .version-switcher { position: relative; }
+.context-bar .version-switcher summary {
+  list-style: none;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 12px; font-weight: 650; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+.context-bar .version-switcher summary::-webkit-details-marker { display: none; }
+.context-bar .version-switcher summary::after { content: "\25be"; color: var(--text-3); }
+.context-bar .version-switcher[open] summary { border-color: var(--accent); }
+.context-bar .version-switcher .menu {
+  position: absolute; top: calc(100% + 0.3rem); left: 0; z-index: 40;
+  min-width: 17rem; max-width: 26rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(31, 35, 40, 0.14);
+  padding: 0.35rem; margin: 0; list-style: none;
+  max-height: 24rem; overflow-y: auto;
+}
+.context-bar .version-switcher .menu li {
+  display: flex; align-items: center;
+}
+.context-bar .version-switcher .menu a {
+  display: block; padding: 0.32rem 0.55rem; border-radius: var(--radius-sm);
+  color: var(--text); font-size: 12.5px;
+}
+.context-bar .version-switcher .menu a:hover { background: var(--surface-1); text-decoration: none; }
+.context-bar .version-switcher .menu a.branch, .context-bar .version-switcher .menu a.commit { flex: 1 1 auto; }
+.context-bar .version-switcher .menu a.compare {
+  flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--accent);
+  padding: 0.32rem 0.55rem;
+}
+.context-bar .version-switcher .menu a.current {
+  background: var(--accent-tint); color: var(--accent-strong); font-weight: 650;
+}
+.context-bar .version-switcher .menu code { color: var(--text-3); font-size: 11px; }
+.context-bar .version-switcher .menu a.branch code.tip { margin-left: 0.4rem; }
+.context-bar .version-switcher .menu li.vs-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3);
+  padding: 0.4rem 0.55rem 0.1rem;
+}
+
+.context-bar .ctx-actions a.ctx-action {
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.15rem 0.55rem;
+}
+.context-bar .ctx-actions a.ctx-action:hover { border-color: var(--accent); text-decoration: none; }
+
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {
@@ -1069,6 +1135,15 @@ pub struct Nav {
     pub section: Option<&'static str>,
     pub branch: Option<String>,
     pub commit: Option<String>,
+    /// Every version (branch) of the current project, as (name, tip), for the version
+    /// selector in the context bar.
+    pub branches: Vec<(String, String)>,
+    /// Recent commits reachable from the branch tips, newest first, so the selector can offer
+    /// a commit as a version to switch to.
+    pub recent_commits: Vec<Commit>,
+    /// Whether the caller may write the current project, so the context bar never offers an
+    /// action (new version, make current) the caller cannot perform.
+    pub can_write: bool,
 }
 
 impl Nav {
@@ -1086,12 +1161,19 @@ impl Nav {
             }
         }
         projects.sort();
+        let (branches, recent_commits) = match current {
+            Some(project) => load_versions(state, project)?,
+            None => (Vec::new(), Vec::new()),
+        };
         Ok(Nav {
             projects,
             current: current.map(str::to_string),
             section: None,
             branch: None,
             commit: None,
+            branches,
+            recent_commits,
+            can_write: identity.may(Permission::Write),
         })
     }
 
@@ -1103,8 +1185,60 @@ impl Nav {
             section: None,
             branch: None,
             commit: None,
+            branches: Vec::new(),
+            recent_commits: Vec::new(),
+            can_write: false,
         }
     }
+}
+
+/// The versions of a project: its branches and the recent commits reachable from those tips.
+/// Both come from the store's own reads - no new store method exists for the workbench.
+#[allow(clippy::type_complexity)]
+fn load_versions(
+    state: &ApiState,
+    project: &str,
+) -> Result<(Vec<(String, String)>, Vec<Commit>), ApiError> {
+    let branches = state
+        .store
+        .list_branches(project)
+        .map_err(map_store_error)?;
+    let recent = recent_commits(state.store.as_ref(), project, &branches)?;
+    Ok((branches, recent))
+}
+
+/// Every commit reachable from a branch tip, deduplicated and ordered newest first. The walk
+/// follows parents through the store's own `commit` reads and stops at a commit already seen,
+/// so a cycle in stored data cannot loop forever.
+fn recent_commits(
+    store: &dyn Store,
+    project: &str,
+    branches: &[(String, String)],
+) -> Result<Vec<Commit>, ApiError> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<Commit> = Vec::new();
+    for (_name, tip) in branches {
+        let mut stack = vec![tip.clone()];
+        while let Some(hash) = stack.pop() {
+            if !seen.insert(hash.clone()) {
+                continue;
+            }
+            if let Some(commit) = store.commit(project, &hash).map_err(map_store_error)? {
+                for parent in &commit.parents {
+                    stack.push(parent.clone());
+                }
+                out.push(commit);
+            }
+        }
+    }
+    out.sort_by_key(|commit| std::cmp::Reverse(commit_time(commit)));
+    out.truncate(15);
+    Ok(out)
+}
+
+/// A commit's creation time as seconds since the epoch, for newest-first ordering.
+fn commit_time(commit: &Commit) -> i64 {
+    commit.created_at.parse::<i64>().unwrap_or(0)
 }
 
 /// The address of a section for the current model, preserving the branch/commit being viewed so
@@ -1235,25 +1369,97 @@ fn left_nav(nav: &Nav) -> Markup {
     }
 }
 
-/// The context bar: which project, version (branch) and commit are being viewed. The version
-/// actions (new version, compare, make current) attach here in the following task; for now it
-/// only displays the context clearly.
+/// The context bar: which project, version (branch) and commit are being viewed, plus the
+/// version selector and the version actions. The selector is a plain `<details>` disclosure of
+/// server-rendered links - one click to switch version, with the choice in the URL - so it works
+/// with JavaScript disabled exactly like the model switcher.
 fn context_bar(nav: &Nav) -> Markup {
+    let project = nav.current.as_deref().unwrap_or("");
+    let current_ref = current_ref(nav);
     html! {
         div class="context-bar" {
             span class="ctx-label" { "Viewing" }
-            @if let Some(current) = &nav.current {
-                span class="ctx-project" { (current) }
+            @if !project.is_empty() {
+                span class="ctx-project" { (project) }
             }
-            @if let Some(branch) = &nav.branch {
-                span class="ctx-sep" { "·" }
-                span { "version " code { (branch) } }
+            @if !nav.branches.is_empty() {
+                (version_switcher(nav))
             }
             @if let Some(commit) = &nav.commit {
                 span class="ctx-sep" { "·" }
                 span { "commit " code { (short_hash(commit)) } }
             }
-            span class="ctx-actions" {}
+            span class="ctx-actions" {
+                // Creating a version WRITES, so the link is offered only to a caller who may
+                // write; the page itself enforces the same decision server-side.
+                @if nav.can_write {
+                    a class="ctx-action" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/version/new" } { "New version" }
+                }
+                @if current_ref.is_some() {
+                    a class="ctx-action" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare?from=" (crate::ui::urlencode(current_ref.as_deref().unwrap_or("")) ) } { "Compare" }
+                }
+                // Make current merges the branch being viewed into the main line, so it is
+                // offered only from a non-main branch and only to a writer.
+                @if let Some(branch) = &nav.branch {
+                    @if branch != "main" && nav.can_write {
+                        a class="ctx-action" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/version/make-current?candidate=" (crate::ui::urlencode(branch.as_str())) } { "Make current" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The endpoint that identifies the version being viewed, for a compare `from`. A branch name
+/// wins; a commit-scoped view without a branch falls back to the commit hash.
+fn current_ref(nav: &Nav) -> Option<String> {
+    nav.branch.clone().or_else(|| nav.commit.clone())
+}
+
+/// The version selector: a disclosure listing every branch (one click to switch, with the
+/// version in the URL) and the recent commits (one click to open a historical commit). Each
+/// other branch also offers a `compare` link with both sides pre-filled, so "did my change
+/// break anything" is one click from the context bar.
+fn version_switcher(nav: &Nav) -> Markup {
+    let project = nav.current.as_deref().unwrap_or("");
+    let current_ref = current_ref(nav);
+    html! {
+        details class="version-switcher" {
+            summary {
+                @if let Some(branch) = &nav.branch {
+                    "version " code { (branch) }
+                } @else if let Some(commit) = &nav.commit {
+                    "commit " code { (short_hash(commit)) }
+                } @else {
+                    "switch version"
+                }
+            }
+            ul class="menu" {
+                @for (name, tip) in &nav.branches {
+                    li {
+                        a.branch.current[nav.branch.as_deref() == Some(name.as_str())]
+                          href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?branch=" (crate::ui::urlencode(name.as_str())) } {
+                            (name) code class="tip" { (short_hash(tip)) }
+                        }
+                        @if let Some(from) = &current_ref {
+                            @if nav.branch.as_deref() != Some(name.as_str()) {
+                                a class="compare" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare?from=" (crate::ui::urlencode(from.as_str())) "&to=" (crate::ui::urlencode(name.as_str())) } { "compare" }
+                            }
+                        }
+                    }
+                }
+                @if !nav.recent_commits.is_empty() {
+                    li class="vs-label" { "Recent commits" }
+                    @for commit in &nav.recent_commits {
+                        li {
+                            a class="commit" href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?commit=" (crate::ui::urlencode(commit.hash.as_str())) } {
+                                code { (short_hash(&commit.hash)) }
+                                @if !commit.message.is_empty() { " " (commit.message.as_str()) }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

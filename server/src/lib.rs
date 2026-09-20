@@ -81,7 +81,10 @@ pub fn app(state: AppState) -> Router {
             post(ui::pages::create_branch),
         )
         .route("/ui/projects/:project/model", get(ui::model::model_page))
-        .route("/ui/projects/:project/overview", get(ui::model::model_page))
+        .route(
+            "/ui/projects/:project/overview",
+            get(ui::model::overview_page),
+        )
         .route(
             "/ui/projects/:project/structure",
             get(ui::model::structure_page),
@@ -146,6 +149,14 @@ pub fn app(state: AppState) -> Router {
             get(ui::review::compare_page),
         )
         .route("/ui/projects/:project/merge", post(ui::review::merge_form))
+        .route(
+            "/ui/projects/:project/version/new",
+            get(ui::version::new_version_page),
+        )
+        .route(
+            "/ui/projects/:project/version/make-current",
+            get(ui::version::make_current_page),
+        )
         .route(
             "/projects",
             post(api::create_project).get(api::list_projects),

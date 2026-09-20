@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Redirect, Response};
 use maud::{html, Markup};
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +34,14 @@ pub struct ModelQuery {
     /// The diagram view: `structure` (default) or `process`.
     #[serde(default)]
     pub view: Option<String>,
+    /// The element the enhancement should highlight, read by app.js from the URL; parsed here
+    /// only so the canonical version redirect preserves it.
+    pub select: Option<String>,
 }
 
 /// `GET /ui/projects/:project/model?branch=&commit=` - the model an engineer came to see.
+/// The legacy IDE address; it does not canonicalise, so the existing callers that treat it as
+/// a plain 200 stay correct.
 pub async fn model_page(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -48,6 +53,61 @@ pub async fn model_page(
         Ok(identity) => identity,
         Err(error) => return layout::sign_in_page(mechanism, &error.message),
     };
+    match render_model_page(&state, &identity, &project, &query) {
+        Ok(page) => layout::html_response(StatusCode::OK, page),
+        Err(error) => layout::error_page(
+            error.status,
+            Some(&identity.subject),
+            mechanism,
+            &error.message,
+        ),
+    }
+}
+
+/// `GET /ui/projects/:project/overview?branch=&commit=` - the Overview section. A bare URL
+/// canonicalises to the default branch so the version is always in the address: the page can
+/// be bookmarked and shared with no hidden state. The existing query (the diagram view, the
+/// ?select= highlight) is preserved.
+pub async fn overview_page(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(project): Path<String>,
+    Query(query): Query<ModelQuery>,
+) -> Response {
+    let mechanism = state.auth.mechanism();
+    let identity = match resolve_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(error) => return layout::sign_in_page(mechanism, &error.message),
+    };
+    if query.branch.as_deref().is_none_or(str::is_empty)
+        && query.commit.as_deref().is_none_or(str::is_empty)
+    {
+        match default_branch(&state, &project) {
+            Ok(Some(branch)) => {
+                let mut url = format!(
+                    "/ui/projects/{}/overview?branch={}",
+                    crate::ui::urlencode(&project),
+                    crate::ui::urlencode(&branch)
+                );
+                if let Some(view) = query.view.as_deref().filter(|value| !value.is_empty()) {
+                    url.push_str(&format!("&view={}", crate::ui::urlencode(view)));
+                }
+                if let Some(select) = query.select.as_deref().filter(|value| !value.is_empty()) {
+                    url.push_str(&format!("&select={}", crate::ui::urlencode(select)));
+                }
+                return Redirect::temporary(&url).into_response();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return layout::error_page(
+                    error.status,
+                    Some(&identity.subject),
+                    mechanism,
+                    &error.message,
+                );
+            }
+        }
+    }
     match render_model_page(&state, &identity, &project, &query) {
         Ok(page) => layout::html_response(StatusCode::OK, page),
         Err(error) => layout::error_page(
@@ -135,7 +195,7 @@ fn render_model_page(
         LoadedView::Model { commit, root } => {
             let mut nav = nav;
             nav.section = Some("overview");
-            nav.branch = Some(commit.branch.clone());
+            nav.branch = Some(view_branch(query, &commit));
             nav.commit = Some(commit.hash.clone());
             let branches = state
                 .store
@@ -164,6 +224,33 @@ fn render_model_page(
             ))
         }
     }
+}
+
+/// The branch name the view is scoped to: the query's branch when given (which may be a
+/// different branch than the commit was created on - a freshly-created version points at an
+/// existing tip), otherwise the commit's own branch.
+pub(crate) fn view_branch(query: &ModelQuery, commit: &Commit) -> String {
+    match query.branch.as_deref().filter(|branch| !branch.is_empty()) {
+        Some(branch) => branch.to_string(),
+        None => commit.branch.clone(),
+    }
+}
+
+/// The branch a bare overview URL resolves to: the main line when it exists, otherwise the
+/// alphabetically-first branch (the store returns branches sorted by name). Returns None for a
+/// project with no branches at all.
+fn default_branch(state: &ApiState, project: &str) -> Result<Option<String>, ApiError> {
+    let branches = state
+        .store
+        .list_branches(project)
+        .map_err(map_store_error)?;
+    if branches.is_empty() {
+        return Ok(None);
+    }
+    if branches.iter().any(|(name, _)| name == "main") {
+        return Ok(Some("main".to_string()));
+    }
+    Ok(branches.first().map(|(name, _)| name.clone()))
 }
 
 /// Resolve the commit to render: an explicit commit hash, else the named branch's tip
@@ -441,7 +528,7 @@ fn render_section_page(
         LoadedView::Model { commit, root } => {
             let mut nav = nav;
             nav.section = Some(section);
-            nav.branch = Some(commit.branch.clone());
+            nav.branch = Some(view_branch(query, &commit));
             nav.commit = Some(commit.hash.clone());
             Ok(section_markup(
                 identity,

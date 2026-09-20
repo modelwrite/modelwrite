@@ -29,6 +29,7 @@ pub mod model;
 pub mod pages;
 pub mod proposals;
 pub mod review;
+pub mod version;
 
 /// Percent-encode a value for use in a URL PATH SEGMENT or QUERY STRING.
 ///

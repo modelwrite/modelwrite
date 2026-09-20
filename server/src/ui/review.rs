@@ -88,16 +88,26 @@ fn render_compare_page(
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
+    let mut nav = layout::Nav::load(state, identity, Some(project))?;
+    nav.section = Some("changes");
     let from = query
         .from
         .as_deref()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::bad_request("the from endpoint is required"))?;
-    let to = query
-        .to
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ApiError::bad_request("the to endpoint is required"))?;
+    let Some(to) = query.to.as_deref().filter(|value| !value.is_empty()) else {
+        // No "to" chosen yet: offer the other versions, with the "from" side already fixed.
+        let body = compare_chooser_markup(project, from, &nav);
+        let title = format!("modelwrite — {} — compare", project);
+        return Ok(layout::shell(
+            &title,
+            &nav,
+            Some(&identity.subject),
+            identity.may(Permission::Administer),
+            state.auth.mechanism(),
+            body,
+        ));
+    };
     let from_hash = resolve_ref(state.store.as_ref(), project, from)?;
     let to_hash = resolve_ref(state.store.as_ref(), project, to)?;
     let from_commit = state
@@ -167,8 +177,6 @@ fn render_compare_page(
         }
     };
     let title = format!("modelwrite — {} — compare", project);
-    let mut nav = layout::Nav::load(state, identity, Some(project))?;
-    nav.section = Some("changes");
     Ok(layout::shell(
         &title,
         &nav,
@@ -177,6 +185,48 @@ fn render_compare_page(
         state.auth.mechanism(),
         body,
     ))
+}
+
+/// The compare chooser: when the "to" side is not chosen yet, offer each version as a link
+/// with the "from" side already fixed, plus a typed form for two arbitrary endpoints.
+fn compare_chooser_markup(project: &str, from: &str, nav: &layout::Nav) -> Markup {
+    html! {
+        h1 { "Compare" }
+        p class="meta" {
+            "from " code { (from) } " — choose the other version to compare against."
+        }
+        @if nav.branches.is_empty() {
+            p { "This project has no versions yet." }
+        } @else {
+            ul class="branches" {
+                @for (name, tip) in &nav.branches {
+                    @if name.as_str() != from {
+                        li {
+                            a class="branch-name" href={
+                                "/ui/projects/" (crate::ui::urlencode(project))
+                                "/compare?from=" (crate::ui::urlencode(from))
+                                "&to=" (crate::ui::urlencode(name.as_str()))
+                            } {
+                                (name) code class="tip" { (short_hash(tip)) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        h2 { "Or type two endpoints" }
+        form method="get" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/compare" } class="compare-form" {
+            p {
+                label for="from" { "from" }
+                input type="text" id="from" name="from" value=(from);
+            }
+            p {
+                label for="to" { "to" }
+                input type="text" id="to" name="to" placeholder="branch or commit";
+            }
+            button type="submit" { "Compare" }
+        }
+    }
 }
 
 /// Resolve one endpoint to a commit hash: an existing commit hash wins, otherwise the value

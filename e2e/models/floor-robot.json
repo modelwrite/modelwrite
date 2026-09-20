@@ -1,0 +1,667 @@
+{
+  "okf": "1.0",
+  "project": "floor-robot",
+  "exportedAt": "",
+  "summary": {
+    "blocks": 10,
+    "requirements": 7,
+    "signals": 3,
+    "activities": 6
+  },
+  "structure": [
+    {
+      "id": "beni",
+      "name": "Beni Floor Robot",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [
+        {
+          "name": "chassis",
+          "type": "All-Terrain Chassis",
+          "aggregation": "composite",
+          "default": ""
+        },
+        {
+          "name": "drive",
+          "type": "Drive Motors",
+          "aggregation": "composite",
+          "default": ""
+        },
+        {
+          "name": "vision",
+          "type": "Camera Module",
+          "aggregation": "composite",
+          "default": ""
+        },
+        {
+          "name": "collector",
+          "type": "Cup Collector",
+          "aggregation": "composite",
+          "default": ""
+        }
+      ],
+      "documentation": "A Beni-class mini all-terrain camera robot (Mondo Robotics) adapted for a cafe floor: it patrols, finds dropped coffee cups and collects them."
+    },
+    {
+      "id": "chassis",
+      "name": "All-Terrain Chassis",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Low, stable body that clears spills, cables, chair legs and door sills."
+    },
+    {
+      "id": "drive-motors",
+      "name": "Drive Motors",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Independent wheel drive, slow and precise near people."
+    },
+    {
+      "id": "wheels",
+      "name": "Wheels",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "All-terrain wheels gripping tile, matting and wet floor."
+    },
+    {
+      "id": "camera-module",
+      "name": "Camera Module",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Forward camera used for navigation and for cup detection. It RECORDS NOTHING beyond the task: see PR-4."
+    },
+    {
+      "id": "cup-detector",
+      "name": "Cup Detector",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Recognises a dropped cup and its position from the camera image."
+    },
+    {
+      "id": "follow-sensor",
+      "name": "Follow Sensor",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "The Beni platform's follow-me sensing, reused here to track the floor steward's route."
+    },
+    {
+      "id": "collector",
+      "name": "Cup Collector",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Scoop and holding basket that captures a cup without the robot stopping."
+    },
+    {
+      "id": "person-sensor",
+      "name": "Person Proximity Sensor",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Detects people close by; the robot yields and stops."
+    },
+    {
+      "id": "dock",
+      "name": "Charging Dock",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "Where the robot returns when its battery is low or a shift ends."
+    },
+    {
+      "id": "cafe-floor",
+      "name": "Cafe Floor",
+      "kind": "block",
+      "stereotypes": [
+        "Block"
+      ],
+      "attributes": [],
+      "documentation": "The area under the robot's care: the seated area, the service lane and the passage to the counter."
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "if-steward",
+      "name": "Steward Interface",
+      "kind": "interface",
+      "stereotypes": [
+        "InterfaceBlock"
+      ],
+      "attributes": [],
+      "documentation": "How staff summon, pause and take the robot."
+    }
+  ],
+  "signals": [
+    {
+      "id": "sig-cup-detected",
+      "name": "CupDetected",
+      "kind": "signal",
+      "stereotypes": [
+        "Signal"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "sig-cup-collected",
+      "name": "CupCollected",
+      "kind": "signal",
+      "stereotypes": [
+        "Signal"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "sig-person-near",
+      "name": "PersonNear",
+      "kind": "signal",
+      "stereotypes": [
+        "Signal"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "requirements": [
+    {
+      "id": "req-patrol",
+      "name": "Floor Patrol",
+      "kind": "requirement",
+      "reqId": "PR-1",
+      "reqText": "The robot shall cover the whole cafe floor area at least once every 20 minutes during trading hours.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-detect-cup",
+      "name": "Cup Detection",
+      "kind": "requirement",
+      "reqId": "PR-2",
+      "reqText": "The robot shall detect a dropped coffee cup on the floor within 2 metres at any point on its route.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-collect",
+      "name": "Cup Collection",
+      "kind": "requirement",
+      "reqId": "PR-3",
+      "reqText": "The robot shall collect a detected cup without stopping its route and without contacting the cup with its wheels.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-privacy",
+      "name": "Camera Privacy",
+      "kind": "requirement",
+      "reqId": "PR-4",
+      "reqText": "The robot shall transmit no image off the device and shall not retain imagery identifying a customer; detection shall produce a cup position, not a recording.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": "A camera robot working around the public is a data-protection question before it is an engineering one."
+    },
+    {
+      "id": "req-yield",
+      "name": "Yield to People",
+      "kind": "requirement",
+      "reqId": "PR-5",
+      "reqText": "The robot shall stop and yield when a person is within 1 metre, and shall not resume until the person has moved away.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-noise",
+      "name": "Service Undisturbed",
+      "kind": "requirement",
+      "reqId": "PR-6",
+      "reqText": "The robot shall operate at a noise level that does not disturb conversation at an adjacent table.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "req-return",
+      "name": "Return to Dock",
+      "kind": "requirement",
+      "reqId": "PR-7",
+      "reqText": "The robot shall return to its dock when its battery falls below 20 percent and shall not strand itself on the floor.",
+      "stereotypes": [
+        "Requirement"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "stateMachine": {
+    "name": "floor-robot-states",
+    "regions": []
+  },
+  "activities": [
+    {
+      "id": "act-patrol",
+      "name": "Patrol Floor",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "floor-robot",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Follow the shift route across the seated area and service lane."
+    },
+    {
+      "id": "act-detect",
+      "name": "Detect Cup",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "floor-robot",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Recognise a dropped cup and its position from the camera image."
+    },
+    {
+      "id": "act-approach",
+      "name": "Approach Cup",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "floor-robot",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Move to the cup, slowing near people and obstacles."
+    },
+    {
+      "id": "act-collect",
+      "name": "Collect Cup",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "floor-robot",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Scoop the cup into the basket without stopping the route."
+    },
+    {
+      "id": "act-deposit",
+      "name": "Deposit Cups",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "cafe-stand",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Empty the basket at the collection point on the way past."
+    },
+    {
+      "id": "act-yield",
+      "name": "Yield to Person",
+      "kind": "activity",
+      "stereotypes": [
+        "Activity"
+      ],
+      "attributes": [
+        {
+          "name": "allocatedTo",
+          "type": "floor-robot",
+          "aggregation": "none",
+          "default": ""
+        }
+      ],
+      "documentation": "Stop, wait, then resume from where it paused."
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "beni",
+        "kind": "block",
+        "name": "Beni Floor Robot",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "chassis",
+        "kind": "block",
+        "name": "All-Terrain Chassis",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "drive-motors",
+        "kind": "block",
+        "name": "Drive Motors",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "camera-module",
+        "kind": "block",
+        "name": "Camera Module",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "cup-detector",
+        "kind": "block",
+        "name": "Cup Detector",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "collector",
+        "kind": "block",
+        "name": "Cup Collector",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "person-sensor",
+        "kind": "block",
+        "name": "Person Proximity Sensor",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "dock",
+        "kind": "block",
+        "name": "Charging Dock",
+        "stereotypes": [
+          "Block"
+        ]
+      },
+      {
+        "id": "act-patrol",
+        "kind": "activity",
+        "name": "Patrol Floor",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-detect",
+        "kind": "activity",
+        "name": "Detect Cup",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-approach",
+        "kind": "activity",
+        "name": "Approach Cup",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-collect",
+        "kind": "activity",
+        "name": "Collect Cup",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-deposit",
+        "kind": "activity",
+        "name": "Deposit Cups",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "act-yield",
+        "kind": "activity",
+        "name": "Yield to Person",
+        "stereotypes": [
+          "Activity"
+        ]
+      },
+      {
+        "id": "req-patrol",
+        "kind": "requirement",
+        "name": "Floor Patrol",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-detect-cup",
+        "kind": "requirement",
+        "name": "Cup Detection",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-collect",
+        "kind": "requirement",
+        "name": "Cup Collection",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-privacy",
+        "kind": "requirement",
+        "name": "Camera Privacy",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-yield",
+        "kind": "requirement",
+        "name": "Yield to People",
+        "stereotypes": [
+          "Requirement"
+        ]
+      },
+      {
+        "id": "req-return",
+        "kind": "requirement",
+        "name": "Return to Dock",
+        "stereotypes": [
+          "Requirement"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "source": "beni",
+        "target": "chassis",
+        "kind": "part",
+        "label": "chassis"
+      },
+      {
+        "source": "beni",
+        "target": "drive-motors",
+        "kind": "part",
+        "label": "drive"
+      },
+      {
+        "source": "beni",
+        "target": "camera-module",
+        "kind": "part",
+        "label": "vision"
+      },
+      {
+        "source": "beni",
+        "target": "collector",
+        "kind": "part",
+        "label": "collector"
+      },
+      {
+        "source": "drive-motors",
+        "target": "chassis",
+        "kind": "association",
+        "label": "drives"
+      },
+      {
+        "source": "camera-module",
+        "target": "cup-detector",
+        "kind": "association",
+        "label": "feeds"
+      },
+      {
+        "source": "act-patrol",
+        "target": "act-detect",
+        "kind": "include",
+        "label": "then"
+      },
+      {
+        "source": "act-detect",
+        "target": "act-approach",
+        "kind": "triggers",
+        "label": "on CupDetected"
+      },
+      {
+        "source": "act-approach",
+        "target": "act-collect",
+        "kind": "triggers",
+        "label": "on arrival"
+      },
+      {
+        "source": "act-collect",
+        "target": "act-patrol",
+        "kind": "include",
+        "label": "resume"
+      },
+      {
+        "source": "act-collect",
+        "target": "act-deposit",
+        "kind": "triggers",
+        "label": "when basket full"
+      },
+      {
+        "source": "act-yield",
+        "target": "act-approach",
+        "kind": "include",
+        "label": "resumes"
+      },
+      {
+        "source": "person-sensor",
+        "target": "act-yield",
+        "kind": "dependency",
+        "label": "triggers"
+      },
+      {
+        "source": "act-patrol",
+        "target": "req-patrol",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "act-detect",
+        "target": "req-detect-cup",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "act-collect",
+        "target": "req-collect",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "camera-module",
+        "target": "req-privacy",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "act-yield",
+        "target": "req-yield",
+        "kind": "dependency",
+        "label": "Satisfy"
+      },
+      {
+        "source": "dock",
+        "target": "req-return",
+        "kind": "dependency",
+        "label": "Satisfy"
+      }
+    ]
+  },
+  "references": []
+}

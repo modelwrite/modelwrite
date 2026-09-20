@@ -35,7 +35,7 @@ use crate::auth::{identity as resolve_identity, Identity, Permission};
 use crate::error::ApiError;
 use crate::store::Commit;
 use crate::ui::layout;
-use crate::ui::model::{resolve_hash, ModelQuery};
+use crate::ui::model::{resolve_hash, view_branch, ModelQuery};
 
 // ---------------------------------------------------------------------------
 // Geometry constants local to the renderer. Node sizes come from the engine
@@ -110,7 +110,7 @@ fn render_diagram_page(
     let root = load_model(state.store.as_ref(), project, &hash).map_err(map_store_error)?;
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
     nav.section = Some("diagram");
-    nav.branch = Some(commit.branch.clone());
+    nav.branch = Some(view_branch(query, &commit));
     nav.commit = Some(commit.hash.clone());
     Ok(diagram_markup(
         identity,

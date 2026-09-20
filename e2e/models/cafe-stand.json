@@ -145,6 +145,20 @@
 
                                             ],
                              "documentation":  ""
+                         },
+                         {
+                             "id":  "req-floor-clear",
+                             "name":  "Floor Kept Clear",
+                             "kind":  "requirement",
+                             "reqId":  "CS-4",
+                             "reqText":  "The stand shall keep the seated floor free of dropped cups throughout trading hours, not only at close.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
                          }
                      ],
     "stateMachine":  {
@@ -238,6 +252,23 @@
                                               }
                                           ],
                            "documentation":  "When both BeverageReady and FoodReady are received the order is called and handed over."
+                       },
+                       {
+                           "id":  "act-clear-floor",
+                           "name":  "Clear the Floor",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "floor-robot",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "Beni patrols the floor during service, detects a dropped cup and collects it without leaving the route."
                        }
                    ],
     "graph":  {
@@ -329,6 +360,22 @@
                                     "stereotypes":  [
                                                         "Requirement"
                                                     ]
+                                },
+                                {
+                                    "id":  "act-clear-floor",
+                                    "kind":  "activity",
+                                    "name":  "Clear the Floor",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-floor-clear",
+                                    "kind":  "requirement",
+                                    "name":  "Floor Kept Clear",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
                                 }
                             ],
                   "edges":  [
@@ -403,6 +450,24 @@
                                     "target":  "req-one-payment",
                                     "kind":  "dependency",
                                     "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "act-clear-floor",
+                                    "kind":  "triggers",
+                                    "label":  "service begins"
+                                },
+                                {
+                                    "source":  "act-clear-floor",
+                                    "target":  "act-complete",
+                                    "kind":  "include",
+                                    "label":  "continues during service"
+                                },
+                                {
+                                    "source":  "act-clear-floor",
+                                    "target":  "req-floor-clear",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
                                 }
                             ]
               },
@@ -435,6 +500,17 @@
                                           "heating-element",
                                           "lower-plate",
                                           "latch"
+                                      ]
+                       },
+                       {
+                           "project":  "floor-robot",
+                           "revision":  "9dcccb6d13fb0fd67b46af70d08a730491e5a7d32ae52f3a2f4d42e843f0d712",
+                           "role":  "floor-care",
+                           "bounds":  [
+                                          "camera-module",
+                                          "cup-detector",
+                                          "collector",
+                                          "beni"
                                       ]
                        }
                    ]
