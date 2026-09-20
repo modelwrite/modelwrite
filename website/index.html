@@ -4,216 +4,558 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Modelwrite — the model you can prove</title>
-<meta name="description" content="Modelwrite: an open-source model-based systems engineering platform. Systems models in a provable format, a recorded fidelity gate, and agents that propose while humans commit.">
+<title>Modelwrite: the model you can prove</title>
+<meta name="description" content="Modelwrite is an open-source, self-hosted MBSE platform. A round-trip gate names every element and edge a migration lost, and writes a deterministic evidence record CI reproduces byte for byte.">
+<meta name="color-scheme" content="light">
+<meta property="og:title" content="Modelwrite: the model you can prove">
+<meta property="og:description" content="An open-source, self-hosted MBSE platform whose fidelity claims are records you can run yourself.">
+<meta property="og:type" content="website">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header>
-  <p class="kicker">Open-source MBSE platform</p>
-  <h1>Modelwrite</h1>
-  <p class="tagline">The model you can prove.</p>
-  <nav aria-label="Sections">
-    <a href="#what">What it is</a>
-    <a href="#why">Why it exists</a>
-    <a href="#run">Install and run</a>
-    <a href="#works">What works</a>
-    <a href="#does-not">What it does not do</a>
-    <a href="#architecture">Architecture</a>
-    <a href="#numbers">Numbers</a>
-    <a href="#licence">Licence</a>
-  </nav>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="masthead">
+  <div class="shell masthead__inner">
+    <a class="wordmark" href="#top"><span class="wordmark__glyph" aria-hidden="true">&#9655;</span> modelwrite</a>
+    <nav aria-label="Sections">
+      <ul>
+        <li><a href="#evidence">Evidence</a></li>
+        <li><a href="#measured">Measured</a></li>
+        <li><a href="#capabilities">Capabilities</a></li>
+        <li><a href="#limits">Limits</a></li>
+        <li><a href="#workbench">Workbench</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#install">Install</a></li>
+      </ul>
+    </nav>
+    <a class="repo" href="https://github.com/modelwrite/modelwrite">github.com/modelwrite</a>
+  </div>
 </header>
 
-<main>
+<main id="main">
 
-<section id="what">
-<h2>What it is</h2>
-<p>Modelwrite is an open-source platform for model-based systems engineering (MBSE)
-that an organisation runs on its own infrastructure. It stores systems models in
-OKF — the Open Knowledge Format, a single self-describing JSON document — and it
-proves, with a recorded gate run, that a change or a migration lost nothing.</p>
-<p>The identity of the project is <em>the model you can prove</em>. A claim is either
-checkable, or it is labelled as unchecked. Every statement about fidelity, model
-health, or change traces to a recorded, deterministic gate run.</p>
+<div class="hero shell" id="top">
+  <p class="hero__kicker">Open-source MBSE platform &middot; self-hosted &middot; air-gapped</p>
+  <h1>Modelwrite</h1>
+  <p class="hero__tagline">The model you can prove.</p>
+
+  <div class="hero__lede">
+    <p>Most systems engineering teams accept a migration on the vendor&rsquo;s word. There is no
+    alternative on offer: a fidelity claim arrives in a slide deck, demonstrated on a model you did
+    not choose. <strong>But a fidelity claim cannot be checked before the migration</strong>, which
+    means the loss surfaces at acceptance testing, a year after signature, on the desk of the person
+    who signed it.</p>
+    <p>Modelwrite turns that claim into a record you can run yourself. The round-trip gate compares
+    two models, names every element and edge that did not survive, and writes the result to a
+    deterministic evidence file. A lossy migration is refused until a human accepts the specific
+    loss, by name.</p>
+  </div>
+
+  <p class="hero__actions">
+    <a class="button" href="#evidence">Read the evidence</a>
+    <a class="button button--quiet" href="#install">Install it</a>
+  </p>
+
+  <p class="statusline">
+    <b>Proven today:</b> the round-trip gate, the model repository and the workbench, each with a
+    committed record. <b>Not proven:</b> a complete migration off MagicDraw. The measured losses are
+    on this page, not in a footnote.
+  </p>
+
+  <ul class="chips">
+    <li>OKF 1.0</li>
+    <li>gate 0.1.0</li>
+    <li>AGPL-3.0-or-later</li>
+    <li>SQLite or PostgreSQL</li>
+    <li>Docker, Compose, Helm</li>
+    <li>air-gapped</li>
+  </ul>
+</div>
+
+<section class="section shell" id="evidence" aria-labelledby="evidence-h">
+  <div class="section__head">
+    <p class="eyebrow">01 / Evidence</p>
+    <h2 id="evidence-h">The evidence, before the claims</h2>
+    <p>Two files are committed to this repository. CI regenerates both on every push and fails the
+    build if a single hash moves, so what follows is the output of the code in the same commit, not a
+    snapshot taken once and left there.</p>
+  </div>
+
+  <div class="records">
+
+    <article class="record record--pass">
+      <div class="record__bar">
+        <span class="pill pill--pass">Pass</span>
+        <h3>Reference against itself</h3>
+        <span class="record__file">docs/evidence/<br>2026-09-17-roundtrip-self-pass.json</span>
+      </div>
+      <dl>
+        <div><dt>passed</dt><dd class="is-pass">true</dd></div>
+        <div><dt>referenceHash</dt><dd title="a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b">a86cc4fa&hellip;4dcf7b</dd></div>
+        <div><dt>candidateHash</dt><dd title="a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b">a86cc4fa&hellip;4dcf7b (identical)</dd></div>
+        <div><dt>roundtrip.equal</dt><dd class="is-pass">true</dd></div>
+        <div><dt>missing elements</dt><dd>0</dd></div>
+        <div><dt>missing edges</dt><dd>0</dd></div>
+        <div><dt>changed attributes</dt><dd>0</dd></div>
+        <div><dt>components</dt><dd>1 (99 nodes)</dd></div>
+        <div><dt>isolated nodes</dt><dd>0</dd></div>
+        <div><dt>coverage</dt><dd>15 of 25 covered (20 satisfied, 3 refined, 1 verified)</dd></div>
+      </dl>
+      <div class="record__repro">
+        <p>Proves the reference OKF is a fixed point of the gate: a model compared with itself
+        passes, hashes and all. Reproduce it:</p>
+<pre><code>cargo run -p mw-gate -- \
+  --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
+  --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
+  --evidence /tmp/self-pass.json</code></pre>
+      </div>
+    </article>
+
+    <article class="record record--fail">
+      <div class="record__bar">
+        <span class="pill pill--fail">Fail</span>
+        <h3>Reference against the corrupted fixture</h3>
+        <span class="record__file">docs/evidence/<br>2026-09-17-roundtrip-corrupted-fail.json</span>
+      </div>
+      <dl>
+        <div><dt>passed</dt><dd class="is-fail">false</dd></div>
+        <div><dt>referenceHash</dt><dd title="a86cc4faece3fd935120f2b51778e7f3611eca77cc673f69ceef0fc6444dcf7b">a86cc4fa&hellip;4dcf7b</dd></div>
+        <div><dt>candidateHash</dt><dd class="is-fail" title="9c9bbac605691b059627c9b6309763328878f9dc174d11adf85dc3df8cc305c2">9c9bbac6&hellip;305c2 (differs)</dd></div>
+        <div><dt>roundtrip.equal</dt><dd class="is-fail">false</dd></div>
+        <div><dt>missing elements</dt><dd class="is-fail">1</dd></div>
+        <div><dt>missing edges</dt><dd class="is-fail">3</dd></div>
+        <div><dt>components</dt><dd class="is-fail">3 (90, 8, 1)</dd></div>
+        <div><dt>isolated nodes</dt><dd class="is-fail">1</dd></div>
+        <div><dt>coverage</dt><dd>13 of 24 covered</dd></div>
+        <div><dt>the element it names</dt><dd>requirements:_2026x_1_12a70364_1789522470210_613186_5619</dd></div>
+      </dl>
+      <ul class="record__failures">
+        <li>roundtrip: 1 missing elements, 0 extra elements, 3 missing edges, 0 extra edges, 0 changed attributes</li>
+        <li>integration: 1 isolated nodes</li>
+        <li>integration: 3 connected components</li>
+      </ul>
+      <div class="record__repro">
+        <p>Proves the gate detects loss and fragmentation, and names what it found rather than
+        reporting a score. Reproduce it:</p>
+<pre><code>cargo run -p mw-gate -- \
+  --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
+  --candidate sample/corpus/coffee-machine/okf/corrupted/coffee_machine_model.json \
+  --evidence /tmp/corrupted-fail.json</code></pre>
+      </div>
+    </article>
+
+  </div>
+
+  <p class="records__caption">Both runs use the coffee-machine corpus in
+  <code>sample/corpus/coffee-machine</code>. Neither record contains a timestamp: dates appear in
+  filenames only, so a re-run is either byte-identical or it is a bug. That is what makes the result
+  citable.</p>
 </section>
 
-<section id="why">
-<h2>Why it exists</h2>
-<p>Legacy MBSE tools such as CATIA Magic are costly to licence and hard to use, and
-there are not enough engineers who can drive them. Modelwrite exists so an
-organisation can move off those tools — migrating its models with measured fidelity —
-and so that AI agents can help with the skilled repetition of building and reviewing
-models, while a human makes every commit. Agents draft; the gate and the human check.</p>
+<section class="section shell" id="measured" aria-labelledby="measured-h">
+  <div class="section__head">
+    <p class="eyebrow">02 / Measured</p>
+    <h2 id="measured-h">Measured on a real vendor model, and the number is not flattering</h2>
+    <p>The first real vendor model put through the reader is a MagicDraw SysML model. Its
+    <code>com.nomagic.magicdraw.uml_model.model</code> entry holds a 193&nbsp;KB XMI document. This
+    is what came out.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="stat__num">148</span><span class="stat__label"><code>packagedElement</code> read from the XMI</span></div>
+    <div class="stat"><span class="stat__num">57</span><span class="stat__label"><code>ownedAttribute</code> read from the XMI</span></div>
+    <div class="stat"><span class="stat__num">28</span><span class="stat__label">traceability links carried: 20 Satisfy, 3 Allocate, 4 Refine, 1 Verify</span></div>
+    <div class="stat"><span class="stat__num stat__num--fail">270</span><span class="stat__label">content losses, every one Unmappable and named</span></div>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <p>Importing it produces 34 structure elements (the Blocks), 25 requirements, 59 graph nodes and
+    28 graph edges. It also produces 270 content losses. Requirements and their traceability are now
+    carried, where the first measurement carried none. Ports, Operations, Associations, visibility
+    and other attributes are still reported as unmappable: named, never dropped in silence, but not
+    carried.</p>
+  </div>
+
+  <div class="callout">
+    <h3>Migrating a MagicDraw or CATIA Magic model without those 270 losses is not supported yet.</h3>
+    <p>Named is not the same as carried. An unmappable loss is reported so you can decide about it.
+    It is still a loss, and this page will not round it down.</p>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <p>Reproduce the measurement. It prints the counts above, not a summary of them:</p>
+  </div>
+<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code></pre>
 </section>
 
-<section id="run">
-<h2>Install and run</h2>
-<p>The Rust crates are not published to crates.io — both declare
-<code>publish = false</code> in their manifests — so <code>cargo install</code> will not
-work. Build from this repository.</p>
-<p>The crates build and run from source. The service is <code>mw-server</code>; the CLI is
-<code>mw-cli</code>, which builds the <code>mw</code> binary:</p>
+<section class="section shell" id="capabilities" aria-labelledby="capabilities-h">
+  <div class="section__head">
+    <p class="eyebrow">03 / Capabilities</p>
+    <h2 id="capabilities-h">What works today</h2>
+    <p>Every card carries its own status, and a number where a number exists. Nothing here is a
+    roadmap item dressed as a feature: what is not built is in the next section, at the same weight
+    as this one.</p>
+  </div>
+
+  <div class="cards">
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--works">Works</span>
+        <h3>Model repository</h3>
+      </div>
+      <p>Content-addressed blobs, a deterministic commit hash, section-scoped diffs, three-way merge
+      with a real least-common-ancestor, element locks as leases, an append-only audit log written
+      inside the mutation transaction, and identity with roles.</p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--works">Works</span>
+        <h3>Round-trip gate</h3>
+      </div>
+      <p>Zero element, edge, attribute or document-field loss. Graph integration, optional strict
+      coverage, and deterministic evidence records that regenerate byte for byte.</p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--works">Works</span>
+        <h3>Workbench</h3>
+      </div>
+      <p>Server-rendered HTML and inline SVG, served by the same service that holds the model.
+      <span class="card__num">0 external requests</span></p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--partial">Partial</span>
+        <h3>Interoperability</h3>
+      </div>
+      <p>A binding contract, a SysML v1 XMI reader, and migration as a gated operation: the source
+      artifact is retained content-addressed before anything else, fidelity is measured, and a lossy
+      migration is refused until the specific loss is accepted by name.</p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--partial">Partial</span>
+        <h3>Agent loop</h3>
+      </div>
+      <p>A Reasoner trait, proposals a human reads, agent actions distinguishable in the audit log,
+      and an enforced rule that an agent cannot write. A human with the write role accepts a proposal
+      through an import-scoped route.</p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--works">Works</span>
+        <h3>Governance</h3>
+      </div>
+      <p>Commit provenance recorded as authored, imported or unknown. Migration rules enforced at the
+      commit path, and a check record written per commit.</p>
+    </article>
+
+    <article class="card">
+      <div class="card__head">
+        <span class="status status--works">Works</span>
+        <h3>Analytics</h3>
+      </div>
+      <p>Portfolio compliance, cost joins with weakest-link confidence, and exact decimal money:
+      scaled integers, no floating point.</p>
+    </article>
+
+  </div>
+</section>
+
+<section class="section shell" id="limits" aria-labelledby="limits-h">
+  <div class="section__head">
+    <p class="eyebrow">04 / Limits</p>
+    <h2 id="limits-h">What it does not do</h2>
+    <p>Competitors do not publish this section. It is the reason to believe the rest of the page.</p>
+  </div>
+
+  <ul class="limits">
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>An agent cannot write.</h3>
+        <p>It proposes. Only a human with the write role accepts a proposal into a commit, and the
+        resulting commit records both parties. An agent token cannot hold a write or admin role.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>The agent loop is not wired end to end.</h3>
+        <p>Nothing outside <code>engine/agent</code> consumes the reasoner&rsquo;s proposals, so a
+        proposal does not reach the server on its own and a human drives the accept route. Acceptance
+        is import-scoped: migration loss-report proposals only.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>Real vendor migration is not complete.</h3>
+        <p>The reader carries requirements and their traceability. It still loses 270 things on the
+        first real MagicDraw model: Ports, Operations, Associations, visibility and other attributes.
+        Named rather than dropped in silence, but not carried.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>The native XMI-to-OKF direction is not independently measured.</h3>
+        <p>The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip. The read rests on
+        the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>There is no CAD or geometry authoring.</h3>
+        <p>Modelwrite integrates with CAD rather than replacing it. The 3D side of the CATIA
+        portfolio is out of scope by design, and so is becoming a general-purpose drawing tool.</p>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<section class="section shell" id="workbench" aria-labelledby="workbench-h">
+  <div class="section__head">
+    <p class="eyebrow">05 / The workbench</p>
+    <h2 id="workbench-h">The workbench</h2>
+    <p>Server-rendered HTML and inline SVG, served by <code>mw-server</code>. No framework, no build
+    step, nothing fetched from the network at page load. These are captures of the running
+    service.</p>
+  </div>
+
+  <div class="figures">
+    <figure>
+      <img src="workbench-overview.png" width="1440" height="900" loading="lazy"
+           alt="The modelwrite workbench showing the coffee-machine model: a model switcher and new model button, a left navigator listing models and sections, a structure tree of blocks and actors, and an overview panel with coverage reading 15 of 25, 49 elements and 25 requirements.">
+      <figcaption><b>Coverage at a glance.</b> 15 of 25 requirements covered, 10 uncovered and named,
+      49 elements, 25 requirements. The numbers on this screen come from the same engine the gate
+      uses.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="workbench-requirements.png" width="1440" height="900" loading="lazy"
+           alt="The requirements table in the workbench, listing REQIDs, requirement text, a satisfied-by column naming the satisfying elements, and a coverage column with covered and uncovered badges.">
+      <figcaption><b>Traceability, element by element.</b> Each requirement carries its REQID, its
+      text, what satisfies it, and whether it is covered. The uncovered ones are listed rather than
+      summarised into a percentage.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section shell" id="architecture" aria-labelledby="architecture-h">
+  <div class="section__head">
+    <p class="eyebrow">06 / Architecture</p>
+    <h2 id="architecture-h">Architecture</h2>
+    <p>The engine crates are the contract. The server, the CLI and every connector build on them, and
+    nothing bypasses the OKF crate and the gate.</p>
+  </div>
+
+  <div class="layers">
+    <div class="layer">
+      <p class="layer__name">Clients</p>
+      <ul class="layer__items">
+        <li>Web workbench: server-rendered HTML and inline SVG</li>
+        <li><code>mw</code> command line and the CI runner</li>
+        <li>MCP clients and AI agents</li>
+        <li>REST integrations</li>
+      </ul>
+    </div>
+
+    <div class="layer">
+      <p class="layer__name">mw-server<span class="layer__note">AGPL-3.0-or-later</span></p>
+      <ul class="layer__items">
+        <li>HTTP API and the workbench UI</li>
+        <li>Commits and branches &middot; three-way merge &middot; locks as leases &middot; audit log</li>
+        <li>Identity and roles &middot; gate &middot; migration &middot; agent proposals and acceptance</li>
+        <li>Governance &middot; analytics</li>
+        <li>Storage: SQLite for one user, PostgreSQL for a team</li>
+      </ul>
+    </div>
+
+    <div class="layer">
+      <p class="layer__name">Engine crates<span class="layer__note">AGPL-3.0-or-later</span></p>
+      <ul class="layer__items">
+        <li><code>okf</code> &middot; <code>graph</code> &middot; <code>gate</code> &middot; <code>binding</code> &middot; <code>binding-xmi</code> (the SysML v1 XMI reader)</li>
+        <li><code>agent</code> (Reasoner and proposals) &middot; <code>capi</code> (C ABI) &middot; <code>mcp</code> (MCP server) &middot; <code>analytics</code></li>
+      </ul>
+    </div>
+
+    <div class="layer">
+      <p class="layer__name">Interchange<span class="layer__note">Apache-2.0</span></p>
+      <ul class="layer__items">
+        <li>OKF 1.0 format and schema</li>
+      </ul>
+    </div>
+
+    <div class="layer">
+      <p class="layer__name">Deployment</p>
+      <ul class="layer__items">
+        <li>Docker image &middot; Docker Compose trial &middot; Helm chart &middot; air-gapped bundle</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="flow">
+    <svg viewBox="0 0 700 170" role="img" aria-labelledby="flow-title flow-desc">
+      <title id="flow-title">How the round-trip gate produces an evidence record</title>
+      <desc id="flow-desc">A reference OKF document and a candidate OKF document both feed the
+      mw-gate, which writes one evidence record. Re-running the gate on the same two inputs produces
+      the same record byte for byte.</desc>
+
+      <rect class="box" x="8" y="18" width="180" height="46" rx="5"></rect>
+      <text class="label" x="98" y="38" text-anchor="middle">reference OKF</text>
+      <text class="sub" x="98" y="54" text-anchor="middle">expected corpus model</text>
+
+      <rect class="box" x="8" y="104" width="180" height="46" rx="5"></rect>
+      <text class="label" x="98" y="124" text-anchor="middle">candidate OKF</text>
+      <text class="sub" x="98" y="140" text-anchor="middle">the model you brought</text>
+
+      <rect class="box box--accent" x="252" y="58" width="140" height="52" rx="5"></rect>
+      <text class="label" x="322" y="80" text-anchor="middle">mw-gate</text>
+      <text class="sub" x="322" y="97" text-anchor="middle">no timestamp</text>
+
+      <rect class="box box--out" x="452" y="58" width="232" height="52" rx="5"></rect>
+      <text class="label" x="568" y="80" text-anchor="middle">evidence record</text>
+      <text class="sub" x="568" y="97" text-anchor="middle">byte-identical on re-run</text>
+
+      <path class="wire" d="M188 41 C 220 41, 220 84, 252 84"></path>
+      <path class="wire" d="M188 127 C 220 127, 220 84, 252 84"></path>
+      <path class="wire" d="M392 84 L 452 84"></path>
+    </svg>
+  </div>
+</section>
+
+<section class="section shell" id="install" aria-labelledby="install-h">
+  <div class="section__head">
+    <p class="eyebrow">07 / Install</p>
+    <h2 id="install-h">Install and run it yourself</h2>
+    <p>The Rust crates are not published to crates.io. Both declare <code>publish = false</code> in
+    their manifests, so <code>cargo install</code> will not work. Build from the repository. You need
+    Rust stable via rustup, and Python 3.12 or later for the judge harness.</p>
+  </div>
+
+  <div class="prose">
+    <h3>Build the crates</h3>
+    <p>The service is <code>mw-server</code>. The CLI is <code>mw-cli</code>, which builds the
+    <code>mw</code> binary.</p>
+  </div>
 <pre><code>cargo build --workspace
+cargo test --workspace
 cargo run -p mw-server</code></pre>
-<p>The container image builds from <code>deploy/Dockerfile</code> (see
-<code>deploy/README.md</code>):</p>
-<pre><code>docker build -f deploy/Dockerfile -t modelwrite/modelwrite:0.1.0 .</code></pre>
-<p>To try the full stack on one machine, from the repository root:</p>
-<pre><code>docker compose -f deploy/docker-compose.yml up --build</code></pre>
-<p>The server runs in open mode (anonymous admin) unless a token or JWKS is configured.
-The container refuses to start open on a reachable interface unless
-<code>MW_ALLOW_OPEN=yes</code> is set.</p>
+
+  <div class="prose">
+    <h3>Run the gate on the corpus</h3>
+    <p>Expected output: <code>GATE PASS</code>.</p>
+  </div>
+<pre><code>cargo run -p mw-gate -- \
+  --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
+  --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json</code></pre>
+
+  <div class="prose">
+    <h3>Use the CLI against a local store</h3>
+    <p>The CLI reaches the service over plain HTTP, or opens a SQLite store directly for offline
+    use.</p>
+  </div>
+<pre><code>mw --db modelwrite.db project create coffee</code></pre>
+
+  <div class="prose">
+    <h3>Deploy it</h3>
+    <p>As a container, a Compose trial on one machine, or a Helm release.</p>
+  </div>
+<pre><code>docker build -f deploy/Dockerfile -t modelwrite/modelwrite:0.1.0 .
+docker compose -f deploy/docker-compose.yml up --build
+helm install modelwrite deploy/helm/modelwrite</code></pre>
+
+  <div class="callout" style="border-color:var(--line);border-left-color:var(--warn);background:var(--panel)">
+    <h3 style="color:var(--ink)">The service runs in open mode unless you configure authentication.</h3>
+    <p style="color:var(--ink-soft)">Open mode means an anonymous admin. The image refuses to start
+    that way unless <code>MW_ALLOW_OPEN=yes</code> is set, so for anything shared, set
+    <code>MW_AUTH_TOKEN</code> or <code>MW_AUTH_JWKS</code> instead. The Helm chart does not do TLS,
+    backups or high availability: see <code>deploy/README.md</code> for what it leaves to you. A
+    JWKS file is read once at startup, so adding or removing a signing key needs a restart.</p>
+  </div>
 </section>
 
-<section id="works">
-<h2>What works</h2>
-<table>
-<thead>
-<tr><th scope="col">Capability</th><th scope="col">Status</th><th scope="col">What it means</th></tr>
-</thead>
-<tbody>
-<tr>
-  <td>Commit model</td>
-  <td>Works</td>
-  <td>Content-addressed blobs, a deterministic commit hash, section-scoped diffs,
-  three-way merge with a real least-common-ancestor, element locks as leases, an
-  append-only audit log written inside the mutation transaction, identity and roles.</td>
-</tr>
-<tr>
-  <td>Round-trip gate</td>
-  <td>Works</td>
-  <td>Zero element, edge, attribute or document-field loss; graph integration; optional
-  strict coverage; deterministic evidence records.</td>
-</tr>
-<tr>
-  <td>Workbench</td>
-  <td>Works</td>
-  <td>Server-rendered HTML and inline SVG. No build step. Nothing fetched from the
-  network at page load.</td>
-</tr>
-<tr>
-  <td>Interoperability</td>
-  <td>Partial</td>
-  <td>A binding contract, a SysML v1 XMI reader, and migration as a gated operation:
-  the source artifact is retained content-addressed before anything else, fidelity is
-  measured, and a lossy migration is refused until the specific loss is accepted by name.</td>
-</tr>
-<tr>
-  <td>Agent loop</td>
-  <td>Partial</td>
-  <td>A Reasoner trait, proposals a human reads, agent actions distinguishable in the
-  audit log, and an enforced rule that an agent cannot write. A human with the write
-  role accepts a proposal through an import-scoped route.</td>
-</tr>
-<tr>
-  <td>Governance</td>
-  <td>Works</td>
-  <td>Commit provenance (authored / imported / unknown), migration rules enforced at the
-  commit path, and per-commit check records.</td>
-</tr>
-<tr>
-  <td>Analytics</td>
-  <td>Works</td>
-  <td>Portfolio compliance, cost joins with weakest-link confidence, and exact decimal
-  money (scaled integers, no floating point).</td>
-</tr>
-</tbody>
-</table>
+<section class="section shell" id="numbers" aria-labelledby="numbers-h">
+  <div class="section__head">
+    <p class="eyebrow">08 / Numbers</p>
+    <h2 id="numbers-h">Numbers you can check</h2>
+    <p>Every figure below has the command that produced it. If one does not reproduce, that is a bug
+    and it should be reported as one.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="stat__num">501</span><span class="stat__label">workspace tests pass, 0 fail, 24 PostgreSQL tests marked ignored in that run</span></div>
+    <div class="stat"><span class="stat__num">6</span><span class="stat__label">CI jobs: <code>engine</code>, <code>msrv</code>, <code>postgres</code>, <code>browser</code>, <code>deploy</code>, <code>publish</code></span></div>
+    <div class="stat"><span class="stat__num">99</span><span class="stat__label">corpus graph nodes, 165 edges, one component, 0 isolated</span></div>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <p>The test count comes from <code>cargo test --workspace --no-fail-fast</code> at the repository
+    root. The 24 ignored tests are the PostgreSQL backend suite, which the <code>postgres</code> CI
+    job runs against a real PostgreSQL 16 service container. The <code>browser</code> job builds the
+    service and drives it with Playwright end-to-end tests; <code>msrv</code> rebuilds each layer at
+    the toolchain floor its manifest declares, rather than at stable. The corpus is
+    <code>sample/corpus/coffee-machine</code>, pinned by tests and by the evidence annex: 99 graph
+    nodes, 165 graph edges, 25 requirements, 49 blocks, 9 signals, 8 activities, one connected
+    component and no isolated nodes.</p>
+    <p>The evidence records are not maintained by hand. The <code>engine</code> CI job regenerates
+    both and diffs them against the committed files, so a new timestamp or a nondeterministic
+    iteration order anywhere in the gate fails the build.</p>
+  </div>
 </section>
 
-<section id="does-not">
-<h2>What it does not do</h2>
-<ul>
-<li><strong>An agent cannot write.</strong> It proposes; only a human with the write
-role accepts a proposal into a commit, and the resulting commit records both parties.
-An agent token cannot hold a write or admin role.</li>
-<li><strong>The agent loop is not wired end to end.</strong> Nothing outside
-<code>engine/agent</code> consumes the reasoner&rsquo;s proposals, so a proposal does
-not reach the server on its own; a human drives the accept route. Acceptance is
-import-scoped: migration loss-report proposals only.</li>
-<li><strong>The first real vendor model has been tested — and the result is measured,
-not reassuring.</strong> The MagicDraw SysML model in
-<code>sample/corpus/coffee-machine/legacy/CoffeeMachine-SysML-Model.mdzip</code> (a
-193&nbsp;KB XMI in its <code>com.nomagic.magicdraw.uml_model.model</code> entry) contains
-148 <code>packagedElement</code> and 57 <code>ownedAttribute</code> elements: 34 Blocks,
-25 Requirements, and 28 traceability links (20 Satisfy, 3 Allocate, 4 Refine, 1 Verify).
-Importing it produces 34 structure elements (the Blocks), 25 requirements, 59 graph nodes
-and 28 graph edges — the Satisfy, Allocate, Refine and Verify links — alongside 270
-content losses, every one Unmappable and named. Requirements and their traceability are
-now carried; Ports, Operations, Associations, visibility and other attributes are still
-reported as unmappable: named, never dropped in silence, but not carried. Reproduce it
-with
-<code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code>.</li>
-<li><strong>Real vendor migration is still not complete.</strong> The reader now carries
-requirements and their traceability — 25 requirements and 28 links (20 Satisfy, 3
-Allocate, 4 Refine, 1 Verify), where the first measurement carried none — but it still
-loses 270 things: Ports, Operations, Associations, visibility and other attributes.
-Migrating a MagicDraw or CATIA Magic model without those losses is not yet supported.</li>
-<li><strong>The native XMI-to-OKF direction is not independently measured.</strong>
-The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip; the read rests
-on the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</li>
-</ul>
-</section>
+<section class="section shell" id="licence" aria-labelledby="licence-h">
+  <div class="section__head">
+    <p class="eyebrow">09 / Licence</p>
+    <h2 id="licence-h">Licence and governance</h2>
+  </div>
 
-<section id="architecture">
-<h2>Architecture</h2>
-<pre class="diagram"><code>Clients
-  workbench (server-rendered HTML + inline SVG) · mw CLI · MCP clients
-        |
-        v
-mw-server  (AGPL-3.0-or-later)
-  HTTP API and the workbench UI
-  commits and branches · three-way merge · locks (leases) · audit log
-  identity and roles · gate · migration · agent proposals and acceptance
-  governance · analytics
-  storage: SQLite (single user) or PostgreSQL (team)
-        |
-engine crates  (AGPL-3.0-or-later)
-  okf · graph · gate · binding · binding-xmi (SysML v1 XMI reader)
-  agent (Reasoner, proposals) · capi (C ABI) · mcp (MCP server) · analytics
-        |
-interchange
-  OKF 1.0 format and schema  (Apache-2.0)
-        |
-deployment
-  Docker image · Docker Compose · Helm chart</code></pre>
-<p>The engine crates are the contract. The server, the CLI and every connector build on
-them; nothing bypasses the OKF crate and the gate.</p>
-</section>
-
-<section id="numbers">
-<h2>Numbers you can check</h2>
-<ul>
-<li><strong>412 tests pass.</strong> Run <code>cargo test --workspace --no-fail-fast</code>
-from the repository root. 24 further tests — the PostgreSQL backend suite — are marked
-ignored in that run; the <code>postgres</code> CI job executes them against a real
-PostgreSQL 16 service container.</li>
-<li><strong>4 CI jobs:</strong> <code>engine</code>, <code>msrv</code>,
-<code>postgres</code>, <code>deploy</code> — defined in <code>.github/workflows/ci.yml</code>.</li>
-<li><strong>Corpus</strong> (<code>sample/corpus/coffee-machine</code>), pinned by tests
-and the evidence annex: 99 graph nodes, 165 graph edges, 25 requirements, 49 blocks,
-9 signals, 8 activities, 1 connected component, 0 isolated nodes.</li>
-</ul>
-</section>
-
-<section id="licence">
-<h2>Licence</h2>
-<p>The engine and server are AGPL-3.0-or-later. The OKF interchange format, and the
-importers and exporters, are Apache-2.0 — the split is project policy:
-&ldquo;Importers and exporters ship under Apache-2.0; the engine stays
-AGPL-3.0-or-later&rdquo; (<code>CONTRIBUTING.md</code>). The reference implementation of
-OKF lives in the AGPL engine.</p>
-<p>Commercial use follows the documented open-core pattern: a private business
-repository alongside the public engine, an evidence annex, and rule packs.</p>
+  <div class="prose">
+    <p>The engine crates and the server are <strong>AGPL-3.0-or-later</strong>. The OKF interchange
+    format, the importers and the exporters are <strong>Apache-2.0</strong>. The split is project
+    policy, stated in <code>CONTRIBUTING.md</code>: importers and exporters ship under Apache-2.0 and
+    the engine stays AGPL-3.0-or-later. The reference implementation of OKF lives in the AGPL
+    engine.</p>
+    <p>Commercial use follows the documented open-core pattern: a private business repository
+    alongside the public engine, the evidence annex, and the rule packs. What you install is the
+    thing you can read.</p>
+  </div>
 </section>
 
 </main>
 
-<footer>
-<p>Modelwrite. Hand-written HTML and CSS; no build step and no external requests.</p>
-<p>Licence: AGPL-3.0-or-later (engine and server), Apache-2.0 (interchange format and
-importers/exporters).</p>
+<footer class="site-footer">
+  <div class="shell footer__grid">
+    <div>
+      <h2>Reproduce the claims</h2>
+<pre><code>cargo test --workspace --no-fail-fast
+cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+cargo run -p mw-gate -- \
+  --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
+  --candidate sample/corpus/coffee-machine/okf/corrupted/coffee_machine_model.json</code></pre>
+    </div>
+    <div>
+      <h2>The project</h2>
+      <p><a href="https://github.com/modelwrite/modelwrite">Source and issues on GitHub</a><br>
+      <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/evidence/README.md">The evidence annex</a><br>
+      <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/okf/okf-1.0-spec.md">The OKF 1.0 specification</a><br>
+      <a href="https://github.com/modelwrite/modelwrite/blob/main/deploy/README.md">Deployment notes</a></p>
+      <p>Licence: AGPL-3.0-or-later for the engine and server, Apache-2.0 for the interchange format
+      and the importers and exporters.</p>
+      <p>Hand-written HTML and CSS. No build step, no external requests, no cookies and no
+      analytics.</p>
+    </div>
+  </div>
 </footer>
+
 </body>
 </html>
