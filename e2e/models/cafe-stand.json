@@ -1,0 +1,441 @@
+{
+    "okf":  "1.0",
+    "project":  "cafe-stand",
+    "exportedAt":  "",
+    "summary":  {
+                    "blocks":  3,
+                    "requirements":  3,
+                    "signals":  3,
+                    "activities":  5
+                },
+    "structure":  [
+                      {
+                          "id":  "cafe-stand",
+                          "name":  "Cafe Stand",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+                                             {
+                                                 "name":  "serviceWindow",
+                                                 "type":  "Service Window",
+                                                 "aggregation":  "composite",
+                                                 "default":  ""
+                                             }
+                                         ],
+                          "documentation":  "A staffed stand that takes an order, takes payment through the purchasing terminal, and provisions a coffee and a toasted sandwich."
+                      },
+                      {
+                          "id":  "service-window",
+                          "name":  "Service Window",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Where the customer orders, pays and collects. The stand\u0027s only interface to the customer."
+                      },
+                      {
+                          "id":  "provisioning-bay",
+                          "name":  "Provisioning Bay",
+                          "kind":  "block",
+                          "stereotypes":  [
+                                              "Block"
+                                          ],
+                          "attributes":  [
+
+                                         ],
+                          "documentation":  "Holds the beverage and food equipment and is served by the terminal\u0027s payment approval."
+                      }
+                  ],
+    "interfaces":  [
+                       {
+                           "id":  "if-customer",
+                           "name":  "Customer Interface",
+                           "kind":  "interface",
+                           "stereotypes":  [
+                                               "InterfaceBlock"
+                                           ],
+                           "attributes":  [
+
+                                          ],
+                           "documentation":  "Ordering, payment and collection across the counter."
+                       }
+                   ],
+    "signals":  [
+                    {
+                        "id":  "sig-payment-approved",
+                        "name":  "PaymentApproved",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  "From the purchasing terminal: the customer\u0027s payment cleared."
+                    },
+                    {
+                        "id":  "sig-beverage-ready",
+                        "name":  "BeverageReady",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  "From the coffee machine: the drink is dispensed."
+                    },
+                    {
+                        "id":  "sig-food-ready",
+                        "name":  "FoodReady",
+                        "kind":  "signal",
+                        "stereotypes":  [
+                                            "Signal"
+                                        ],
+                        "attributes":  [
+
+                                       ],
+                        "documentation":  "From the sandwich toaster: the toastie is sealed and cut."
+                    }
+                ],
+    "requirements":  [
+                         {
+                             "id":  "req-service-time",
+                             "name":  "Service Time",
+                             "kind":  "requirement",
+                             "reqId":  "CS-1",
+                             "reqText":  "The stand shall serve a coffee and a toasted sandwich within 4 minutes of the customer\u0027s payment being approved.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-one-payment",
+                             "name":  "One Payment",
+                             "kind":  "requirement",
+                             "reqId":  "CS-2",
+                             "reqText":  "A single payment shall cover both items and produce one receipt itemising both.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         },
+                         {
+                             "id":  "req-no-early-provision",
+                             "name":  "No Provision Before Payment",
+                             "kind":  "requirement",
+                             "reqId":  "CS-3",
+                             "reqText":  "The stand shall not begin provisioning either item before payment approval is received from the purchasing terminal.",
+                             "stereotypes":  [
+                                                 "Requirement"
+                                             ],
+                             "attributes":  [
+
+                                            ],
+                             "documentation":  ""
+                         }
+                     ],
+    "stateMachine":  {
+                         "name":  "cafe-stand-states",
+                         "regions":  [
+
+                                     ]
+                     },
+    "activities":  [
+                       {
+                           "id":  "act-order",
+                           "name":  "Take Order",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "cafe-stand",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "The customer states the order; the stand records a coffee and a toastie against one order."
+                       },
+                       {
+                           "id":  "act-pay",
+                           "name":  "Take Payment",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "purchasing-terminal",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "The purchasing terminal prices the order, takes payment through the EFTPOS machine and prints one receipt."
+                       },
+                       {
+                           "id":  "act-brew",
+                           "name":  "Provision Beverage",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "coffee-machine",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "On PaymentApproved the coffee machine grinds, brews and dispenses the drink."
+                       },
+                       {
+                           "id":  "act-toast",
+                           "name":  "Provision Food",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "sandwich-toaster",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "On PaymentApproved the toaster seals and cuts the sandwich."
+                       },
+                       {
+                           "id":  "act-complete",
+                           "name":  "Complete Order",
+                           "kind":  "activity",
+                           "stereotypes":  [
+                                               "Activity"
+                                           ],
+                           "attributes":  [
+                                              {
+                                                  "name":  "allocatedTo",
+                                                  "type":  "cafe-stand",
+                                                  "aggregation":  "none",
+                                                  "default":  ""
+                                              }
+                                          ],
+                           "documentation":  "When both BeverageReady and FoodReady are received the order is called and handed over."
+                       }
+                   ],
+    "graph":  {
+                  "nodes":  [
+                                {
+                                    "id":  "cafe-stand",
+                                    "kind":  "block",
+                                    "name":  "Cafe Stand",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "service-window",
+                                    "kind":  "block",
+                                    "name":  "Service Window",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "provisioning-bay",
+                                    "kind":  "block",
+                                    "name":  "Provisioning Bay",
+                                    "stereotypes":  [
+                                                        "Block"
+                                                    ]
+                                },
+                                {
+                                    "id":  "act-order",
+                                    "kind":  "activity",
+                                    "name":  "Take Order",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "act-pay",
+                                    "kind":  "activity",
+                                    "name":  "Take Payment",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "act-brew",
+                                    "kind":  "activity",
+                                    "name":  "Provision Beverage",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "act-toast",
+                                    "kind":  "activity",
+                                    "name":  "Provision Food",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "act-complete",
+                                    "kind":  "activity",
+                                    "name":  "Complete Order",
+                                    "stereotypes":  [
+                                                        "Activity"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-service-time",
+                                    "kind":  "requirement",
+                                    "name":  "Service Time",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-one-payment",
+                                    "kind":  "requirement",
+                                    "name":  "One Payment",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                },
+                                {
+                                    "id":  "req-no-early-provision",
+                                    "kind":  "requirement",
+                                    "name":  "No Provision Before Payment",
+                                    "stereotypes":  [
+                                                        "Requirement"
+                                                    ]
+                                }
+                            ],
+                  "edges":  [
+                                {
+                                    "source":  "cafe-stand",
+                                    "target":  "service-window",
+                                    "kind":  "part",
+                                    "label":  "serviceWindow"
+                                },
+                                {
+                                    "source":  "cafe-stand",
+                                    "target":  "provisioning-bay",
+                                    "kind":  "part",
+                                    "label":  "provisioningBay"
+                                },
+                                {
+                                    "source":  "act-order",
+                                    "target":  "act-pay",
+                                    "kind":  "include",
+                                    "label":  "then"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "act-brew",
+                                    "kind":  "triggers",
+                                    "label":  "on PaymentApproved"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "act-toast",
+                                    "kind":  "triggers",
+                                    "label":  "on PaymentApproved"
+                                },
+                                {
+                                    "source":  "act-brew",
+                                    "target":  "act-complete",
+                                    "kind":  "include",
+                                    "label":  "when BeverageReady"
+                                },
+                                {
+                                    "source":  "act-toast",
+                                    "target":  "act-complete",
+                                    "kind":  "include",
+                                    "label":  "when FoodReady"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "act-brew",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "act-toast",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "act-complete",
+                                    "target":  "req-no-early-provision",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "act-complete",
+                                    "target":  "req-service-time",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                },
+                                {
+                                    "source":  "act-pay",
+                                    "target":  "req-one-payment",
+                                    "kind":  "dependency",
+                                    "label":  "Satisfy"
+                                }
+                            ]
+              },
+    "references":  [
+                       {
+                           "project":  "purchasing-terminal",
+                           "revision":  "86a14a8128ee2a02085a56bf83a2504f12774e25a0a1d28005daf1fe1e9ee1ea",
+                           "role":  "payment",
+                           "bounds":  [
+                                          "eftpos",
+                                          "secure-element",
+                                          "receipt-printer",
+                                          "card-reader"
+                                      ]
+                       },
+                       {
+                           "project":  "coffee-machine",
+                           "revision":  "d427e847bf4d875d06fc7f2a5b47bb0a3dc53855a61850195c4ec78e7d45fc36",
+                           "role":  "beverage",
+                           "bounds":  [
+                                          "_2026x_1_12a70364_1789363229077_574630_3720",
+                                          "_2026x_1_12a70364_1789357175665_504215_3638"
+                                      ]
+                       },
+                       {
+                           "project":  "sandwich-toaster",
+                           "revision":  "6cc2b58d6f827363d032965ead2d7ecc33e95dfdab1089f9586423959b3bf9ac",
+                           "role":  "food",
+                           "bounds":  [
+                                          "heating-element",
+                                          "lower-plate",
+                                          "latch"
+                                      ]
+                       }
+                   ]
+}

@@ -9,11 +9,12 @@
 const { test, expect } = require('@playwright/test');
 const { baseURL } = require('./helpers');
 
-// The ten sections of a model, in navigator order. These are the SAME labels the server
+// The eleven sections of a model, in navigator order. These are the SAME labels the server
 // renders in server/src/ui/layout.rs::SECTIONS.
 const SECTION_LABELS = [
   'Overview',
   'Structure',
+  'Composition',
   'Requirements',
   'Traceability',
   'Diagram',
@@ -39,16 +40,17 @@ test.describe('navigation shell', () => {
     // The identity chip names who is viewing.
     await expect(page.locator('.site-header .chip')).toContainText('via');
 
-    // MODELS group: both models, the current one highlighted.
-    const modelLinks = page.locator('.rail .nav-group').nth(0).locator('a');
-    await expect(modelLinks).toHaveCount(2);
-    await expect(modelLinks.nth(0)).toHaveText('coffee');
-    await expect(modelLinks.nth(1)).toHaveText('tea');
-    await expect(modelLinks.nth(0)).toHaveClass(/current/);
+    // MODELS group: the current model and the second model are both listed, the current
+    // one highlighted. The composition spec adds further models, so presence is asserted
+    // by exact name rather than by a fixed count or position.
+    const modelsGroup = page.locator('.rail .nav-group').nth(0);
+    await expect(modelsGroup.locator('a', { hasText: /^coffee$/ })).toBeVisible();
+    await expect(modelsGroup.locator('a', { hasText: /^tea$/ })).toBeVisible();
+    await expect(modelsGroup.locator('a', { hasText: /^coffee$/ })).toHaveClass(/current/);
 
-    // SECTIONS group: all ten sections, Overview marked current.
+    // SECTIONS group: all eleven sections, Overview marked current.
     const sectionLinks = page.locator('.rail .nav-group').nth(1).locator('a');
-    await expect(sectionLinks).toHaveCount(10);
+    await expect(sectionLinks).toHaveCount(11);
     await expect(sectionLinks.nth(0)).toHaveText('Overview');
     await expect(sectionLinks.nth(0)).toHaveClass(/current/);
     expect(await sectionLinks.allTextContents()).toEqual(SECTION_LABELS);
@@ -79,6 +81,7 @@ test.describe('navigation shell', () => {
     const checks = [
       ['/ui/projects/coffee/overview', 'Overview'],
       ['/ui/projects/coffee/structure', 'Structure'],
+      ['/ui/projects/coffee/composition', 'Composition'],
       ['/ui/projects/coffee/requirements', 'Requirements'],
       ['/ui/projects/coffee/traceability', 'Traceability'],
       ['/ui/projects/coffee/diagram', 'Diagram'],
@@ -105,7 +108,7 @@ test.describe('navigation shell with JavaScript disabled', () => {
     const hrefs = await page.$$eval('.rail .nav-group a', (els) =>
       els.map((el) => el.getAttribute('href'))
     );
-    expect(hrefs.length).toBeGreaterThanOrEqual(11); // models + 10 sections
+    expect(hrefs.length).toBeGreaterThanOrEqual(12); // models + 11 sections
     expect(hrefs.some((href) => href.startsWith('/ui/projects/coffee/structure'))).toBe(true);
     expect(
       hrefs.some((href) => href.startsWith('/ui/projects/coffee/requirements'))
