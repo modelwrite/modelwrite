@@ -49,3 +49,55 @@ A `symbol(kind, stereotype, domain)` function returning SVG geometry, behind a t
 | **S2** | The 2525/APP-6 frame and the platform glyphs a programme names (land, sea surface, subsurface, air), at a stated standard version, with a conformance test set |
 | **S3** | Operator symbol packs, with provenance recorded on the diagram |
 | **S4** | The declared-SIDC path: a model states its symbols and the diagram renders them |
+
+---
+
+# Appendix: other domains, and the licence classes that decide everything
+
+The question "which symbol libraries should we adopt for networking, cloud, IT, electrical, fluid dynamics?" has the same answer in every domain, because **the deciding factor is never the domain, it is the licence class**.
+
+## The three classes
+
+### Class A - PERMISSIVE OR PUBLIC DOMAIN: bundle it
+Safe to compile into the binary with attribution. Examples found:
+- **MIL-STD-2525 / APP-6** via `milsymbol` (**MIT**) - defence platforms: tanks, ships, aircraft.
+- **Electrical symbols** - `basverdoes/ElectricalSymbolLibrary` (**public domain**, SVG).
+- General UI glyphs: **Lucide (ISC)**, **Feather (MIT)**, **Tabler (MIT)**, **Bootstrap Icons (MIT)**, **Material Symbols (Apache-2.0)**.
+- **P&ID symbol sets** - at least one open set exists (BVLtd, American National Standard); its licence must be VERIFIED per pack before use, which is exactly why a pack declares its licence.
+
+### Class B - COPYLEFT: bundle only knowingly
+Compatible with an AGPL-3.0-or-later engine when the licence is GPL-3.0-or-later or CC-BY-SA **and** attribution and share-alike are honoured for the pack itself:
+- **KiCad** symbol libraries (**CC-BY-SA-4.0**).
+- **QElectroTech** element collections (GPL-family).
+Rule: the pack keeps its own licence, is attributed, and is not silently relicensed. A pack that cannot satisfy that does not ship.
+
+### Class C - PROPRIETARY OR TRADEMARKED: never bundle, always operator-supplied
+This is the largest class by far, and it is where most of the domains the question named actually live:
+- **IEC 60617** (electrical graphical symbols), **ISO 10628** and **ISA-5.1** (P&ID and instrumentation), **ASME Y14.5** (GD&T), **ISO 128** - **standards bodies sell these publications.** The symbols are the copyrighted content. Implementing to a standard you have licensed is normal engineering; redistributing its artwork is not.
+- **Cisco network icons**, **AWS / Azure / Google Cloud architecture icons** - trademarked vendor marks whose terms restrict redistribution. An organisation that uses them has its own entitlement; the platform has none.
+- **Any company's own mark.**
+
+## So the architecture is one mechanism, not seven libraries
+
+**A symbology PACK**, which is the same shape as the interoperability binding already built for legacy XMI:
+
+- a pack **declares** the standard it implements **and its version** (2525E, IEC 60617, ISA-5.1, "our house symbols"), because a standard version is a binding and they differ between revisions;
+- a pack **declares its licence**, ships with its `NOTICE`, and is either bundled (Class A/B) or **supplied by the deployment** (Class C);
+- a pack **maps model declarations to symbols** - and the platform **never guesses**: a model says what a "frigate", a "pump" or a "VPC" is; the pack draws it;
+- a pack that cannot draw something reports it as an **unmappable**, never a silent fallback to a box.
+
+That last point is the whole reason this is safe: the same discipline as the loss report. **A diagram must never imply a symbol it did not draw.**
+
+## What this means practically
+
+| Domain | Approach |
+|---|---|
+| Defence platforms | Bundle 2525/APP-6 geometry (MIT reference); operator adds house symbols |
+| Electrical | Bundle a public-domain set; operator may supply an IEC-60617 pack they are licensed for |
+| Process / P&ID / fluid | Bundle nothing by default; the operator supplies the ISA-5.1 or ISO 10628 pack their licence covers |
+| Networking / cloud / IT | **Bundle nothing**; the operator supplies vendor icons they are entitled to use |
+| Engineering drawing | Conventions (not artwork) are implementable: line types, hatching, dimension style |
+
+## Ruling
+
+**THE PLATFORM BUNDLES ONLY WHAT IT MAY REDISTRIBUTE, AND SHIPS THE MECHANISM FOR EVERYTHING ELSE.** Cost if wrong: a user must supply one directory for their licensed standards. Benefit: the project stays legitimately distributable, and an air-gapped defence site can use its own controlled symbol library without asking anyone's permission.
