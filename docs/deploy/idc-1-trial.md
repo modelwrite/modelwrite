@@ -103,9 +103,11 @@ returns to the seeded baseline.
 - Canonical capture: `/opt/modelwrite/seed/manifest.json` + `documents/` (exact stored
   documents + replayable operations with expected hashes). Regenerate with
   `capture-seed.py`; replay with `seed-from-manifest.py`.
-- Reproducible from this repository: `/opt/modelwrite/seed/models/` (copies of
-  `e2e/models/*.json` + the coffee-machine corpus) + `seed.mjs` rebuild the same six
-  models with identical commit hashes. See `/opt/modelwrite/seed/README.md`.
+- Reproducible from this repository: `docs/deploy/seed-trial.mjs` reads
+  `e2e/models/*.json` + the coffee-machine corpus straight from a checkout and rebuilds
+  the same six models with identical commit hashes (verified). The same logic also runs
+  on the host as `/opt/modelwrite/seed/seed.mjs` (with `models/` copies) - see
+  `/opt/modelwrite/seed/README.md`.
 
 ## Operate
 
