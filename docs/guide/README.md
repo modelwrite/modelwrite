@@ -16,7 +16,7 @@ Two readers, both first class.
   through MCP.
 
 Start with [concepts](concepts.md) for the mental model, then [tasks](tasks.md) for the
-click paths. Agents start at [agents](agents.md).
+click paths. Agents start at [mcp-agents](mcp-agents.md).
 
 ## What modelwrite does not do
 
@@ -59,7 +59,7 @@ models by reference rather than by copying them.
 
 - [concepts.md](concepts.md): the mental model, short.
 - [tasks.md](tasks.md): do this, then that.
-- [agents.md](agents.md): the MCP contract for an agent and the person wiring one up.
+- [mcp-agents.md](mcp-agents.md): the MCP contract for an agent and the person wiring one up.
 - [faq.md](faq.md): the honest answers.
 - [limits.md](limits.md): what it does not do, in one place.
 - [troubleshooting.md](troubleshooting.md): what a failure means, and what to do.

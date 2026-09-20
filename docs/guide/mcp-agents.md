@@ -1,3 +1,9 @@
+# For agents, and for the people who wire them up
+
+> **Do not rename this file to `agents.md`.** On a case-insensitive filesystem
+> (Windows, macOS) that collides with the `AGENTS.md` convention and agent
+> harnesses pick it up as INSTRUCTIONS TO THE AGENT rather than as a page of
+> this guide. It is documentation, not a rule pack.
 # Agents
 
 For an AI agent driving modelwrite through MCP, and for the person wiring one up. Everything
