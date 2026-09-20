@@ -84,16 +84,17 @@ test.describe('composition section', () => {
     await expect(page.locator('main h1')).toHaveText('Composition');
 
     await expect(page.locator('.composition-summary')).toHaveText(
-      '3 subsystems, all resolving at their pinned revisions'
+      '4 subsystems, all resolving at their pinned revisions'
     );
 
     const cards = page.locator('li.subsystem-card');
-    await expect(cards).toHaveCount(3);
+    await expect(cards).toHaveCount(4);
 
     const expected = [
       { role: 'payment', project: 'purchasing-terminal' },
       { role: 'beverage', project: 'coffee-machine' },
       { role: 'food', project: 'sandwich-toaster' },
+      { role: 'floor-care', project: 'floor-robot' },
     ];
     for (let index = 0; index < expected.length; index += 1) {
       const card = cards.nth(index);
@@ -114,16 +115,17 @@ test.describe('composition section', () => {
     await page.goto('/ui/projects/cafe-stand/composition');
 
     const steps = page.locator('.flow-step');
-    await expect(steps).toHaveCount(5);
+    await expect(steps).toHaveCount(6);
 
-    // Ordered left-to-right in the DOM: Take Order -> Take Payment -> Provision Beverage and
-    // Provision Food (a parallel branch) -> Complete Order.
+    // Ordered left-to-right in the DOM: Take Order -> Take Payment -> Provision Beverage,
+    // Provision Food and Clear the Floor (a parallel branch) -> Complete Order.
     const names = await steps.locator('.step-name').allTextContents();
     expect(names).toEqual([
       'Take Order',
       'Take Payment',
       'Provision Beverage',
       'Provision Food',
+      'Clear the Floor',
       'Complete Order',
     ]);
 
@@ -134,10 +136,11 @@ test.describe('composition section', () => {
       'purchasing-terminal',
       'coffee-machine',
       'sandwich-toaster',
+      'floor-robot',
       'cafe-stand',
     ]);
 
-    // The two provisioning steps are one parallel layer, not two sequential ones.
+    // The three provisioning steps are one parallel layer, not three sequential ones.
     await expect(page.locator('.flow-parallel-label')).toHaveText('parallel');
 
     // Each step shows the requirement it satisfies where a Satisfy edge exists.

@@ -51,7 +51,7 @@ async function ensureProject(request, name) {
 // Seed the platform so cafe-stand has a process flow to draw, with its references rewritten to
 // the actual subsystem hashes (the same scenario the composition spec uses).
 async function seedPlatform(request) {
-  for (const name of ['purchasing-terminal', 'coffee-machine', 'sandwich-toaster', 'cafe-stand']) {
+  for (const name of ['purchasing-terminal', 'coffee-machine', 'sandwich-toaster', 'floor-robot', 'cafe-stand']) {
     await ensureProject(request, name);
   }
   const hashes = {
@@ -62,6 +62,7 @@ async function seedPlatform(request) {
       JSON.parse(fs.readFileSync(path.join(repoRoot, 'sample', 'corpus', 'coffee-machine', 'okf', 'expected', 'coffee_machine_model.json'), 'utf8'))
     ),
     'sandwich-toaster': await commit(request, 'sandwich-toaster', readModel('sandwich-toaster.json')),
+    'floor-robot': await commit(request, 'floor-robot', readModel('floor-robot.json')),
   };
   const cafeStand = readModel('cafe-stand.json');
   for (const reference of cafeStand.references) {
