@@ -170,6 +170,28 @@ pub struct Provenance {
     pub exporter_version: String,
 }
 
+/// A typed, content-addressed cross-model edge: a platform element (an activity or a
+/// requirement) declares that it is implemented by, or satisfied by, a named element inside
+/// the pinned subsystem revision its reference binds to. The edge carries no revision of its
+/// own: it lives inside a SubsystemReference and inherits that reference's (project,
+/// revision, role) - the content address, never "latest". When the reference's revision
+/// changes, every edge re-resolves against the new revision or fails by name.
+///
+/// This is the S2 primitive that SubsystemReference::bounds alone cannot express: bounds
+/// names WHICH elements the platform binds to, but nothing says WHICH platform element a
+/// bound element implements or satisfies. The edge closes that gap as one typed edge used by
+/// the compositional gate, the composition page and the variant impact panel.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrossModelEdge {
+    /// The platform element the edge leaves from: an activity id or a requirement id.
+    pub from: String,
+    /// The relationship: "implementedBy" (an activity implemented by the subsystem element)
+    /// or "satisfiedBy" (a requirement satisfied by the subsystem element).
+    pub relation: String,
+    /// The element id inside the pinned revision that implements or satisfies 'from'.
+    pub to: String,
+}
+
 /// A typed subsystem reference: a platform model declares each integrated subsystem as a
 /// (project, pinned commit hash, role) triple. This is the R1 primitive - a reference, never
 /// a copy - and R2's pinned revision: the commit hash is part of the reference's identity,
@@ -186,12 +208,18 @@ pub struct SubsystemReference {
     pub role: String,
     /// The specific elements within the pinned revision this platform binds to - the
     /// interfaces or blocks the platform connects to - each named by element id within
-    /// that revision. These are the cross-model traceability edges: a platform
-    /// requirement is satisfied by a bound element inside the subsystem, and the
-    /// reference is the typed edge that closes the coverage. Empty means the reference
-    /// binds to the subsystem as a whole without naming any element.
+    /// that revision. Empty means the reference binds to the subsystem as a whole without
+    /// naming any element. The typed link from a specific platform element to a specific
+    /// bound element is carried by [SubsystemReference::cross_model_edges], not by this list.
     #[serde(default)]
     pub bounds: Vec<String>,
+    /// The typed cross-model traceability edges this reference carries: each connects a
+    /// specific platform element (an activity or requirement) to a specific element id
+    /// inside the pinned revision. This is what bounds alone cannot say - WHICH platform
+    /// element is implemented or satisfied by WHICH bound element. Empty means the
+    /// reference binds to the subsystem without declaring any specific traceability.
+    #[serde(rename = "crossModelEdges", default)]
+    pub cross_model_edges: Vec<CrossModelEdge>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

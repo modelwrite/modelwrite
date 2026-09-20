@@ -284,8 +284,9 @@ fn process_section(root: &OkfRoot, allocated: &HashMap<String, String>) -> Marku
                 code { "include" } " / " code { "triggers" } " edges."
             }
             p class="fidelity-note" {
-                "The link from a platform activity to a specific element inside a subsystem is carried by the activity's "
-                code { "allocatedTo" } " attribute, which names a role — it is not yet a first-class cross-model edge."
+                "The link from a platform activity to a specific element inside a subsystem is the typed "
+                code { "crossModelEdges" } " declared on the subsystem reference (implementedBy / satisfiedBy), resolved at its pinned revision; the activity's "
+                code { "allocatedTo" } " attribute still names the role for this flow view."
             }
             @if layers.is_empty() {
                 p { "This model has no activity steps to lay out." }

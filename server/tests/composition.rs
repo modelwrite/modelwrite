@@ -157,7 +157,7 @@ async fn a_gated_platform_model_passes_and_carries_the_measured_vs_asserted_boun
     // asserted, in the same breath.
     let boundary = &evidence["composition"]["boundary"];
     let measured = boundary["measured"].as_array().unwrap();
-    assert_eq!(measured.len(), 3, "three measured checks: {:?}", measured);
+    assert_eq!(measured.len(), 4, "four measured checks: {:?}", measured);
     let asserted = boundary["asserted"].as_array().unwrap();
     assert_eq!(asserted.len(), 1, "one asserted claim: {:?}", asserted);
     assert!(!asserted[0].as_str().unwrap().contains("measured"));
@@ -229,6 +229,7 @@ async fn a_stale_reference_fails_named_in_the_composition_check() {
         revision: stale,
         role: "radar".into(),
         bounds: Vec::new(),
+        cross_model_edges: Vec::new(),
     });
 
     let report = server::composition::check(store.as_ref(), &platform).unwrap();
@@ -295,4 +296,160 @@ async fn a_bound_element_that_does_not_exist_fails_named() {
         "the failure must name the missing bound element: {:?}",
         failures
     );
+}
+
+/// A minimal model whose satisfying block has a caller-chosen id, so a subsystem revision
+/// can be re-pinned to a revision where the bound element no longer exists under the old id.
+fn minimal_block(name: &str, block_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "project": name,
+        "exportedAt": "2026-09-19T00:00:00Z",
+        "summary": {},
+        "stateMachine": { "name": "sm", "regions": [] },
+        "requirements": [
+            { "id": "r1", "name": "Req", "kind": "requirement", "stereotypes": ["Requirement"], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "shall satisfy" }
+        ],
+        "graph": {
+            "nodes": [
+                { "id": block_id, "kind": "block", "name": "Block" },
+                { "id": "r1", "kind": "requirement", "name": "Req" }
+            ],
+            "edges": [
+                { "source": block_id, "target": "r1", "kind": "dependency", "label": "Satisfy" }
+            ]
+        }
+    })
+}
+
+/// A platform model carrying one cross-model edge: its requirement r1 is satisfiedBy the
+/// subsystem element named `to`. The platform's own graph still satisfies r1 locally (so the
+/// single-model gate passes); the cross-model edge is the S2 traceability under test.
+fn platform_with_cross_model_edge(radar_hash: &str, to: &str) -> serde_json::Value {
+    let mut platform = minimal("ship");
+    platform["references"] = serde_json::json!([
+        {
+            "project": "radar",
+            "revision": radar_hash,
+            "role": "radar",
+            "bounds": [],
+            "crossModelEdges": [
+                { "from": "r1", "relation": "satisfiedBy", "to": to }
+            ]
+        }
+    ]);
+    platform
+}
+
+#[tokio::test]
+async fn a_cross_model_edge_resolves_at_the_pinned_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    create_project(&router, "radar").await;
+    let radar_hash = commit(&router, "radar", minimal("radar")).await;
+    gate(&router, "radar", &radar_hash, &radar_hash).await;
+
+    create_project(&router, "ship").await;
+    let ship_hash = commit(
+        &router,
+        "ship",
+        platform_with_cross_model_edge(&radar_hash, "b1"),
+    )
+    .await;
+
+    let evidence = gate(&router, "ship", &ship_hash, &ship_hash).await;
+    assert_eq!(evidence["passed"], true, "evidence: {}", evidence);
+
+    let edges = &evidence["composition"]["crossModelEdges"];
+    assert_eq!(edges["resolved"], serde_json::json!(1), "edges: {}", edges);
+    assert_eq!(
+        edges["unresolved"],
+        serde_json::json!(0),
+        "edges: {}",
+        edges
+    );
+    let edge = &edges["edges"][0];
+    assert_eq!(edge["resolves"], true);
+    assert_eq!(edge["from"], "r1");
+    assert_eq!(edge["relation"], "satisfiedBy");
+    assert_eq!(edge["to"], "b1");
+    assert_eq!(edge["project"], "radar");
+    assert_eq!(edge["revision"], radar_hash.as_str());
+}
+
+#[tokio::test]
+async fn a_cross_model_edge_naming_a_missing_element_fails_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    create_project(&router, "radar").await;
+    let radar_hash = commit(&router, "radar", minimal("radar")).await;
+    gate(&router, "radar", &radar_hash, &radar_hash).await;
+
+    create_project(&router, "ship").await;
+    let ship_hash = commit(
+        &router,
+        "ship",
+        platform_with_cross_model_edge(&radar_hash, "no-such-block"),
+    )
+    .await;
+
+    let evidence = gate(&router, "ship", &ship_hash, &ship_hash).await;
+    assert_eq!(evidence["passed"], false);
+    let failures = evidence["failures"].as_array().unwrap();
+    assert!(
+        failures.iter().any(|f| {
+            let s = f.as_str().unwrap();
+            s.contains("no-such-block")
+                && s.contains("cross-model edge")
+                && s.contains("does not resolve")
+        }),
+        "the failure must name the missing element and the edge: {:?}",
+        failures
+    );
+
+    let edges = &evidence["composition"]["crossModelEdges"];
+    assert_eq!(edges["resolved"], serde_json::json!(0));
+    assert_eq!(edges["unresolved"], serde_json::json!(1));
+    let edge = &edges["edges"][0];
+    assert_eq!(edge["resolves"], false);
+    assert!(edge["reason"].as_str().unwrap().contains("no-such-block"));
+}
+
+#[tokio::test]
+async fn a_reference_revision_change_re_resolves_the_cross_model_edge() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    create_project(&router, "radar").await;
+    let radar_v1 = commit(&router, "radar", minimal_block("radar", "b1")).await;
+    gate(&router, "radar", &radar_v1, &radar_v1).await;
+    // A new revision where the bound element b1 no longer exists (it is now b2).
+    let radar_v2 = commit(&router, "radar", minimal_block("radar", "b2")).await;
+    gate(&router, "radar", &radar_v2, &radar_v2).await;
+
+    create_project(&router, "ship").await;
+    let ship_v1 = commit(
+        &router,
+        "ship",
+        platform_with_cross_model_edge(&radar_v1, "b1"),
+    )
+    .await;
+    let ev1 = gate(&router, "ship", &ship_v1, &ship_v1).await;
+    assert_eq!(
+        ev1["composition"]["crossModelEdges"]["edges"][0]["resolves"],
+        true
+    );
+
+    // Re-pin to the new revision WITHOUT changing the edge: it must now fail by name,
+    // because the edge is content-addressed through the reference's pinned revision.
+    let ship_v2 = commit(
+        &router,
+        "ship",
+        platform_with_cross_model_edge(&radar_v2, "b1"),
+    )
+    .await;
+    let ev2 = gate(&router, "ship", &ship_v2, &ship_v2).await;
+    assert_eq!(ev2["passed"], false, "evidence: {}", ev2);
+    let edge = &ev2["composition"]["crossModelEdges"]["edges"][0];
+    assert_eq!(edge["resolves"], false);
+    assert!(edge["reason"].as_str().unwrap().contains("b1"));
+    assert_eq!(edge["revision"], radar_v2.as_str());
 }

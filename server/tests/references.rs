@@ -106,7 +106,7 @@ async fn a_platform_model_reference_resolves_and_is_listed() {
     let body = json_body(listed).await;
     assert_eq!(
         body["references"],
-        serde_json::json!([{ "project": "radar", "revision": radar_hash, "role": "radar", "bounds": [] }]),
+        serde_json::json!([{ "project": "radar", "revision": radar_hash, "role": "radar", "bounds": [], "crossModelEdges": [] }]),
     );
 
     // And the reference resolves: the named project exists and the revision is a commit of it.

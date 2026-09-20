@@ -8,7 +8,7 @@
 //! conflicting merge as a resolvable page showing base, ours and theirs for every conflict
 //! rather than as an error page: a 409 is information, not a failure.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -21,6 +21,7 @@ use okf::types::{OkfRoot, Requirement, SubsystemReference};
 
 use crate::api::{load_model, map_store_error, validate_name, verify_actor, ApiState};
 use crate::auth::{identity as resolve_identity, Identity, Permission};
+use crate::composition::CrossModelEdgeResolution;
 use crate::error::ApiError;
 use crate::merge_api::{merge_core, MergeCore, MergeOutcome};
 use crate::store::{Commit, Store};
@@ -135,7 +136,13 @@ fn render_compare_page(
     let isolated = isolated_nodes(&outcome.evidence);
     let from_label = side_label(from, &from_hash);
     let to_label = side_label(to, &to_hash);
-    let impact = impact_panel(&from_label, &to_label, &reference, &candidate);
+    let impact = impact_panel(
+        state.store.as_ref(),
+        &from_label,
+        &to_label,
+        &reference,
+        &candidate,
+    )?;
 
     let body = html! {
         h1 { "Compare" }
@@ -442,30 +449,33 @@ fn side_label(endpoint: &str, resolved: &str) -> String {
 }
 
 /// The variant impact panel for a PLATFORM comparison: the two sides' references (role-keyed,
-/// changed choices marked) and each platform requirement's coverage state on each side — the
+/// changed choices marked), each platform requirement's coverage state on each side — the
 /// ENGINE's [graph::requirement_coverage] over each version's own graph, never a
-/// reimplementation — plus a plain summary and the honest measured-vs-asserted boundary.
-/// Returns `None` when neither side declares a subsystem reference, so there is no variant
-/// impact to show.
+/// reimplementation — and the cross-model edges each side declares, resolved against the store
+/// so the panel names WHAT each version is actually implemented or satisfied by. A plain
+/// summary and the honest measured-vs-asserted boundary close it. Returns `None` when neither
+/// side declares a subsystem reference, so there is no variant impact to show.
 fn impact_panel(
+    store: &dyn Store,
     from_label: &str,
     to_label: &str,
     reference: &OkfRoot,
     candidate: &OkfRoot,
-) -> Option<Markup> {
+) -> Result<Option<Markup>, ApiError> {
     if reference.references.is_empty() && candidate.references.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let rows = reference_rows(reference, candidate);
     let requirements = requirement_rows(reference, candidate);
     let summary = summary_line(&requirements, from_label, to_label);
+    let edges = edge_rows(store, reference, candidate)?;
 
-    Some(html! {
+    Ok(Some(html! {
         section id="impact" class="model-section" {
             h2 { "Variant impact" }
             p class="meta" {
-                "Which platform requirements each side satisfies, and where the two versions' subsystem choices differ."
+                "Which platform requirements each side satisfies, where the two versions' subsystem choices differ, and what each side's cross-model edges resolve to."
             }
 
             h3 { "References" }
@@ -508,11 +518,172 @@ fn impact_panel(
                 }
             }
 
+            @if !edges.is_empty() {
+                (cross_model_edges_section(&edges, from_label, to_label))
+            }
+
             p class="impact-summary" { (summary.as_str()) }
 
             (impact_boundary())
         }
-    })
+    }))
+}
+
+/// One resolved target of a cross-model edge on one side, for display.
+#[derive(Clone, PartialEq)]
+struct EdgeTarget {
+    element_name: String,
+    project: String,
+    revision: String,
+}
+
+/// One cross-model edge as a row in the panel: the platform element, the relation, and the
+/// resolved target on each side (when that side declares the edge).
+struct ImpactEdgeRow {
+    from_label: String,
+    relation_label: String,
+    from_target: Option<EdgeTarget>,
+    to_target: Option<EdgeTarget>,
+    changed: bool,
+}
+
+/// The two sides' cross-model edges, keyed by (platform element, relation), resolved against
+/// the store through each reference's pinned revision. This is the SAME resolution the
+/// compositional gate performs, never a per-consumer reimplementation.
+fn edge_rows(
+    store: &dyn Store,
+    reference: &OkfRoot,
+    candidate: &OkfRoot,
+) -> Result<Vec<ImpactEdgeRow>, ApiError> {
+    let from_edges =
+        crate::composition::resolve_cross_model_edges(store, reference).map_err(map_store_error)?;
+    let to_edges =
+        crate::composition::resolve_cross_model_edges(store, candidate).map_err(map_store_error)?;
+
+    fn target_of(edge: &CrossModelEdgeResolution) -> Option<EdgeTarget> {
+        if !edge.resolves {
+            return None;
+        }
+        Some(EdgeTarget {
+            element_name: edge.element_name.clone().unwrap_or_else(|| edge.to.clone()),
+            project: edge.project.clone(),
+            revision: short_hash(&edge.revision).to_string(),
+        })
+    }
+
+    let mut from_map: HashMap<(String, String), &CrossModelEdgeResolution> = HashMap::new();
+    for edge in &from_edges {
+        from_map.insert((edge.from.clone(), edge.relation.clone()), edge);
+    }
+    let mut to_map: HashMap<(String, String), &CrossModelEdgeResolution> = HashMap::new();
+    for edge in &to_edges {
+        to_map.insert((edge.from.clone(), edge.relation.clone()), edge);
+    }
+
+    let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+    keys.extend(from_map.keys().cloned());
+    keys.extend(to_map.keys().cloned());
+
+    let mut rows = Vec::new();
+    for (from, relation) in keys {
+        let from_target = from_map
+            .get(&(from.clone(), relation.clone()))
+            .copied()
+            .and_then(target_of);
+        let to_target = to_map
+            .get(&(from.clone(), relation.clone()))
+            .copied()
+            .and_then(target_of);
+        rows.push(ImpactEdgeRow {
+            from_label: element_label(reference, candidate, &from),
+            relation_label: relation_label(&relation),
+            changed: from_target != to_target,
+            from_target,
+            to_target,
+        });
+    }
+    Ok(rows)
+}
+
+/// The human label for a platform element id: "CS-4 · Floor Kept Clear" for a requirement,
+/// the graph node's name for an activity, or the bare id as a fallback.
+fn element_label(reference: &OkfRoot, candidate: &OkfRoot, id: &str) -> String {
+    for root in [reference, candidate] {
+        for requirement in &root.requirements {
+            if requirement.id == id {
+                if requirement.req_id.trim().is_empty() {
+                    return requirement.name.clone();
+                }
+                return format!("{} · {}", requirement.req_id, requirement.name);
+            }
+        }
+    }
+    for root in [reference, candidate] {
+        if let Some(graph) = &root.graph {
+            for node in &graph.nodes {
+                if node.id == id {
+                    return node.name.clone();
+                }
+            }
+        }
+    }
+    id.to_string()
+}
+
+/// The human wording for a relation: "implemented by" or "satisfied by".
+fn relation_label(relation: &str) -> String {
+    match relation {
+        "implementedBy" => "implemented by".to_string(),
+        "satisfiedBy" => "satisfied by".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// The cross-model edges table: each edge resolved at its pinned revision, so the panel can
+/// name the element inside the referenced subsystem rather than the role string.
+fn cross_model_edges_section(edges: &[ImpactEdgeRow], from_label: &str, to_label: &str) -> Markup {
+    html! {
+        h3 { "Cross-model edges" }
+        p class="meta" {
+            "Each declared cross-model edge, resolved at its pinned revision. A resolved edge names the element inside the referenced subsystem that implements or satisfies the platform element; an edge that does not resolve is reported by name, never dropped."
+        }
+        table class="impact-edges" {
+            thead {
+                tr {
+                    th { "platform element" }
+                    th { "relation" }
+                    th { "from · " (from_label) }
+                    th { "to · " (to_label) }
+                }
+            }
+            tbody {
+                @for edge in edges {
+                    tr class=(if edge.changed { "impact-edge changed" } else { "impact-edge" })
+                       data-cross-changed=(if edge.changed { "true" } else { "false" }) {
+                        td class="impact-edge-from" { (edge.from_label.as_str()) }
+                        td class="impact-edge-relation" { (edge.relation_label.as_str()) }
+                        td class="impact-side" { (edge_target_cell(&edge.from_target)) }
+                        td class="impact-side" {
+                            (edge_target_cell(&edge.to_target))
+                            @if edge.changed { span class="impact-changed" { "changed" } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One side's resolved target: "Cup Collector (floor-robot@9dcc…)", or an absent marker.
+fn edge_target_cell(target: &Option<EdgeTarget>) -> Markup {
+    match target {
+        Some(t) => html! {
+            span class="impact-edge-target" {
+                (t.element_name.as_str()) " (" (t.project.as_str()) "@" code { (t.revision.as_str()) } ")"
+            }
+        },
+        None => html! { span class="none" { "—" } },
+    }
 }
 
 /// `project@short-revision`, or an absent marker when one side has no reference for a role.
@@ -723,16 +894,16 @@ fn state_chip_text(state: ImpactState, from_label: &str, to_label: &str) -> Stri
     }
 }
 
-/// The honest boundary: what this panel computed (the platform model's own coverage on each
-/// side, and the reference differences) and what it did not (coverage proved inside a
-/// referenced subsystem), in the same measured-vs-asserted discipline as the composition
-/// page.
+/// The honest boundary, narrowed to what S2 now proves: the platform model's own coverage on
+/// each side, the reference differences, and each cross-model edge resolved at its pinned
+/// revision. What remains asserted is the GLOBAL graph property across the union of platform
+/// and subsystems - proving it would require importing every subsystem, the copy R1 forbids.
 fn impact_boundary() -> Markup {
     html! {
         div class="impact-boundary" {
             h3 { "What this panel proves — and what it does not" }
             p class="meta" {
-                "Coverage is computed over each version's own graph; what a referenced subsystem satisfies internally is not."
+                "Coverage is computed over each version's own graph; a cross-model edge is resolved at its pinned revision, so a requirement satisfied by a named element inside a referenced subsystem is proved, not merely asserted."
             }
             div class="boundary-grid" {
                 div class="boundary-panel boundary-measured" {
@@ -745,23 +916,19 @@ fn impact_boundary() -> Markup {
                         li {
                             "the subsystem reference differences, shown role → project@revision and marked where they change"
                         }
+                        li {
+                            "each cross-model edge, resolved at its pinned revision — the named element inside the referenced subsystem is shown with its name and project@revision"
+                        }
                     }
                 }
                 div class="boundary-panel boundary-asserted" {
                     h3 { "Not computed — asserted, not proved" }
                     ul {
                         li {
-                            "coverage proved inside a referenced subsystem: a platform requirement satisfied by an activity allocated to a role is not proved to be satisfied by the bound element inside that subsystem"
-                        }
-                        li {
-                            "where a difference in a requirement's state is explained by a changed reference, it is explained by the change but not proved by it"
+                            "the global graph property: that the union of the platform and all its subsystems, transitively, at their pinned revisions, forms one connected, coverage-complete, orphan-free graph — proving it would require importing every subsystem, which is the copy R1 forbids"
                         }
                     }
                 }
-            }
-            p class="fidelity-note" {
-                "An activity's link to a specific element inside a subsystem is carried by its "
-                code { "allocatedTo" } " attribute (a role name), not a first-class cross-model edge, so coverage inside the referenced subsystems is not computed here."
             }
         }
     }

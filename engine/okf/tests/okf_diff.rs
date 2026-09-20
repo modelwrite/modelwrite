@@ -92,6 +92,7 @@ fn with_reference(revision: &str) -> OkfRoot {
         revision: revision.into(),
         role: "radar".into(),
         bounds: Vec::new(),
+        cross_model_edges: Vec::new(),
     });
     root
 }
