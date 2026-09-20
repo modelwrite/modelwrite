@@ -1,10 +1,14 @@
 [package]
 name = "mw-server"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version = "1.88"
 license.workspace = true
-publish = false
+description = "The modelwrite model service: repository, version control, gate, merge, and lock enforcement over OKF with a workbench UI and an HTTP API."
+repository = "https://github.com/modelwrite/modelwrite"
+readme = "README.md"
+keywords = ["modelwrite", "server", "okf", "mbse", "repository"]
+categories = ["web-programming::http-server"]
 
 [lib]
 name = "server"
@@ -28,20 +32,21 @@ postgres = [
 ]
 
 [dependencies]
-mw-okf = { path = "../engine/okf" }
-mw-graph = { path = "../engine/graph" }
-mw-gate = { path = "../engine/gate" }
-mw-binding = { path = "../engine/binding" }
-mw-binding-xmi = { path = "../engine/binding-xmi" }
-mw-agent = { path = "../engine/agent" }
-mw-analytics = { path = "../engine/analytics" }
-axum.workspace = true
+mw-okf = { path = "../engine/okf", version = "0.2.0" }
+mw-graph = { path = "../engine/graph", version = "0.2.0" }
+mw-gate = { path = "../engine/gate", version = "0.2.0" }
+mw-binding = { path = "../engine/binding", version = "0.2.0" }
+mw-binding-xmi = { path = "../engine/binding-xmi", version = "0.2.0" }
+mw-agent = { path = "../engine/agent", version = "0.2.0" }
+mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
+axum = { workspace = true, features = ["multipart"] }
 tokio.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
+tempfile.workspace = true
 base64 = "0.22"
 anyhow.workspace = true
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
@@ -57,8 +62,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-native-certs = { version = "0.8", optional = true }
 
 [dev-dependencies]
-mw-mcp = { path = "../engine/mcp" }
-mw-test-support = { path = "../engine/test-support" }
+mw-mcp = { path = "../engine/mcp", version = "0.2.0" }
+mw-test-support = { path = "../engine/test-support", version = "0.2.0" }
 base64 = "0.22"
 tower.workspace = true
 http-body-util.workspace = true

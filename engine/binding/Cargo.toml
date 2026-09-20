@@ -1,6 +1,6 @@
 [package]
 name = "mw-binding"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,12 +13,12 @@ keywords = ["modelwrite","binding","okf","mbse"]
 name = "binding"
 
 [dependencies]
-mw-okf = { path = "../okf", version = "0.1.0" }
+mw-okf = { path = "../okf", version = "0.2.0" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
-mw-okf = { path = "../okf", version = "0.1.0" }
+mw-okf = { path = "../okf", version = "0.2.0" }
 serde_json.workspace = true

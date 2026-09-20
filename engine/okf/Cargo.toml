@@ -1,6 +1,6 @@
 [package]
 name = "mw-okf"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -20,4 +20,4 @@ sha2.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
-mw-test-support = { path = "../test-support", version = "0.1.0" }
+mw-test-support = { path = "../test-support", version = "0.2.0" }
