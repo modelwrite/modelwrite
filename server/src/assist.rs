@@ -42,10 +42,12 @@ pub const LIVE_AGENT: &str = "mw-assist";
 const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 /// The Messages API endpoint. The key is sent as a header on this request only, never stored.
 const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
-/// The token ceiling on the live OpenAI-compatible reasoner's answer. Bounding the completion
-/// keeps a long reasoning pass from ballooning the response: the strict-JSON proposal is far
-/// smaller than this.
-const OPENAI_MAX_TOKENS: u64 = 2048;
+/// The token ceiling on the live OpenAI-compatible reasoner's answer. A proposal is one to
+/// three strict-JSON changes (a few hundred tokens), so bounding the completion here keeps
+/// generation time proportional to the WORK, not to a generous ceiling the model could fill.
+/// Reasoning is disabled in the request (see [call_openai]) so this cap is spent on the JSON
+/// answer itself, never on a thinking pass.
+const OPENAI_MAX_TOKENS: u64 = 512;
 
 /// One concrete model change a reasoner proposed: the action (always model-changing) plus the
 /// element or requirement it carries. This is the STRICT JSON shape the live model must
@@ -371,47 +373,46 @@ Return only the JSON object."#
 }
 
 /// The COMPACT model inventory a reasoner reads instead of the full document. Proposing a
-/// change needs the id/name inventory - so a new id can be checked against the ids that already
-/// exist - and the request; it does not need every element's documentation, attributes,
-/// provenance or the graph edge list, which would only bloat the prompt (and, on the fast tier,
-/// overflow the 24k-token context window). Nothing else is serialised here: no documentation
-/// bodies, no attributes, no edge endpoints, no provenance.
+/// change needs the NAME/KIND inventory - what elements and requirements already exist, so the
+/// model proposes a sensible, readable id for a new one - and the request; it does not need the
+/// full opaque ids (the bulk of the old prompt), documentation, attributes, provenance or the
+/// graph edge list. The opaque ids are deliberately omitted: a readable kebab-case id cannot
+/// collide with the corpus's internal scheme, and [validate_changes] still rejects a duplicate
+/// id within the proposal. Nothing else is serialised here: no ids, no documentation bodies, no
+/// attributes, no edge endpoints, no provenance.
 fn model_inventory(current: &OkfRoot) -> Value {
     let structure: Vec<Value> = current
         .structure
         .iter()
         .map(|e| {
             json!({
-                "id": e.id.clone(),
                 "name": e.name.clone(),
                 "kind": e.kind.clone(),
-                "stereotypes": e.stereotypes.clone(),
             })
         })
         .collect();
     let interfaces: Vec<Value> = current
         .interfaces
         .iter()
-        .map(|e| json!({ "id": e.id.clone(), "name": e.name.clone() }))
+        .map(|e| json!({ "name": e.name.clone(), "kind": e.kind.clone() }))
         .collect();
     let signals: Vec<Value> = current
         .signals
         .iter()
-        .map(|e| json!({ "id": e.id.clone(), "name": e.name.clone() }))
+        .map(|e| json!({ "name": e.name.clone(), "kind": e.kind.clone() }))
         .collect();
     let requirements: Vec<Value> = current
         .requirements
         .iter()
         .map(|r| {
             json!({
-                "id": r.id.clone(),
                 "name": r.name.clone(),
-                "reqId": r.req_id.clone(),
+                "kind": r.kind.clone(),
             })
         })
         .collect();
-    // The model must know edges EXIST, but proposing a change needs the id/name inventory, not
-    // every edge endpoint. Report the counts from the graph itself (the truth of "edges
+    // The model must know edges EXIST, but proposing a change needs the name/kind inventory,
+    // not every edge endpoint. Report the counts from the graph itself (the truth of "edges
     // exist"); fall back to the summary when a graph is absent.
     let (graph_nodes, graph_edges) = match current.graph.as_ref() {
         Some(graph) => (graph.nodes.len(), graph.edges.len()),
@@ -436,7 +437,7 @@ fn user_prompt(project: &str, request: &str, current: &OkfRoot) -> Result<String
         ApiError::internal("the current model could not be prepared")
     })?;
     Ok(format!(
-        "Project: {}\nThe current model inventory (ids and names only; no documentation, attributes or edge lists) is:\n{}\n\nThe request is: {}\n\nPropose the changes that honour this request.",
+        "Project: {}\nThe current model inventory (names and kinds only; no ids, documentation, attributes or edge lists) is:\n{}\n\nThe request is: {}\n\nPropose the changes that honour this request.",
         project, inventory, request
     ))
 }
@@ -501,6 +502,10 @@ fn call_openai(
             ],
             "temperature": 0,
             "max_tokens": OPENAI_MAX_TOKENS,
+            // The fleet's qwen3 models reason before answering by default; that thinking pass
+            // would consume the max_tokens budget and leave the strict-JSON answer truncated
+            // (or empty). Turn it off so the cap bounds the JSON answer, not the thinking.
+            "chat_template_kwargs": {"enable_thinking": false},
             "response_format": {"type": "json_object"}
         }))
         .map_err(|e| {
@@ -975,10 +980,10 @@ mod tests {
     }
 
     #[test]
-    fn the_inventory_lists_every_element_and_requirement_id() {
+    fn the_inventory_lists_names_and_kinds_and_omits_ids() {
         let mut current = empty_model();
         current.structure.push(Element {
-            id: "block-a".to_string(),
+            id: "_2026x_1_12a70364_1789357107731_106889_3635".to_string(),
             name: "Block A".to_string(),
             kind: "block".to_string(),
             stereotypes: vec!["Block".to_string()],
@@ -986,7 +991,7 @@ mod tests {
             documentation: String::new(),
         });
         current.interfaces.push(Element {
-            id: "iface-a".to_string(),
+            id: "_2026x_1_12a70364_1789357175665_504215_3638".to_string(),
             name: "Iface A".to_string(),
             kind: "interface".to_string(),
             stereotypes: Vec::new(),
@@ -994,7 +999,7 @@ mod tests {
             documentation: String::new(),
         });
         current.signals.push(Element {
-            id: "sig-a".to_string(),
+            id: "_2026x_1_12a70364_1789357305852_992852_3641".to_string(),
             name: "Sig A".to_string(),
             kind: "signal".to_string(),
             stereotypes: Vec::new(),
@@ -1002,7 +1007,7 @@ mod tests {
             documentation: String::new(),
         });
         current.requirements.push(Requirement {
-            id: "req-a".to_string(),
+            id: "_2026x_1_12a70364_1789522470201_737876_5617".to_string(),
             name: "Req A".to_string(),
             kind: "requirement".to_string(),
             stereotypes: Vec::new(),
@@ -1027,15 +1032,42 @@ mod tests {
         });
 
         let inventory = serde_json::to_string(&model_inventory(&current)).unwrap();
-        for id in ["block-a", "iface-a", "sig-a", "req-a"] {
+        for name in ["Block A", "Iface A", "Sig A", "Req A"] {
             assert!(
-                inventory.contains(id),
-                "the inventory must carry id {}, got: {}",
+                inventory.contains(name),
+                "the inventory must carry the name {}, got: {}",
+                name,
+                inventory
+            );
+        }
+        for kind in ["block", "interface", "signal", "requirement"] {
+            assert!(
+                inventory.contains(&format!("\"kind\":\"{}\"", kind)),
+                "the inventory must carry the kind {}, got: {}",
+                kind,
+                inventory
+            );
+        }
+        // The opaque corpus ids were the bulk of the old prompt; the model reasons about names
+        // and kinds, so the ids are NOT sent. The validator still enforces id uniqueness within
+        // the proposal.
+        for id in [
+            "_2026x_1_12a70364_1789357107731_106889_3635",
+            "_2026x_1_12a70364_1789357175665_504215_3638",
+            "_2026x_1_12a70364_1789357305852_992852_3641",
+            "_2026x_1_12a70364_1789522470201_737876_5617",
+            "block-a",
+            "iface-a",
+            "sig-a",
+            "req-a",
+        ] {
+            assert!(
+                !inventory.contains(id),
+                "the inventory must omit the id {}, got: {}",
                 id,
                 inventory
             );
         }
-        assert!(inventory.contains("REQ-A"), "the reqId must be carried");
         assert!(
             inventory.contains("\"graphNodes\":1"),
             "the graph node count must be carried"
@@ -1047,10 +1079,10 @@ mod tests {
     }
 
     #[test]
-    fn the_inventory_omits_documentation_attributes_edges_and_provenance() {
+    fn the_inventory_omits_documentation_attributes_edges_provenance_and_ids() {
         let mut current = empty_model();
         current.structure.push(Element {
-            id: "block-a".to_string(),
+            id: "_2026x_1_12a70364_1789357107731_106889_3635".to_string(),
             name: "Block A".to_string(),
             kind: "block".to_string(),
             stereotypes: Vec::new(),
@@ -1063,7 +1095,7 @@ mod tests {
             documentation: "SECRET-DOC-BLOCK".to_string(),
         });
         current.requirements.push(Requirement {
-            id: "req-a".to_string(),
+            id: "_2026x_1_12a70364_1789522470201_737876_5617".to_string(),
             name: "Req A".to_string(),
             kind: "requirement".to_string(),
             stereotypes: Vec::new(),
@@ -1105,6 +1137,12 @@ mod tests {
             "SECRET-TOOL",
             "SECRET-EXPORTER",
             "SECRET-VER",
+            // The opaque ids and the reqId are not sent: names and kinds only.
+            "_2026x_1_12a70364_1789357107731_106889_3635",
+            "_2026x_1_12a70364_1789522470201_737876_5617",
+            "REQ-A",
+            "block-a",
+            "req-a",
         ] {
             assert!(
                 !inventory.contains(omitted),
@@ -1113,20 +1151,21 @@ mod tests {
                 inventory
             );
         }
-        assert!(inventory.contains("block-a"), "ids must still be present");
-        assert!(inventory.contains("req-a"));
-        assert!(inventory.contains("REQ-A"));
+        assert!(inventory.contains("Block A"), "names must still be present");
+        assert!(inventory.contains("Req A"));
     }
 
     #[test]
-    fn the_coffee_machine_inventory_is_compact_and_complete() {
+    fn the_coffee_machine_inventory_is_names_and_kinds_and_well_under_two_thousand_tokens() {
         let full = test_support::load_okf_expected();
         let current: OkfRoot =
             serde_json::from_str(&full).expect("the corpus fixture must deserialise");
         let inventory = serde_json::to_string(&model_inventory(&current)).unwrap();
 
-        // Every element and requirement id must be present so the reasoner can see the ids it
-        // must not collide with - the uniqueness validation stays meaningful.
+        // Every element and requirement NAME must be present so the reasoner can reason about
+        // what already exists; the opaque corpus ids (the old prompt's bulk) are NOT sent. The
+        // validator still enforces id uniqueness within the proposal, and a readable kebab-case
+        // id cannot collide with the corpus's opaque internal scheme.
         for element in current
             .structure
             .iter()
@@ -1134,15 +1173,25 @@ mod tests {
             .chain(current.signals.iter())
         {
             assert!(
-                inventory.contains(&element.id),
-                "the inventory must carry element id {}",
+                inventory.contains(&element.name),
+                "the inventory must carry element name {}",
+                element.name
+            );
+            assert!(
+                !inventory.contains(&element.id),
+                "the inventory must omit the opaque element id {}",
                 element.id
             );
         }
         for requirement in &current.requirements {
             assert!(
-                inventory.contains(&requirement.id),
-                "the inventory must carry requirement id {}",
+                inventory.contains(&requirement.name),
+                "the inventory must carry requirement name {}",
+                requirement.name
+            );
+            assert!(
+                !inventory.contains(&requirement.id),
+                "the inventory must omit the opaque requirement id {}",
                 requirement.id
             );
         }
@@ -1170,20 +1219,43 @@ mod tests {
             );
         }
 
-        // Compact: the corpus inventory is ~9k chars (~5k fleet tokens) versus ~64k chars
-        // (~33.5k fleet tokens) for the full document - the overflow this fix removes. Bound it
-        // far below the full document and under an absolute cap so the 24k-token fast tier holds
-        // it with room for the answer.
+        // Compact: the names-and-kinds inventory is ~3.7k chars (~850 fleet tokens) versus the
+        // old id-laden inventory (~8.6k chars, ~4.9k fleet tokens) and the ~64k-char full
+        // document. Bound it well under the 2,000-token target and far below the full document.
         assert!(
-            inventory.len() < 12_000,
-            "the inventory must be compact, got {} chars",
+            inventory.len() < 4_500,
+            "the inventory must be well under 2,000 fleet tokens, got {} chars",
             inventory.len()
         );
         assert!(
-            inventory.len() < full.len() / 5,
+            inventory.len() < full.len() / 10,
             "the inventory must be much smaller than the full document ({} vs {} chars)",
             inventory.len(),
             full.len()
+        );
+    }
+
+    #[test]
+    fn a_multi_change_proposal_fits_inside_the_answer_cap() {
+        assert_eq!(
+            OPENAI_MAX_TOKENS, 512,
+            "the cap must be 512, not the old 2048"
+        );
+
+        // A one-to-three change proposal is the whole output. Serialise a realistic
+        // three-change proposal (two element adds, one requirement) the way the model answers
+        // and prove it is a small fraction of the cap: the local tokenizer is ~4 characters per
+        // token, so 512 tokens is roughly 2,000 characters.
+        let three = json!({ "changes": [
+            { "action": "EditElement", "element": { "id": "heater-block", "name": "Heater Block", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "a heater block with a water inlet port" }, "requirement": null, "rationale": "add a heater block", "confidence": "High" },
+            { "action": "EditElement", "element": { "id": "water-pump", "name": "Water Pump", "kind": "block", "stereotypes": [], "attributes": [], "documentation": "a water pump" }, "requirement": null, "rationale": "add a water pump", "confidence": "High" },
+            { "action": "DraftText", "requirement": { "id": "heat-requirement", "name": "Heat to 95C", "kind": "requirement", "stereotypes": [], "attributes": [], "documentation": "", "reqId": "REQ-HEAT", "reqText": "the heater heats water to 95C" }, "element": null, "rationale": "the request requires heating to 95C", "confidence": "High" }
+        ]});
+        let text = serde_json::to_string(&three).unwrap();
+        assert!(
+            text.len() < 1_600,
+            "a three-change proposal must fit far under the 512-token cap, got {} chars",
+            text.len()
         );
     }
 

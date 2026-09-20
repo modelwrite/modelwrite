@@ -170,8 +170,12 @@ fn the_openai_reasoner_posts_the_shape_and_validates_a_good_answer() {
     assert_eq!(captured.body["model"], "qwen3.8-27b-fp8");
     assert_eq!(captured.body["temperature"], 0);
     assert_eq!(
-        captured.body["max_tokens"], 2048,
-        "the answer must be bounded"
+        captured.body["max_tokens"], 512,
+        "the answer must be bounded by the work, not a 2,048-token ceiling"
+    );
+    assert_eq!(
+        captured.body["chat_template_kwargs"]["enable_thinking"], false,
+        "reasoning must be off so the cap bounds the JSON answer, not a thinking pass"
     );
     assert_eq!(
         captured.body["response_format"]["type"], "json_object",
