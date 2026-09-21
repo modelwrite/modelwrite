@@ -281,6 +281,75 @@ fn repository_tool_definitions() -> Vec<Value> {
                 "required": ["project", "reviewArtifact"]
             }
         }),
+        json!({
+            "name": "repo.analyticsSchema",
+            "description": "The analytics schema (mw-analytics-schema@1): its tables, their columns and the metric definitions, so an agent can plan before it queries. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "repo.metrics",
+            "description": "The metrics for a project at a commit or branch head, each WITH its basis (basis_element_count, basis_relationship_count, constructs_not_carried, basis_note, engine_version, evidence_hash). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "commit": { "type": "string" },
+                    "branch": { "type": "string" }
+                },
+                "required": ["project"]
+            }
+        }),
+        json!({
+            "name": "repo.trend",
+            "description": "One metric across the commits of a branch, in commit order, each value WITH its basis. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "metric": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" }
+                },
+                "required": ["project", "metric", "branch"]
+            }
+        }),
+        json!({
+            "name": "repo.table",
+            "description": "Bounded rows from one analytics table, with key filters and a cursor. Default 50 rows, maximum 500; every page returns the TOTAL row count. Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "table": { "type": "string" },
+                    "commit": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "limit": { "type": "integer" },
+                    "cursor": { "type": "string" },
+                    "filters": { "type": "object" }
+                },
+                "required": ["project", "table"]
+            }
+        }),
+        json!({
+            "name": "repo.losses",
+            "description": "The paged full import-loss list (repo.lossSummary aggregates; this pages the underlying entries). Repository mode (opt-in): requires MW_MCP_SERVICE_URL and MW_MCP_TOKEN; read permission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string" },
+                    "commit": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "limit": { "type": "integer" },
+                    "cursor": { "type": "string" }
+                },
+                "required": ["project"]
+            }
+        }),
     ]
 }
 
@@ -372,10 +441,27 @@ fn call_tool(msg: &Value, repo: &Repository) -> Value {
         }
         // Every repository tool routes through the single dispatch in repository::run_tool,
         // which issues only read (GET) routes and the one propose (POST /proposals) route.
-        "repo.projects" | "repo.branches" | "repo.commits" | "repo.read" | "repo.find"
-        | "repo.element" | "repo.coverage" | "repo.references" | "repo.importReport"
-        | "repo.lossSummary" | "repo.diff" | "repo.audit" | "repo.checks" | "repo.proposals"
-        | "repo.analytics" | "repo.propose" => match repo.run_tool(name, &args) {
+        "repo.projects"
+        | "repo.branches"
+        | "repo.commits"
+        | "repo.read"
+        | "repo.find"
+        | "repo.element"
+        | "repo.coverage"
+        | "repo.references"
+        | "repo.importReport"
+        | "repo.lossSummary"
+        | "repo.diff"
+        | "repo.audit"
+        | "repo.checks"
+        | "repo.proposals"
+        | "repo.analytics"
+        | "repo.propose"
+        | "repo.analyticsSchema"
+        | "repo.metrics"
+        | "repo.trend"
+        | "repo.table"
+        | "repo.losses" => match repo.run_tool(name, &args) {
             Ok(value) => tool_ok(pretty(&value)),
             Err(e) => tool_error(&e),
         },

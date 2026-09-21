@@ -294,6 +294,76 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
             let entries = store.audit(&project, limit).map_err(map)?;
             serde_json::to_value(&entries).map_err(|e| e.to_string())
         }
+        Command::AnalyticsSchema => {
+            crate::analytics::offline_schema()?;
+            Ok(Value::Null)
+        }
+        Command::AnalyticsTables {
+            project,
+            commit,
+            branch,
+        } => {
+            crate::analytics::offline_tables(
+                &store,
+                &project,
+                commit.as_deref(),
+                branch.as_deref(),
+            )?;
+            Ok(Value::Null)
+        }
+        Command::AnalyticsExport {
+            project,
+            commit,
+            branch,
+            all_commits,
+            format,
+            out,
+        } => {
+            crate::analytics::offline_export(
+                &store,
+                &project,
+                commit.as_deref(),
+                branch.as_deref(),
+                all_commits,
+                &format,
+                &out,
+            )?;
+            Ok(Value::Null)
+        }
+        Command::AnalyticsMetrics {
+            project,
+            commit,
+            branch,
+            format,
+        } => {
+            crate::analytics::offline_metrics(
+                &store,
+                &project,
+                commit.as_deref(),
+                branch.as_deref(),
+                &format,
+            )?;
+            Ok(Value::Null)
+        }
+        Command::AnalyticsTrend {
+            metric,
+            project,
+            branch,
+            from,
+            to,
+            format,
+        } => {
+            crate::analytics::offline_trend(
+                &store,
+                &project,
+                &metric,
+                &branch,
+                from.as_deref(),
+                to.as_deref(),
+                &format,
+            )?;
+            Ok(Value::Null)
+        }
     }
 }
 

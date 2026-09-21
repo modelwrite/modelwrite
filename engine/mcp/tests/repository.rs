@@ -364,6 +364,107 @@ fn the_new_read_only_tools_cover_composition_and_aggregation() {
 }
 
 #[test]
+fn the_analytics_tools_are_read_only_views_with_basis() {
+    let (repo, log) = repo_with(vec![
+        (
+            ("GET", "/analytics/schema"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","tables":[{"name":"metrics","columns":["project","commit","metric_id","value","basis_element_count"]}],"metricDefinitions":[{"id":"coverage.covered","name":"Covered requirements","description":"d","depends_on":["requirements"],"status":"active"}]}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/metrics?commit=abc123"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","metrics":[{"project":"coffee","commit":"abc123","metric_id":"coverage.covered","value":20,"value_state":"present","unit":"count","trust":"measured","basis_element_count":25,"basis_relationship_count":30,"constructs_not_carried":0,"basis_note":"requirement coverage","engine_version":"0.2.0","evidence_hash":"okfh"}]}"#,
+            ),
+        ),
+        (
+            (
+                "GET",
+                "/analytics/coffee/trend?metric=coverage.covered&branch=main",
+            ),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","branch":"main","metric":"coverage.covered","metrics":[{"project":"coffee","commit":"abc123","metric_id":"coverage.covered","value":20,"value_state":"present","unit":"count","trust":"measured","basis_element_count":25,"basis_relationship_count":30,"constructs_not_carried":0,"basis_note":"requirement coverage","engine_version":"0.2.0","evidence_hash":"okfh"}]}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/tables/elements?limit=50"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","table":"elements","rows":[{"element_id":"pump"}],"total":58}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/tables/import_losses?limit=50"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","table":"import_losses","rows":[],"total":0}"#,
+            ),
+        ),
+    ]);
+
+    // The schema tool plans before a query.
+    let schema = tool_json(&call(&repo, "repo.analyticsSchema", json!({})));
+    assert_eq!(schema["schemaVersion"], "mw-analytics-schema@1");
+    assert_eq!(schema["tables"][0]["name"], "metrics");
+    assert_eq!(schema["metricDefinitions"][0]["id"], "coverage.covered");
+
+    // metrics states schema version, project, commit, and each metric's basis.
+    let metrics = tool_json(&call(
+        &repo,
+        "repo.metrics",
+        json!({ "project": "coffee", "commit": "abc123" }),
+    ));
+    assert_eq!(metrics["schemaVersion"], "mw-analytics-schema@1");
+    assert_eq!(metrics["project"], "coffee");
+    assert_eq!(metrics["commit"], "abc123");
+    let m = &metrics["metrics"][0];
+    assert_eq!(m["basis_element_count"], 25);
+    assert_eq!(m["basis_relationship_count"], 30);
+    assert_eq!(m["constructs_not_carried"], 0);
+    assert_eq!(m["evidence_hash"], "okfh");
+
+    // trend states the metric across commits, each with basis.
+    let trend = tool_json(&call(
+        &repo,
+        "repo.trend",
+        json!({ "project": "coffee", "metric": "coverage.covered", "branch": "main" }),
+    ));
+    assert_eq!(trend["schemaVersion"], "mw-analytics-schema@1");
+    assert_eq!(trend["metric"], "coverage.covered");
+    assert_eq!(trend["metrics"][0]["basis_element_count"], 25);
+
+    // table pages with a total row count on every page.
+    let table = tool_json(&call(
+        &repo,
+        "repo.table",
+        json!({ "project": "coffee", "table": "elements" }),
+    ));
+    assert_eq!(table["table"], "elements");
+    assert_eq!(table["total"], 58);
+    assert_eq!(table["schemaVersion"], "mw-analytics-schema@1");
+
+    // losses pages the underlying import-loss entries.
+    let losses = tool_json(&call(&repo, "repo.losses", json!({ "project": "coffee" })));
+    assert_eq!(losses["table"], "import_losses");
+    assert_eq!(losses["total"], 0);
+
+    // Every request the analytics tools made is a GET: no write route is ever touched.
+    let log = log.lock().unwrap();
+    assert!(!log.is_empty());
+    for rec in log.iter() {
+        assert_eq!(
+            rec.method, "GET",
+            "an analytics tool issued a non-GET request: {} {}",
+            rec.method, rec.url
+        );
+    }
+}
+
+#[test]
 fn repository_mode_is_read_and_propose_only_on_the_wire() {
     let okf = test_support::load_okf_expected();
     let (repo, log) = repo_with(vec![
@@ -409,6 +510,44 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
         (
             ("POST", "/projects/coffee/proposals"),
             (201, r#"{"id":"p1"}"#),
+        ),
+        (
+            ("GET", "/analytics/schema"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","tables":[],"metricDefinitions":[]}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/metrics?commit=abc123"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","metrics":[]}"#,
+            ),
+        ),
+        (
+            (
+                "GET",
+                "/analytics/coffee/trend?metric=coverage.covered&branch=main",
+            ),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","branch":"main","metric":"coverage.covered","metrics":[]}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/tables/elements?limit=50"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","table":"elements","rows":[],"total":0}"#,
+            ),
+        ),
+        (
+            ("GET", "/analytics/coffee/tables/import_losses?limit=50"),
+            (
+                200,
+                r#"{"schemaVersion":"mw-analytics-schema@1","project":"coffee","commit":"abc123","table":"import_losses","rows":[],"total":0}"#,
+            ),
         ),
     ]);
 
@@ -479,6 +618,23 @@ fn repository_mode_is_read_and_propose_only_on_the_wire() {
         "repo.propose",
         json!({ "project": "coffee", "reviewArtifact": { "task": { "goal": "g" } } }),
     );
+    call(&repo, "repo.analyticsSchema", json!({}));
+    call(
+        &repo,
+        "repo.metrics",
+        json!({ "project": "coffee", "commit": "abc123" }),
+    );
+    call(
+        &repo,
+        "repo.trend",
+        json!({ "project": "coffee", "metric": "coverage.covered", "branch": "main" }),
+    );
+    call(
+        &repo,
+        "repo.table",
+        json!({ "project": "coffee", "table": "elements" }),
+    );
+    call(&repo, "repo.losses", json!({ "project": "coffee" }));
 
     let log = log.lock().unwrap();
     let mut posts = 0usize;
@@ -574,6 +730,11 @@ fn repository_tools_without_configuration_answer_not_configured_and_make_no_netw
         "repo.proposals",
         "repo.analytics",
         "repo.propose",
+        "repo.analyticsSchema",
+        "repo.metrics",
+        "repo.trend",
+        "repo.table",
+        "repo.losses",
     ];
     for name in repo_tools {
         let resp = call(&repo, name, json!({}));

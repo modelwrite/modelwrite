@@ -187,13 +187,15 @@ returns the import's loss report and fidelity measurement whether or not it was 
 
 ## The MCP tools
 
-The MCP server (`mw-mcp`) exposes twenty-one tools. The first four are document-level: they
+The MCP server (`mw-mcp`) exposes twenty-six tools. The first four are document-level: they
 operate on documents supplied in the request and never touch a repository or the network. The
-remaining seventeen are the repository tools, opt-in and read-and-propose only. Their names and
+remaining twenty-two are the repository tools, opt-in and read-and-propose only. Their names and
 input schemas are in `docs/agents/mcp-tools.json` and are additive. `gate.run` and `repo.diff`
 also accept an optional `strictCoverage` boolean, `repo.references` an optional `resolve`
 boolean, `repo.lossSummary` optional `offset`/`limit` paging, and `repo.analytics` optional
-`branch`/`commit` selectors - each named in the manifest rather than below.
+`branch`/`commit` selectors - each named in the manifest rather than below. The analytics tools
+(`repo.metrics`, `repo.trend`, `repo.table`, `repo.losses`) carry the schema version, the project
+and the commit in every result, and every metric row carries its basis as data.
 
 ### Document tools (always available, no repository, no network)
 
@@ -232,6 +234,11 @@ never a retry.
 | `repo.proposals` | `project` | The project's proposals with their decisions and who made them |
 | `repo.analytics` | `project`, `requirements` | The portfolio answer: which models meet which requirements |
 | `repo.propose` | `project`, `reviewArtifact` | The recorded proposal (the agent's output for a human to decide) |
+| `repo.analyticsSchema` |  | The analytics schema (mw-analytics-schema@1): tables, columns and metric definitions |
+| `repo.metrics` | `project` | The metrics for a commit or branch head, each with its basis |
+| `repo.trend` | `project`, `metric`, `branch` | One metric across the commits of a branch, in order, each with its basis |
+| `repo.table` | `project`, `table` | Bounded rows from one table, with filters and a cursor, plus the total row count |
+| `repo.losses` | `project` | The paged full import-loss list (the underlying entries behind `repo.lossSummary`) |
 
 `repo.diff` reads the two models from the repository and runs the gate LOCALLY with the same
 engine the service uses. It returns the verdict and evidence but never records a run, because

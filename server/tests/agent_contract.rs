@@ -253,6 +253,7 @@ async fn every_contract_endpoint_enforces_its_permission() {
         subject: "nobody".to_string(),
         roles: Vec::new(),
         projects: vec!["*".to_string()],
+        trial_id: None,
     }));
 
     for endpoint in endpoints {
@@ -356,6 +357,11 @@ fn the_mcp_toolset_is_read_and_propose_only() {
             "repo.proposals",
             "repo.analytics",
             "repo.propose",
+            "repo.analyticsSchema",
+            "repo.metrics",
+            "repo.trend",
+            "repo.table",
+            "repo.losses",
         ],
         "the repository toolset is fixed: read tools plus the one propose tool, never a write tool"
     );

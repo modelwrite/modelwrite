@@ -18,6 +18,14 @@ path = "src/main.rs"
 mw-server = { path = "../server", version = "0.2.0", default-features = false }
 mw-okf = { path = "../engine/okf", version = "0.2.0" }
 mw-gate = { path = "../engine/gate", version = "0.2.0" }
+mw-graph = { path = "../engine/graph", version = "0.2.0" }
+mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
+mw-binding = { path = "../engine/binding", version = "0.2.0" }
+# Apache Arrow + Parquet for the analytics export's lake format. Pinned to the 55 line
+# (MSRV 1.81) rather than the current 60 (MSRV 1.88) so the CLI's 1.88 floor keeps a margin.
+# default-features off keeps the tree small: no CSV/JSON/IPC readers, no compression C code.
+arrow = { version = "55", default-features = false }
+parquet = { version = "55", default-features = false, features = ["arrow"] }
 serde_json.workspace = true
 
 [dev-dependencies]

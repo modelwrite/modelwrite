@@ -882,6 +882,46 @@ fn run_tool(name: &str, args: &Value, client: &RepoClient) -> Result<Value, Stri
                 Some(&body),
             )
         }
+        // The analytics read tools: read-only views over the Package 3 analytics REST surface.
+        // They are thin pass-through clients - the service is the authority for the schema
+        // version, the rows and, for any metric, its basis.
+        "repo.analyticsSchema" => client.json("GET", "/analytics/schema", None),
+        "repo.metrics" => {
+            let project = require_str(args, "project")?;
+            let mut path = format!("/analytics/{}/metrics", pct(project));
+            path.push_str(&commit_branch_query(args));
+            client.json("GET", &path, None)
+        }
+        "repo.trend" => {
+            let project = require_str(args, "project")?;
+            let metric = require_str(args, "metric")?;
+            let branch = require_str(args, "branch")?;
+            let mut params = vec![
+                format!("metric={}", pct(metric)),
+                format!("branch={}", pct(branch)),
+            ];
+            if let Some(f) = arg_str(args, "from") {
+                params.push(format!("from={}", pct(f)));
+            }
+            if let Some(t) = arg_str(args, "to") {
+                params.push(format!("to={}", pct(t)));
+            }
+            let path = format!("/analytics/{}/trend?{}", pct(project), params.join("&"));
+            client.json("GET", &path, None)
+        }
+        "repo.table" => {
+            let project = require_str(args, "project")?;
+            let table = require_str(args, "table")?;
+            let mut path = format!("/analytics/{}/tables/{}", pct(project), pct(table));
+            path.push_str(&table_query(args));
+            client.json("GET", &path, None)
+        }
+        "repo.losses" => {
+            let project = require_str(args, "project")?;
+            let mut path = format!("/analytics/{}/tables/import_losses", pct(project));
+            path.push_str(&table_query(args));
+            client.json("GET", &path, None)
+        }
         _ => Err(format!("unknown repository tool: {}", name)),
     }
 }
@@ -976,6 +1016,55 @@ fn find_element<'a>(
 /// is the shared key a loss entry carries to its binding table row.
 fn construct_of(subject: &str) -> &str {
     subject.split_whitespace().next().unwrap_or(subject)
+}
+
+/// The commit/branch query suffix for the analytics metrics route.
+fn commit_branch_query(args: &Value) -> String {
+    let mut params = Vec::new();
+    if let Some(c) = arg_str(args, "commit") {
+        params.push(format!("commit={}", pct(c)));
+    }
+    if let Some(b) = arg_str(args, "branch") {
+        params.push(format!("branch={}", pct(b)));
+    }
+    if params.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", params.join("&"))
+    }
+}
+
+/// The paging/filter query suffix for the analytics table route. limit defaults to 50 and is
+/// capped at 500; key filters are equality filters on the table's key columns.
+fn table_query(args: &Value) -> String {
+    let mut params = Vec::new();
+    if let Some(c) = arg_str(args, "commit") {
+        params.push(format!("commit={}", pct(c)));
+    }
+    if let Some(b) = arg_str(args, "branch") {
+        params.push(format!("branch={}", pct(b)));
+    }
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_i64)
+        .unwrap_or(50)
+        .clamp(1, 500);
+    params.push(format!("limit={}", limit));
+    if let Some(cursor) = arg_str(args, "cursor") {
+        params.push(format!("cursor={}", pct(cursor)));
+    }
+    if let Some(filters) = args.get("filters").and_then(Value::as_object) {
+        for (key, value) in filters {
+            if let Some(s) = value.as_str() {
+                params.push(format!("{}={}", pct(key), pct(s)));
+            }
+        }
+    }
+    if params.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", params.join("&"))
+    }
 }
 
 fn arg_str<'a>(args: &'a Value, name: &str) -> Option<&'a str> {

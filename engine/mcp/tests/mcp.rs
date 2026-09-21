@@ -47,6 +47,11 @@ fn tools_list_exposes_the_agent_toolset() {
             "repo.proposals",
             "repo.analytics",
             "repo.propose",
+            "repo.analyticsSchema",
+            "repo.metrics",
+            "repo.trend",
+            "repo.table",
+            "repo.losses",
         ]
     );
 }

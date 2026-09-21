@@ -409,6 +409,126 @@
           "reviewArtifact"
         ]
       }
+    },
+    {
+      "name": "repo.analyticsSchema",
+      "summary": "The analytics schema (mw-analytics-schema@1): its tables, their columns and the metric definitions, so an agent can plan before it queries. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "repo.metrics",
+      "summary": "The metrics for a project at a commit or branch head, each WITH its basis (basis_element_count, basis_relationship_count, constructs_not_carried, basis_note, engine_version, evidence_hash). Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "repo.trend",
+      "summary": "One metric across the commits of a branch, in commit order, each value WITH its basis. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "metric",
+          "branch"
+        ]
+      }
+    },
+    {
+      "name": "repo.table",
+      "summary": "Bounded rows from one analytics table, with key filters and a cursor. Default 50 rows, maximum 500; every page returns the TOTAL row count. Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "project",
+          "table"
+        ]
+      }
+    },
+    {
+      "name": "repo.losses",
+      "summary": "The paged full import-loss list (repo.lossSummary aggregates; this pages the underlying entries). Repository mode (opt-in): read permission.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
     }
   ],
   "resources": [

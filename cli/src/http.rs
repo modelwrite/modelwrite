@@ -37,6 +37,22 @@ pub fn run(url: &str, token: Option<&str>, command: Command) -> Result<Value, St
     client.execute(command)
 }
 
+/// Build a planned Package 3 analytics URL with the optional commit/branch query selectors.
+fn analytics_path(base: &str, commit: Option<String>, branch: Option<String>) -> String {
+    let mut params = Vec::new();
+    if let Some(c) = commit {
+        params.push(format!("commit={}", c));
+    }
+    if let Some(b) = branch {
+        params.push(format!("branch={}", b));
+    }
+    if params.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}?{}", base, params.join("&"))
+    }
+}
+
 impl Client {
     fn connect(url: &str, token: Option<&str>) -> Result<Client, String> {
         if url.starts_with("https://") {
@@ -212,6 +228,55 @@ impl Client {
             }
             Command::Audit { project, limit } => {
                 let path = format!("/projects/{}/audit?limit={}", project, limit);
+                let resp = self.request("GET", &path, None)?;
+                self.handle(resp, 200)
+            }
+            // The analytics group over --server reaches the Package 3 REST surface. Those
+            // endpoints are not built yet, so these calls are stubs against the planned URL
+            // shape: they build the right request and will answer once the REST package lands.
+            Command::AnalyticsSchema => {
+                let resp = self.request("GET", "/analytics/schema", None)?;
+                self.handle(resp, 200)
+            }
+            Command::AnalyticsTables {
+                project,
+                commit,
+                branch,
+            } => {
+                let path = analytics_path(&format!("/analytics/{}/tables", project), commit, branch);
+                let resp = self.request("GET", &path, None)?;
+                self.handle(resp, 200)
+            }
+            Command::AnalyticsExport { .. } => Err(
+                "analytics export over --server is not implemented: the Package 3 REST endpoints do not exist yet; use --db <path> for a full export"
+                    .to_string(),
+            ),
+            Command::AnalyticsMetrics {
+                project,
+                commit,
+                branch,
+                ..
+            } => {
+                let path = analytics_path(&format!("/analytics/{}/metrics", project), commit, branch);
+                let resp = self.request("GET", &path, None)?;
+                self.handle(resp, 200)
+            }
+            Command::AnalyticsTrend {
+                metric,
+                project,
+                branch,
+                from,
+                to,
+                ..
+            } => {
+                let mut params = vec![format!("metric={}", metric), format!("branch={}", branch)];
+                if let Some(f) = &from {
+                    params.push(format!("from={}", f));
+                }
+                if let Some(t) = &to {
+                    params.push(format!("to={}", t));
+                }
+                let path = format!("/analytics/{}/trend?{}", project, params.join("&"));
                 let resp = self.request("GET", &path, None)?;
                 self.handle(resp, 200)
             }

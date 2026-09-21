@@ -7,6 +7,7 @@
 //! environment variable NAMED by a flag - never from the command line, because a token on
 //! a command line is a token in the shell history and in the process list.
 
+mod analytics;
 mod http;
 mod offline;
 
@@ -99,6 +100,34 @@ enum Command {
         project: String,
         limit: i64,
     },
+    AnalyticsSchema,
+    AnalyticsTables {
+        project: String,
+        commit: Option<String>,
+        branch: Option<String>,
+    },
+    AnalyticsExport {
+        project: String,
+        commit: Option<String>,
+        branch: Option<String>,
+        all_commits: bool,
+        format: String,
+        out: PathBuf,
+    },
+    AnalyticsMetrics {
+        project: String,
+        commit: Option<String>,
+        branch: Option<String>,
+        format: String,
+    },
+    AnalyticsTrend {
+        metric: String,
+        project: String,
+        branch: String,
+        from: Option<String>,
+        to: Option<String>,
+        format: String,
+    },
 }
 
 const USAGE: &str = r#"usage: mw [--server <url> [--token <ENV_VAR>] | --db <path>] <command>
@@ -123,6 +152,11 @@ commands:
   lock release <project> --holder <name> --ids <a,b>
   lock list <project>
   audit <project> [--limit <n>]
+  analytics schema
+  analytics tables <project> [--commit <hash> | --branch <branch>]
+  analytics export <project> [--commit <hash> | --branch <branch> | --all-commits] --format <csv|ndjson|parquet> --out <dir>
+  analytics metrics <project> [--commit <hash> | --branch <branch>] [--format json|csv]
+  analytics trend <project> --metric <id> --branch <branch> [--from <hash> --to <hash>] [--format json|csv]
 "#;
 
 fn main() {
@@ -231,6 +265,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
         "gate" => parse_gate(rest),
         "lock" => parse_lock(rest),
         "audit" => parse_audit(rest),
+        "analytics" => parse_analytics(rest),
         other if other.starts_with("--") => {
             Err(format!("unknown flag {} before any command", other))
         }
@@ -594,6 +629,159 @@ fn parse_audit(args: &[String]) -> Result<Command, String> {
     Ok(Command::Audit { project, limit })
 }
 
+fn parse_analytics(args: &[String]) -> Result<Command, String> {
+    match args.first().map(|s| s.as_str()) {
+        Some("schema") => {
+            if args.len() > 1 {
+                return Err("analytics schema takes no arguments".to_string());
+            }
+            Ok(Command::AnalyticsSchema)
+        }
+        Some("tables") => parse_analytics_tables(&args[1..]),
+        Some("export") => parse_analytics_export(&args[1..]),
+        Some("metrics") => parse_analytics_metrics(&args[1..]),
+        Some("trend") => parse_analytics_trend(&args[1..]),
+        Some(other) if other.starts_with("--") => {
+            Err(format!("unknown flag {} for analytics", other))
+        }
+        Some(other) => Err(format!("unknown analytics subcommand {}", other)),
+        None => Err(
+            "analytics requires a subcommand: schema, tables, export, metrics or trend".to_string(),
+        ),
+    }
+}
+
+fn parse_analytics_tables(args: &[String]) -> Result<Command, String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut commit: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--commit" => commit = Some(value(args, &mut i, "--commit")?),
+            "--branch" => branch = Some(value(args, &mut i, "--branch")?),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} for analytics tables", other))
+            }
+            other => positionals.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let project = one_project(&positionals, "analytics tables")?;
+    Ok(Command::AnalyticsTables {
+        project,
+        commit,
+        branch,
+    })
+}
+
+fn parse_analytics_export(args: &[String]) -> Result<Command, String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut commit: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut all_commits = false;
+    let mut format: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--commit" => commit = Some(value(args, &mut i, "--commit")?),
+            "--branch" => branch = Some(value(args, &mut i, "--branch")?),
+            "--all-commits" => all_commits = true,
+            "--format" => format = Some(value(args, &mut i, "--format")?),
+            "--out" => out = Some(value(args, &mut i, "--out")?),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} for analytics export", other))
+            }
+            other => positionals.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let project = one_project(&positionals, "analytics export")?;
+    let format = format.ok_or("analytics export requires --format")?;
+    let out = out.ok_or("analytics export requires --out")?;
+    let selectors = [commit.is_some(), branch.is_some(), all_commits]
+        .iter()
+        .filter(|b| **b)
+        .count();
+    if selectors > 1 {
+        return Err(
+            "analytics export takes at most one of --commit, --branch or --all-commits".to_string(),
+        );
+    }
+    Ok(Command::AnalyticsExport {
+        project,
+        commit,
+        branch,
+        all_commits,
+        format,
+        out: PathBuf::from(out),
+    })
+}
+
+fn parse_analytics_metrics(args: &[String]) -> Result<Command, String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut commit: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut format: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--commit" => commit = Some(value(args, &mut i, "--commit")?),
+            "--branch" => branch = Some(value(args, &mut i, "--branch")?),
+            "--format" => format = Some(value(args, &mut i, "--format")?),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} for analytics metrics", other))
+            }
+            other => positionals.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let project = one_project(&positionals, "analytics metrics")?;
+    Ok(Command::AnalyticsMetrics {
+        project,
+        commit,
+        branch,
+        format: format.unwrap_or_else(|| "json".to_string()),
+    })
+}
+
+fn parse_analytics_trend(args: &[String]) -> Result<Command, String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut metric: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut from: Option<String> = None;
+    let mut to: Option<String> = None;
+    let mut format: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--metric" => metric = Some(value(args, &mut i, "--metric")?),
+            "--branch" => branch = Some(value(args, &mut i, "--branch")?),
+            "--from" => from = Some(value(args, &mut i, "--from")?),
+            "--to" => to = Some(value(args, &mut i, "--to")?),
+            "--format" => format = Some(value(args, &mut i, "--format")?),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} for analytics trend", other))
+            }
+            other => positionals.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let project = one_project(&positionals, "analytics trend")?;
+    let metric = metric.ok_or("analytics trend requires --metric")?;
+    let branch = branch.ok_or("analytics trend requires --branch")?;
+    validate_name("branch name", &branch)?;
+    Ok(Command::AnalyticsTrend {
+        metric,
+        project,
+        branch,
+        from,
+        to,
+        format: format.unwrap_or_else(|| "json".to_string()),
+    })
+}
+
 /// The value that follows a flag, consumed from the argument list.
 fn value(args: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
     *i += 1;
@@ -929,6 +1117,120 @@ mod tests {
             Command::Audit {
                 project: "coffee".to_string(),
                 limit: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn analytics_schema_parses() {
+        let c = cmd(&db_args(&["analytics", "schema"])).unwrap();
+        assert_eq!(c, Command::AnalyticsSchema);
+    }
+
+    #[test]
+    fn analytics_tables_parses() {
+        let c = cmd(&db_args(&[
+            "analytics",
+            "tables",
+            "coffee",
+            "--commit",
+            "abc",
+        ]))
+        .unwrap();
+        assert_eq!(
+            c,
+            Command::AnalyticsTables {
+                project: "coffee".to_string(),
+                commit: Some("abc".to_string()),
+                branch: None,
+            }
+        );
+    }
+
+    #[test]
+    fn analytics_export_parses() {
+        let c = cmd(&db_args(&[
+            "analytics",
+            "export",
+            "coffee",
+            "--commit",
+            "abc",
+            "--format",
+            "csv",
+            "--out",
+            "out",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            c,
+            Command::AnalyticsExport {
+                project,
+                commit: Some(commit),
+                branch: None,
+                all_commits: false,
+                format,
+                out,
+            } if project == "coffee"
+                && commit == "abc"
+                && format == "csv"
+                && out == std::path::Path::new("out")
+        ));
+    }
+
+    #[test]
+    fn analytics_export_requires_a_single_selector() {
+        let err = cmd(&db_args(&[
+            "analytics",
+            "export",
+            "coffee",
+            "--commit",
+            "a",
+            "--branch",
+            "main",
+            "--format",
+            "csv",
+            "--out",
+            "o",
+        ]))
+        .unwrap_err();
+        assert!(err.contains("at most one"), "error was: {}", err);
+    }
+
+    #[test]
+    fn analytics_metrics_parses() {
+        let c = cmd(&db_args(&["analytics", "metrics", "coffee"])).unwrap();
+        assert_eq!(
+            c,
+            Command::AnalyticsMetrics {
+                project: "coffee".to_string(),
+                commit: None,
+                branch: None,
+                format: "json".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn analytics_trend_parses() {
+        let c = cmd(&db_args(&[
+            "analytics",
+            "trend",
+            "coffee",
+            "--metric",
+            "coverage.covered",
+            "--branch",
+            "main",
+        ]))
+        .unwrap();
+        assert_eq!(
+            c,
+            Command::AnalyticsTrend {
+                metric: "coverage.covered".to_string(),
+                project: "coffee".to_string(),
+                branch: "main".to_string(),
+                from: None,
+                to: None,
+                format: "json".to_string(),
             }
         );
     }
