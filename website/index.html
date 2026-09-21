@@ -18,7 +18,7 @@
 
 <header class="masthead">
   <div class="shell masthead__inner">
-    <a class="wordmark" href="#top"><svg class="wordmark__mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</a>
+    <a class="wordmark" href="#top"><svg class="wordmark__mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#e7edf2" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#5cc6de" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</a>
     <nav aria-label="Sections">
       <ul>
         <li><a href="#see">See it</a></li>
@@ -38,44 +38,55 @@
 <main id="main">
 
 <div class="hero shell" id="top">
-  <p class="hero__kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
-  <svg class="hero__mark" viewBox="0 0 32 32" width="56" height="56" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  <h1>Modelwrite</h1>
-  <p class="hero__tagline">The open source analytics platform for getting value from a SysML investment.</p>
+  <div class="hero__grid">
+    <div class="hero__copy">
+      <p class="hero__kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
+      <svg class="hero__mark" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#101418" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#0b6e99" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h1>Modelwrite</h1>
+      <p class="hero__tagline">The open source analytics platform for getting value from a SysML investment.</p>
 
-  <div class="hero__lede">
-    <p>Your organisation has spent years building SysML models. Modelwrite is the open source
-    analytics platform that shows what they are worth. It reads the models you already have,
-    measures coverage, traceability and integration, tracks them baseline by baseline, and answers
-    questions with the evidence attached. You keep your modelling tool.</p>
+      <div class="hero__lede">
+        <p>Your organisation has spent years building SysML models. Modelwrite is the open source
+        analytics platform that shows what they are worth. It reads the models you already have,
+        measures coverage, traceability and integration, tracks them baseline by baseline, and answers
+        questions with the evidence attached. You keep your modelling tool.</p>
+      </div>
+
+      <p class="hero__actions">
+        <a class="button" href="https://trial.modelwrite.org">Open the showcase</a>
+        <a class="button button--quiet" href="examples.html">Browse the examples</a>
+        <a class="button button--quiet" href="#try">Try your own model</a>
+        <a class="button button--quiet" href="#install">Install it</a>
+      </p>
+
+      <p class="statusline">
+        <b>Proof is the differentiator, not the headline.</b> Every number on this page names the
+        command that produced it, and the limits sit at the same weight as the claims.
+      </p>
+
+      <ul class="chips">
+        <li>OKF 1.0</li>
+        <li>AGPL-3.0-or-later engine</li>
+        <li>Apache-2.0 analytics schema</li>
+        <li>XMI + SysML v2 textual</li>
+        <li>self-hosted, air-gapped</li>
+        <li>SQLite or PostgreSQL</li>
+      </ul>
+    </div>
+
+    <figure class="hero__shot">
+      <img src="shots/wb-health-crop.png" alt="The model-health view of the cafe-stand project in the Modelwrite workbench, captured from the running product. It reports 2 issues found: one orphaned node, menu-block, and one isolated group of three nodes, cafe-stand, provisioning-bay and service-window, cut off from the main body." width="896" height="854">
+      <figcaption><b>What the product is.</b> Model health on the cafe-stand model, captured from the
+      running workbench: two issues named on one screen &mdash; an orphaned node and an isolated group of
+      three &mdash; rather than rolled into a score.</figcaption>
+    </figure>
   </div>
-
-  <p class="hero__actions">
-    <a class="button" href="https://trial.modelwrite.org">Open the showcase</a>
-    <a class="button button--quiet" href="examples.html">Browse the examples</a>
-    <a class="button button--quiet" href="#try">Try your own model</a>
-    <a class="button button--quiet" href="#install">Install it</a>
-  </p>
-
-  <p class="statusline">
-    <b>Proof is the differentiator, not the headline.</b> Every number on this page names the
-    command that produced it, and the limits sit at the same weight as the claims.
-  </p>
-
-  <ul class="chips">
-    <li>OKF 1.0</li>
-    <li>AGPL-3.0-or-later engine</li>
-    <li>Apache-2.0 analytics schema</li>
-    <li>XMI + SysML v2 textual</li>
-    <li>self-hosted, air-gapped</li>
-    <li>SQLite or PostgreSQL</li>
-  </ul>
 </div>
 
 <section class="section shell" id="try" aria-labelledby="try-h">
   <div class="section__head">
     <p class="eyebrow">Try it</p>
-    <h2 id="try-h">Two doors, both live. One is one credential short of emailing your code.</h2>
+    <h2 id="try-h">Two doors, both live. One cannot email its login code yet.</h2>
     <p>The showcase is live and open. The registered trial is live too &mdash; session-authenticated
     and cross-trial isolated &mdash; but its login code cannot be emailed until an SMTP credential is
     configured.</p>
@@ -170,6 +181,13 @@
     <li><span class="gaps__mark" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li>
   </ul>
 
+  <figure class="measure__shot">
+    <img src="shots/model-health.png" alt="The model-health view for the cafe-stand platform model. It reports one isolated group of three nodes — Cafe Stand, Provisioning Bay and Service Window — cut off from the main body, with orphaned nodes, dangling links and uncovered requirements reported on the same screen." width="1440" height="900" loading="lazy">
+    <figcaption><b>Model health answers &ldquo;what is broken in my model&rdquo; on one screen.</b>
+    For cafe-stand it names the isolated group &mdash; Cafe Stand, Provisioning Bay and Service Window &mdash;
+    rather than summarising the model into a score.</figcaption>
+  </figure>
+
   <div class="prose" style="margin-top:1.5rem">
     <p>Each gap is named, not summarised into a score, and trended baseline by baseline so drift is
     visible when a baseline changes. These are the metrics in the analytics schema, listed in the
@@ -181,20 +199,14 @@
   <div class="section__head">
     <p class="eyebrow">Screenshots</p>
     <h2 id="screenshots-h">What the product looks like.</h2>
-    <p>Three captures from the live showcase (<a href="https://trial.modelwrite.org">trial.modelwrite.org</a>),
-    each chosen for the claim it proves. They are screen captures of the running workbench, not mock-ups.</p>
+    <p>Two more captures from the live showcase (<a href="https://trial.modelwrite.org">trial.modelwrite.org</a>),
+    each chosen for the claim it proves. They are screen captures of the running workbench, not mock-ups.
+    The model-health capture is in the <a href="#measure">measure section</a>, where it does the arguing.</p>
   </div>
 
   <div class="figures">
     <figure>
-      <img src="shots/model-health.png" alt="The model-health view for the cafe-stand platform model. It reports one isolated group of three nodes — Cafe Stand, Provisioning Bay and Service Window — cut off from the main body, with orphaned nodes, dangling links and uncovered requirements reported on the same screen." width="1440" height="960" loading="lazy">
-      <figcaption><b>Model health answers &ldquo;what is broken in my model&rdquo; on one screen.</b>
-      For cafe-stand it names the isolated group &mdash; Cafe Stand, Provisioning Bay and Service Window &mdash;
-      rather than summarising the model into a score.</figcaption>
-    </figure>
-
-    <figure>
-      <img src="shots/variant-impact.png" alt="The variant impact panel comparing cafe-stand main against with-microduck. The floor-care reference is marked changed, and requirement CS-4 Floor Kept Clear is satisfied by Cup Collector (floor-robot) on main and Gripper Arm (microduck) on with-microduck, each resolution named." width="832" height="943" loading="lazy">
+      <img src="shots/variant-impact.png" alt="The variant impact panel comparing cafe-stand main against with-microduck. The floor-care reference is marked changed, and requirement CS-4 Floor Kept Clear is satisfied by Cup Collector (floor-robot) on main and Gripper Arm (microduck) on with-microduck, each resolution named." width="832" height="937" loading="lazy">
       <figcaption><b>The variant impact panel proves the two-robot trade study.</b>
       CS-4 &middot; Floor Kept Clear is satisfied by <b>Cup Collector</b> (floor-robot) on main and
       <b>Gripper Arm</b> (microduck) on with-microduck &mdash; the changed floor-care choice is marked, and each
@@ -202,7 +214,7 @@
     </figure>
 
     <figure>
-      <img src="shots/process-diagram.png" alt="The cafe-stand business process rendered as an orthogonally-routed diagram: axis-aligned edges, shared trunks for fan-out, a separate dashed lane for dependency edges, and jump arcs where edges cross." width="1216" height="705" loading="lazy">
+      <img src="shots/process-diagram.png" alt="The cafe-stand business process rendered as an orthogonally-routed diagram: axis-aligned edges, shared trunks for fan-out, a separate dashed lane for dependency edges, and jump arcs where edges cross." width="1216" height="645" loading="lazy">
       <figcaption><b>The process diagram is the engineering-grade output.</b>
       Edges are routed orthogonally &mdash; shared trunks for fan-out, a separate lane for Satisfy edges, and a
       jump arc at every crossing so a crossing is never mistaken for a junction.</figcaption>

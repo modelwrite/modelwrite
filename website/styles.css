@@ -2,45 +2,79 @@
 
 /* Modelwrite project site.
    Hand-written CSS. No @import, no web fonts, no external requests, no build
-   step. The page is designed to read as an engineering drawing: ink on paper,
-   monospace carries the identifiers, and a single green signal marks the
-   verified states. Colour stays reserved for the two gate outcomes. */
+   step.
+
+   Direction A - "precision instrument". The page is a measurement tool, not a
+   document: a cold even canvas, every value on a plain white sheet, hairline
+   rules instead of shadows, square corners, and one petrol accent spent only on
+   state and action. A dark graphite instrument face runs across the top of this
+   surface and of the workbench.
+
+   ONE PALETTE, TWO SURFACES. The hex literals below are the same literals that
+   the workbench stylesheet uses (server/src/ui/layout.rs, the STYLE constant),
+   mapped onto this file's token names:
+
+     --bg          -> --surface-1 (canvas)      --panel       -> panel/well
+     --line        -> --border                  --line-strong -> --border-strong
+     --ink         -> --text                    --ink-soft    -> --text-2
+     --muted       -> --text-2                  --faint       -> --text-3
+     --accent      -> --accent                  --accent-deep -> --accent-strong
+     --pass/--fail/--warn keep their meanings on both surfaces.
+
+   Palette marker: instrument-2026-09 */
 
 /* ---------------------------------------------------------------- tokens */
 
 :root {
-  --ink: #1b1813;
-  --ink-soft: #3f392e;
-  --muted: #6b6353;
-  --line: #d8d1c0;
-  --line-strong: #b4ab96;
-  --bg: #faf7ef;
-  --panel: #f1ede0;
-  --panel-2: #e7e2d0;
+  /* canvas and sheets */
+  --bg: #f5f7f9;
+  --surface: #ffffff;
+  --panel: #edf1f4;
+  --panel-2: #e4e9ee;
 
-  --accent: #175e3e;
-  --accent-deep: #103f2a;
+  /* rules */
+  --line: #cfd7de;
+  --line-strong: #aeb9c2;
 
-  /* The single green signal is spent on exactly two things: a gate that
-     passed and the verified states. A failed gate stays red. Nothing else on
-     the page is coloured. */
-  --pass: #175e3e;
-  --pass-bg: #e3eee6;
-  --pass-line: #c0d8c8;
-  --pass-ink: #12472f;
-  --fail: #a5231c;
-  --fail-bg: #f7e7e3;
-  --fail-line: #e2c3bd;
-  --fail-ink: #7e1d16;
-  --warn: #7d5400;
+  /* ink - three measured steps, all AA on every surface they sit on */
+  --ink: #101418;
+  --ink-soft: #2c343b;
+  --muted: #49535c;
+  --faint: #5f6973;
+
+  /* the one accent: state, action, link. Never decoration. */
+  --accent: #0b6e99;
+  --accent-deep: #075a7e;
+  --accent-tint: #e6f2f7;
+
+  /* the graphite instrument face */
+  --chrome: #101418;
+  --chrome-ink: #e7edf2;
+  --chrome-muted: #9aa5ae;
+  --chrome-line: #2a323a;
+  --accent-bright: #5cc6de;
+
+  /* A gate that failed stays red and a stated warning stays amber. Nothing
+     else on the page is coloured. */
+  --pass: #116b34;
+  --pass-bg: #e4f2e9;
+  --pass-line: #b9d9c6;
+  --pass-ink: #0d5228;
+  --fail: #a3231c;
+  --fail-bg: #fae9e7;
+  --fail-line: #e6c4c0;
+  --fail-ink: #7e1a14;
+  --warn: #7a5200;
+  --warn-bg: #fbf1da;
+  --warn-line: #e6d3a8;
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace;
 
-  --shell: 70rem;
-  --prose: 46rem;
-  --radius: 6px;
-  --radius-sm: 4px;
+  --shell: 72rem;
+  --prose: 44rem;
+  --radius: 2px;
+  --radius-sm: 2px;
 }
 
 /* ------------------------------------------------------------------ base */
@@ -48,6 +82,10 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
+  /* 17px base: the body copy and the navigation were the two things the review
+     called small. Every component size in this file is in rem, so one number
+     moves the whole scale. */
+  font-size: 17px;
   scroll-behavior: smooth;
   scroll-padding-top: 5rem;
   -webkit-text-size-adjust: 100%;
@@ -55,7 +93,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--ink);
   font-family: var(--sans);
   font-size: 1rem;
@@ -78,6 +116,7 @@ code {
   border-radius: var(--radius-sm);
   padding: 0.12em 0.34em;
   word-break: break-word;
+  font-size: 0.88em;
 }
 
 pre {
@@ -128,9 +167,9 @@ strong { font-weight: 650; }
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(250, 247, 239, 0.94);
-  backdrop-filter: saturate(160%) blur(8px);
-  border-bottom: 1px solid var(--line);
+  /* the same graphite face the workbench puts across the top of every page */
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-line);
 }
 
 .masthead__inner {
@@ -150,12 +189,12 @@ strong { font-weight: 650; }
   font-family: var(--sans);
   font-size: 1rem;
   font-weight: 650;
-  letter-spacing: 0.01em;
-  color: var(--ink);
+  letter-spacing: 0.02em;
+  color: var(--chrome-ink);
   text-decoration: none;
   white-space: nowrap;
 }
-.wordmark:hover { color: var(--ink); }
+.wordmark:hover { color: var(--chrome-ink); }
 .wordmark__mark { display: block; flex: none; }
 
 .masthead nav { margin-left: auto; }
@@ -171,28 +210,55 @@ strong { font-weight: 650; }
 }
 
 .masthead nav a {
-  color: var(--ink-soft);
+  color: var(--chrome-muted);
   text-decoration: none;
   padding-bottom: 2px;
   border-bottom: 1px solid transparent;
 }
-.masthead nav a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.masthead nav a:hover { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
 
 .masthead .repo {
   font-family: var(--mono);
   font-size: 0.8125rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--chrome-line);
   border-radius: var(--radius-sm);
   padding: 0.3rem 0.6rem;
-  color: var(--ink-soft);
+  color: var(--chrome-muted);
   text-decoration: none;
   white-space: nowrap;
 }
-.masthead .repo:hover { border-color: var(--accent); color: var(--accent); }
+.masthead .repo:hover { border-color: var(--accent-bright); color: var(--accent-bright); }
 
 /* ----------------------------------------------------------------- hero */
 
-.hero { padding: 3.5rem 0 2.5rem; border-bottom: 1px solid var(--line); }
+.hero { padding: 2.75rem 0 2.25rem; border-bottom: 1px solid var(--line); }
+
+/* The product capture is in the first screen, beside the copy. The wordmark is
+   no longer the largest object on the page: the workbench is. */
+.hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 27rem) minmax(0, 1fr);
+  gap: 2.5rem;
+  align-items: start;
+}
+@media (max-width: 62rem) { .hero__grid { grid-template-columns: 1fr; gap: 2rem; } }
+
+.hero__shot { margin: 0; }
+.hero__shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.hero__shot figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+  max-width: var(--prose);
+}
+.hero__shot figcaption b { color: var(--ink-soft); }
 
 .hero__kicker {
   font-family: var(--mono);
@@ -203,20 +269,22 @@ strong { font-weight: 650; }
   margin: 0 0 1rem;
 }
 
-.hero__mark { display: block; margin: 0 0 1.25rem; }
+.hero__mark { display: block; margin: 0 0 0.75rem; }
 
 .hero h1 {
-  font-size: clamp(2.6rem, 7vw, 4.25rem);
-  letter-spacing: -0.035em;
-  margin: 0 0 0.5rem;
+  font-size: clamp(1.9rem, 3.4vw, 2.5rem);
+  letter-spacing: -0.03em;
+  margin: 0 0 0.6rem;
 }
 
+/* The positioning sentence carries the lead now, not the product name. */
 .hero__tagline {
-  font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+  font-size: clamp(1.25rem, 2.2vw, 1.55rem);
   color: var(--ink);
   font-weight: 600;
   letter-spacing: -0.02em;
-  margin: 0 0 1.5rem;
+  margin: 0 0 1.15rem;
+  text-wrap: balance;
 }
 
 .hero__lede { max-width: var(--prose); font-size: 1.0625rem; color: var(--ink-soft); }
@@ -226,21 +294,22 @@ strong { font-weight: 650; }
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
-  margin: 1.75rem 0 0;
+  margin: 1.4rem 0 0;
 }
 
+/* One obvious primary action, in the accent. Everything else is an outline. */
 .button {
   display: inline-block;
   font-size: 0.9375rem;
   font-weight: 600;
-  padding: 0.62rem 1.1rem;
+  padding: 0.6rem 1.1rem;
   border-radius: var(--radius);
   text-decoration: none;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--bg);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
 }
-.button:hover { background: var(--ink-soft); border-color: var(--ink-soft); color: var(--bg); }
+.button:hover { background: var(--accent-deep); border-color: var(--accent-deep); color: #ffffff; }
 
 .button--quiet {
   background: transparent;
@@ -252,7 +321,7 @@ strong { font-weight: 650; }
 /* A one-line statement of what is proven and what is not, directly under the
    masthead. It is the first thing a sceptical reader looks for. */
 .statusline {
-  margin: 1.75rem 0 0;
+  margin: 1.4rem 0 0;
   padding: 0.9rem 1.1rem;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
@@ -276,7 +345,8 @@ strong { font-weight: 650; }
 .chips li {
   font-family: var(--mono);
   font-size: 0.75rem;
-  color: var(--muted);
+  color: var(--faint);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.22rem 0.65rem;
@@ -293,6 +363,7 @@ strong { font-weight: 650; }
 .section h2 {
   font-size: clamp(1.5rem, 3.2vw, 1.95rem);
   margin: 0 0 0.75rem;
+  letter-spacing: -0.025em;
 }
 
 .section h3 { font-size: 1.0625rem; margin: 2rem 0 0.6rem; }
@@ -322,7 +393,7 @@ strong { font-weight: 650; }
 .record {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -418,7 +489,7 @@ strong { font-weight: 650; }
   margin: 0;
   font-size: 0.75rem;
   padding: 0.55rem 0.7rem;
-  background: var(--bg);
+  background: var(--surface);
   white-space: pre-wrap;
 }
 
@@ -439,7 +510,7 @@ strong { font-weight: 650; }
 }
 
 .stat {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1.1rem 1.15rem;
@@ -489,7 +560,7 @@ strong { font-weight: 650; }
 }
 
 .card {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1.15rem 1.25rem 1.25rem;
@@ -589,6 +660,13 @@ figcaption {
 }
 figcaption b { color: var(--ink-soft); }
 
+/* The model-health capture sits in the measure section, where the claim it
+   proves is made. It is the evidence, so it gets the full measure. */
+.measure__shot { margin: 2rem 0 0; max-width: 58rem; }
+
+/* The remaining gallery is a two-up, not a three-up. */
+.figures { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
+
 /* --------------------------------------------------------- architecture */
 
 .layers { display: grid; gap: 0; max-width: 58rem; }
@@ -624,7 +702,7 @@ figcaption b { color: var(--ink-soft); }
 
 .flow { max-width: 44rem; margin: 1.75rem 0 0; }
 .flow svg { width: 100%; height: auto; display: block; }
-.flow .box { fill: var(--bg); stroke: var(--line-strong); stroke-width: 1.25; }
+.flow .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.25; }
 .flow .box--accent { stroke: var(--accent); stroke-width: 1.75; }
 .flow .box--out { fill: var(--panel); stroke: var(--line-strong); }
 .flow .wire { stroke: var(--line-strong); stroke-width: 1.25; fill: none; }
@@ -644,7 +722,7 @@ figcaption b { color: var(--ink-soft); }
 .site-footer h2 { font-size: 0.8125rem; font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.75rem; }
 .site-footer p { max-width: var(--prose); }
 .site-footer pre {
-  background: var(--bg);
+  background: var(--surface);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -682,7 +760,7 @@ figcaption b { color: var(--ink-soft); }
   .section { padding: 1.2rem 0; break-inside: avoid; }
   .record, .card, .stat, figure, .layer { break-inside: avoid; }
   a { color: inherit; text-decoration: none; }
-  .record, .cards, .stats, .layers { border-color: #999; }
+  .record, .cards, .stats, .layers, .door, .metric, .examples-key { border-color: #999; }
   .callout { background: none; }
 }
 
@@ -700,7 +778,7 @@ figcaption b { color: var(--ink-soft); }
 .door {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface);
   padding: 1.25rem 1.35rem 1.35rem;
   display: flex;
   flex-direction: column;
@@ -736,7 +814,7 @@ figcaption b { color: var(--ink-soft); }
   white-space: nowrap;
 }
 .door__status--live { color: var(--pass-ink); background: var(--pass-bg); border-color: var(--pass-line); }
-.door__status--soon { color: var(--warn); background: #f5ecdb; border-color: #e2d3b3; }
+.door__status--soon { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
 
 .door__tagline { font-size: 1.0625rem; font-weight: 650; color: var(--ink); margin: 0.4rem 0 0.6rem; }
 .door p { color: var(--ink-soft); font-size: 0.9375rem; margin: 0 0 0.75rem; }
@@ -763,7 +841,7 @@ figcaption b { color: var(--ink-soft); }
 .metric {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface);
   padding: 0.95rem 1.05rem 1.05rem;
 }
 
@@ -824,7 +902,7 @@ figcaption b { color: var(--ink-soft); }
 /* A reproduce block inside a limits item sits a little below the text. */
 .limits pre { margin-top: 0.5rem; }
 /* ----------------------------------------------------- example corpus */
-.pill--warn { color: var(--warn); background: #f5ecdb; border-color: #e2d3b3; }
+.pill--warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
 .pill--muted { color: var(--muted); background: var(--panel-2); border-color: var(--line-strong); }
 
 .examples-key {
@@ -838,7 +916,7 @@ figcaption b { color: var(--ink-soft); }
 .examples-key > li {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface);
   padding: 1rem 1.1rem;
 }
 .examples-key .pill { display: inline-block; margin-bottom: 0.5rem; }

@@ -29,61 +29,95 @@ const STYLE: &str = r#"
 :root {
   color-scheme: light;
 
-  /* -- accent: the ONE brand colour. Used sparingly for the primary action,
-     the selected tree row, links and the focus ring. Everything else is
-     neutral grey so the accent always means "interactive / active". */
-  --accent: #2563eb;
-  --accent-strong: #1d4ed8;
-  --accent-tint: #eff6ff;
+  /* ===== the shared instrument palette =====================================
+     These literals are mirrored in website/styles.css, whose token block is
+     marked "Palette marker: instrument-2026-09". One palette, two surfaces:
+     the site and the workbench are one product and must not look like two.
+     Change a literal here and change it there. */
+
+  /* -- accent: the ONE brand colour. Used for the primary action, the
+     selected tree row, links and the focus ring. Everything else is neutral
+     so the accent always means "interactive / active". */
+  --accent: #0b6e99;
+  --accent-strong: #075a7e;
+  --accent-tint: #e6f2f7;
   --on-accent: #ffffff;
 
-  /* -- neutrals: the chrome grey scale. surface = raised panel, surface-1 =
-     muted well, surface-2 = hover, border = strong line, border-muted =
-     faint line. text / text-2 / text-3 are three ink steps (primary,
-     secondary, faint). */
+  /* -- chrome: the graphite instrument face across the top of every page. It
+     is the same face the site wears, and it is the only dark surface in the
+     product. */
+  --chrome: #101418;
+  --chrome-raised: #1a2026;
+  --chrome-ink: #e7edf2;
+  --chrome-muted: #9aa5ae;
+  --chrome-line: #2a323a;
+  --accent-bright: #5cc6de;
+
+  /* -- neutrals: surface = raised sheet, surface-1 = canvas and muted well,
+     surface-2 = hover, border = hairline, border-muted = faint rule.
+     text / text-2 / text-3 are three measured ink steps. All three clear
+     WCAG AA (4.5:1) on every surface they are used on; --text-3 was #6e7781
+     (4.09:1 on the canvas) and is now #5f6973 (5.21:1). */
   --surface: #ffffff;
-  --surface-1: #f6f8fa;
-  --surface-2: #eaeef2;
-  --border: #d1d9e0;
-  --border-muted: #e5eaef;
-  --text: #1f2328;
-  --text-2: #59636e;
-  --text-3: #8b949e;
+  --surface-1: #f5f7f9;
+  --surface-2: #e9edf1;
+  --border: #cfd7de;
+  --border-muted: #e4e9ee;
+  --text: #101418;
+  --text-2: #49535c;
+  --text-3: #5f6973;
 
   /* -- semantics: PASS / FAIL / UNKNOWN / WARN. Each is a tint plus an ink so
      a chip is readable without relying on colour alone (a border and a text
      label always accompany the tint). */
-  --pass: #1a7f37;
-  --pass-bg: #dafbe1;
-  --fail: #cf222e;
-  --fail-bg: #ffebe9;
-  --unknown: #6e7781;
-  --unknown-bg: #f0f2f5;
-  --warn: #9a6700;
-  --warn-bg: #fff8c5;
+  --pass: #116b34;
+  --pass-bg: #e4f2e9;
+  --pass-ink: #0d5228;
+  --fail: #a3231c;
+  --fail-bg: #fae9e7;
+  --unknown: #5f6973;
+  --unknown-bg: #edf1f4;
+  --warn: #7a5200;
+  --warn-bg: #fbf1da;
 
   /* -- kinds: one colour per element kind. Used for the small dot in the
      containment tree and the diagram so the same kind is the same colour
      everywhere. Unknown kinds fall back to the neutral grey. */
-  --kind-block: #2563eb;
-  --kind-actor: #8250df;
-  --kind-usecase: #0550ae;
-  --kind-requirement: #9a6700;
-  --kind-signal: #1a7f37;
-  --kind-interface: #0a7ea4;
-  --kind-activity: #bc4c00;
-  --kind-state: #bf3989;
-  --kind-statemachine: #cf222e;
-  --kind-neutral: #6e7781;
+  --kind-block: #0b6e99;
+  --kind-actor: #6b3fa0;
+  --kind-usecase: #075a7e;
+  --kind-requirement: #7a5200;
+  --kind-signal: #116b34;
+  --kind-interface: #0a6e80;
+  --kind-activity: #9a4a0a;
+  --kind-state: #9c2f6e;
+  --kind-statemachine: #a3231c;
+  --kind-neutral: #5f6973;
+
+  /* -- kind fills: the very light tint of each kind ink, used as the node fill
+     in the diagram. The diagram build writes a per-kind fill as a presentation
+     attribute; a CSS declaration beats a presentation attribute, so these rules
+     are what actually paint the boxes and the palette stays owned here. */
+  --kind-block-bg: #e6f2f7;
+  --kind-actor-bg: #efe9f6;
+  --kind-usecase-bg: #e3eef4;
+  --kind-requirement-bg: #fbf1da;
+  --kind-signal-bg: #e4f2e9;
+  --kind-interface-bg: #e3f0f3;
+  --kind-activity-bg: #faeee4;
+  --kind-state-bg: #f8e9f2;
+  --kind-statemachine-bg: #fae9e7;
+  --kind-neutral-bg: #ffffff;
 
   /* -- type: a system UI face for everything (no serif), a monospace face for
      ids, hashes and code. */
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
 
-  --radius: 6px;
-  --radius-sm: 4px;
-  --header-h: 3rem;
+  /* -- square corners: a measuring instrument does not have rounded ones. */
+  --radius: 2px;
+  --radius-sm: 2px;
+  --header-h: 2.9rem;
 }
 
 /* -- base ---------------------------------------------------------------- */
@@ -134,33 +168,34 @@ h4 { font-size: 12px; font-weight: 600; margin: 0 0 0.25rem; }
   display: flex; align-items: center; gap: 0.75rem;
   height: var(--header-h);
   padding: 0 1.25rem;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-line);
   position: sticky; top: 0; z-index: 20;
 }
 .site-header .brand {
   display: inline-flex; align-items: center; gap: 0.5rem;
-  font-weight: 700; font-size: 15px; letter-spacing: -0.01em;
-  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 650; font-size: 13px; letter-spacing: 0.02em;
+  color: var(--chrome-ink);
 }
 .site-header .brand::before {
   content: "";
   flex: 0 0 auto;
   width: 16px; height: 16px;
-  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2016%2016'%20fill='none'%3E%3Ccircle%20cx='4'%20cy='8'%20r='2.4'%20fill='%232563eb'/%3E%3Ccircle%20cx='12'%20cy='4'%20r='2.4'%20fill='%232563eb'%20opacity='0.45'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='2.4'%20fill='%232563eb'%20opacity='0.45'/%3E%3Cpath%20d='M6.2%207%209.8%204.7M6.2%209l3.6%202.3'%20stroke='%232563eb'%20stroke-width='1.2'%20stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2016%2016'%20fill='none'%3E%3Ccircle%20cx='4'%20cy='8'%20r='2.4'%20fill='%235cc6de'/%3E%3Ccircle%20cx='12'%20cy='4'%20r='2.4'%20fill='%235cc6de'%20opacity='0.45'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='2.4'%20fill='%235cc6de'%20opacity='0.45'/%3E%3Cpath%20d='M6.2%207%209.8%204.7M6.2%209l3.6%202.3'%20stroke='%235cc6de'%20stroke-width='1.2'%20stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-size: contain;
 }
-.site-header .brand:hover { color: var(--accent); text-decoration: none; }
+.site-header .brand:hover { color: var(--accent-bright); text-decoration: none; }
 .site-header .project {
-  font-size: 12px; color: var(--text-2);
-  background: var(--surface-1);
-  border: 1px solid var(--border-muted);
+  font-size: 12px; color: var(--chrome-ink);
+  background: var(--chrome-raised);
+  border: 1px solid var(--chrome-line);
   padding: 0.12rem 0.55rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.site-header .who { margin-left: auto; color: var(--text-2); font-size: 12px; }
+.site-header .who { margin-left: auto; color: var(--chrome-muted); font-size: 12px; }
 
 /* -- chrome: layout and rail -------------------------------------------- */
 
@@ -169,7 +204,7 @@ h4 { font-size: 12px; font-weight: 600; margin: 0 0 0.25rem; }
   flex: 0 0 11rem;
   border-right: 1px solid var(--border);
   padding: 1rem 0.75rem;
-  background: var(--surface);
+  background: var(--surface-1);
 }
 .rail ul { list-style: none; margin: 0; padding: 0; }
 .rail li { margin-bottom: 0.15rem; }
@@ -198,9 +233,13 @@ main.mw-model-ide { max-width: none; padding: 1.25rem 1.5rem; }
 
 .model-section { margin-bottom: 2rem; }
 .model-section > h2 {
-  padding-bottom: 0.4rem;
+  padding-bottom: 0.35rem;
   margin-bottom: 0.75rem;
-  border-bottom: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 ul.projects, ul.branches, ul.proposals, ul.proposal-list, ul.accepted-items, ul.gaps,
@@ -214,8 +253,13 @@ ul.unresolved-edges, ul.failures, ul.isolated, ul.diff-list, ul.loss-list, ul.lo
 ul.projects {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  gap: 0.75rem;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  background: var(--surface);
 }
+/* gap: 0 with a rule on two sides of every cell gives a true ruled grid and
+   leaves no filled empty cell at the end of an incomplete row. */
 ul.projects li { margin: 0; padding: 0; border: none; background: none; }
 
 ul.branches li, ul.proposals li, ul.proposal-list li {
@@ -228,29 +272,52 @@ ul.branches li, ul.proposals li, ul.proposal-list li {
 ul.proposals li h2, ul.proposal-list li h2 { margin-top: 0; }
 
 a.project-card {
+  position: relative;
   display: flex; flex-direction: column; gap: 0.3rem;
   height: 100%;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 0.8rem 0.9rem 0.8rem 1.05rem;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: var(--surface);
   color: var(--text);
 }
+/* The kind mark: a petrol index tab down the left edge of every project, so a
+   row of projects reads as a set of instruments and the eye can run down the
+   column. It is decoration with a job, not an icon, and it is drawn in CSS -
+   no image, no request. */
+a.project-card::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.9;
+}
+/* The scope mark: a square at the top right of every card, the same square on
+   every card, so the wall is legible as a grid even before it is read. */
+a.project-card::after {
+  content: "";
+  position: absolute; right: 0.7rem; top: 0.7rem;
+  width: 7px; height: 7px;
+  border: 1px solid var(--text-3);
+}
 a.project-card:hover {
-  border-color: var(--accent);
   background: var(--accent-tint);
   text-decoration: none;
 }
-a.project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.project-name { font-weight: 650; font-size: 15px; color: var(--text); }
+a.project-card:hover::before { background: var(--accent-strong); }
+a.project-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.project-name { font-family: var(--font-mono); font-weight: 650; font-size: 13px; letter-spacing: -0.01em; color: var(--text); }
 a.project-card:hover .project-name { color: var(--accent-strong); }
-.project-meta { color: var(--text-2); font-size: 12px; }
+.project-meta { color: var(--text-2); font-size: 11.5px; font-family: var(--font-mono); }
 .project-meta .dot { color: var(--text-3); margin: 0 0.3rem; }
 .project-message { color: var(--text); font-size: 13px; }
 .project-author { color: var(--text-3); font-size: 12px; }
 .project-open {
   margin-top: 0.4rem;
-  font-size: 12px; font-weight: 600; color: var(--accent);
+  font-size: 11px; font-weight: 650; color: var(--accent);
+  letter-spacing: 0.08em; text-transform: uppercase;
   display: inline-flex; align-items: center; gap: 0.3rem;
 }
 
@@ -546,7 +613,7 @@ li.allocation { overflow-wrap: anywhere; }
 .loss-select-all label { font-size: 13px; font-weight: 600; color: var(--text); }
 .accept-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
 .accept-actions button[name="accept_all"] { background: var(--pass); border-color: var(--pass); }
-.accept-actions button[name="accept_all"]:hover { background: #116329; border-color: #116329; }
+.accept-actions button[name="accept_all"]:hover { background: var(--pass-ink); border-color: var(--pass-ink); }
 
 /* -- proposals / gate ---------------------------------------------------- */
 
@@ -731,15 +798,15 @@ li.allocation { overflow-wrap: anywhere; }
 .site-header .switcher summary {
   list-style: none;
   display: inline-flex; align-items: center; gap: 0.4rem;
-  font-size: 13px; font-weight: 600; color: var(--text);
-  background: var(--surface-1);
-  border: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; color: var(--chrome-ink);
+  background: var(--chrome-raised);
+  border: 1px solid var(--chrome-line);
   border-radius: var(--radius);
   padding: 0.28rem 0.65rem;
   cursor: pointer;
 }
 .site-header .switcher summary::-webkit-details-marker { display: none; }
-.site-header .switcher summary::after { content: "\25be"; color: var(--text-3); }
+.site-header .switcher summary::after { content: "\25be"; color: var(--chrome-muted); }
 .site-header .switcher[open] summary { border-color: var(--accent); }
 .site-header .switcher .menu {
   position: absolute; top: calc(100% + 0.35rem); left: 0; z-index: 40;
@@ -747,7 +814,7 @@ li.allocation { overflow-wrap: anywhere; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px rgba(31, 35, 40, 0.14);
+  box-shadow: 0 8px 24px rgba(16, 20, 24, 0.16);
   padding: 0.35rem; margin: 0; list-style: none;
 }
 .site-header .switcher .menu a {
@@ -760,18 +827,18 @@ li.allocation { overflow-wrap: anywhere; }
 }
 
 .site-header .new-model {
-  font-size: 12px; font-weight: 600; color: var(--on-accent);
-  background: var(--accent); border: 1px solid var(--accent);
+  font-size: 12px; font-weight: 650; color: #101418;
+  background: var(--accent-bright); border: 1px solid var(--accent-bright);
   border-radius: var(--radius); padding: 0.28rem 0.7rem;
 }
-.site-header .new-model:hover { background: var(--accent-strong); color: var(--on-accent); text-decoration: none; }
+.site-header .new-model:hover { background: #7fd6e8; border-color: #7fd6e8; color: #101418; text-decoration: none; }
 
 .site-header .chip {
   margin-left: auto;
   display: inline-flex; align-items: center; gap: 0.45rem;
-  font-size: 12px; color: var(--text-2);
-  background: var(--surface-1); border: 1px solid var(--border-muted);
-  border-radius: 999px; padding: 0.28rem 0.75rem;
+  font-size: 12px; color: var(--chrome-muted);
+  background: var(--chrome-raised); border: 1px solid var(--chrome-line);
+  border-radius: var(--radius); padding: 0.28rem 0.75rem;
   white-space: nowrap;
 }
 .site-header .chip::before {
@@ -782,6 +849,12 @@ li.allocation { overflow-wrap: anywhere; }
 /* The global find-element search: one box in the header, on every project page. */
 .site-search { display: flex; align-items: center; gap: 0.35rem; }
 .site-search input[type="search"] { width: 15rem; max-width: 32vw; }
+/* the search box is on the graphite face too, so it takes the dark control
+   treatment rather than the light form default */
+.site-header .site-search input[type="search"] {
+  background: var(--chrome-raised); border-color: var(--chrome-line); color: var(--chrome-ink);
+}
+.site-header .site-search input[type="search"]::placeholder { color: var(--chrome-muted); }
 
 /* -- global find-element results ------------------------------------------ */
 ul.search-hits { list-style: none; margin: 0; padding: 0; }
@@ -807,7 +880,8 @@ li.search-hit code { font-family: var(--font-mono); }
 .rail a.current {
   background: var(--accent-tint);
   color: var(--accent-strong);
-  font-weight: 600;
+  font-weight: 650;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* -- chrome: the context bar --------------------------------------------- */
@@ -817,8 +891,8 @@ li.search-hit code { font-family: var(--font-mono); }
 .context-bar {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   font-size: 12px; color: var(--text-2);
-  background: var(--surface-1);
-  border: 1px solid var(--border-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.35rem 0.75rem;
   margin-bottom: 1.25rem;
@@ -925,7 +999,19 @@ main.mw-diagram { max-width: none; padding: 1.25rem 1.5rem; }
 .diagram-props dd { margin: 0.05rem 0 0; font-size: 12.5px; overflow-wrap: anywhere; color: var(--text); }
 
 svg g.node { cursor: pointer; }
-svg g.node .node-rect { stroke: var(--text-3); stroke-width: 1.5px; }
+/* rx is set to 6 in the SVG; the instrument has square corners. A CSS
+   geometry property beats the attribute where it is supported, and degrades to
+   the attribute where it is not. */
+svg g.node .node-rect { stroke: var(--text-3); stroke-width: 1.5px; rx: 2px; fill: var(--kind-neutral-bg); }
+svg g.node[data-mw-kind="block"] .node-rect { fill: var(--kind-block-bg); }
+svg g.node[data-mw-kind="actor"] .node-rect { fill: var(--kind-actor-bg); }
+svg g.node[data-mw-kind="usecase"] .node-rect { fill: var(--kind-usecase-bg); }
+svg g.node[data-mw-kind="requirement"] .node-rect { fill: var(--kind-requirement-bg); }
+svg g.node[data-mw-kind="signal"] .node-rect { fill: var(--kind-signal-bg); }
+svg g.node[data-mw-kind="interface"] .node-rect { fill: var(--kind-interface-bg); }
+svg g.node[data-mw-kind="activity"] .node-rect { fill: var(--kind-activity-bg); }
+svg g.node[data-mw-kind="state"] .node-rect { fill: var(--kind-state-bg); }
+svg g.node[data-mw-kind="stateMachine"] .node-rect { fill: var(--kind-statemachine-bg); }
 svg g.node .node-name {
   font-family: var(--font-ui); font-size: 13px; fill: var(--text); pointer-events: none;
 }
@@ -966,7 +1052,7 @@ svg g.node[data-mw-kind="activity"] { color: var(--kind-activity); }
 svg g.node[data-mw-kind="state"] { color: var(--kind-state); }
 svg g.node[data-mw-kind="stateMachine"] { color: var(--kind-statemachine); }
 svg g.node .node-glyph { pointer-events: none; }
-svg g.node .mw-2525-unknown { font-family: var(--font-ui); font-weight: 700; fill: #1f2937; pointer-events: none; }
+svg g.node .mw-2525-unknown { font-family: var(--font-ui); font-weight: 700; fill: var(--text); pointer-events: none; }
 
 g.mw-selected-node rect { stroke: var(--accent); stroke-width: 3px; }
 g.mw-selected-node .node-name { fill: var(--accent-strong); font-weight: 600; }
@@ -1183,7 +1269,7 @@ li.impact-req .impact-req-name { color: var(--text-2); font-size: 13px; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px rgba(31, 35, 40, 0.14);
+  box-shadow: 0 8px 24px rgba(16, 20, 24, 0.16);
   padding: 0.35rem; margin: 0; list-style: none;
   max-height: 24rem; overflow-y: auto;
 }
