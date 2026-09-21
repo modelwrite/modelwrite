@@ -16,8 +16,8 @@ The distinction is the product: the showcase answers "what can this do?", the re
 ## 2. Decisions, recorded from the owner
 
 1. **Registration: email + a login code.** A form takes an email; a single-use code is sent; entering the code starts a session. No third-party identity dependency; the same machinery grows into enterprise SSO later.
-2. **Expiry: 14 days active, then 7 days READ-ONLY, then frozen and archived.** Nobody loses work the day the clock runs out. "Your trial ended, your report is still readable" is the right ending.
-3. **Extension BY PAYMENT: yes.** An expired (or expiring) trial can be extended by paying. This is the first paid surface and the bridge from the open tier to the licensed tier - exactly where the boundary spec says the money is ("paid to govern the data").
+2. **Extension: by ACTIVITY, not payment.** The trial is a ROLLING WINDOW: genuine use extends it; dormancy lets it expire. Nobody loses work the day the clock runs out. "Your trial ended, your report is still readable" is the right ending - and the honest one, because a trial that ended this way was one nobody was using.
+3. **Payment extension: DEFERRED, not built now.** At this stage an active user is enough: the registered trial exists to prove the product, not to monetise it. The checkout design in section 7 stays in this spec as the later path, ready if the owner ever enables it - and the trial's audit trail already has a place for an extension record.
 4. **The registered tier lives at app.modelwrite.org.** The showcase keeps trial.modelwrite.org. Two doors, clean separation, one product.
 
 ## 3. The tiers
@@ -46,16 +46,16 @@ The distinction is the product: the showcase answers "what can this do?", the re
 
 ## 6. The lifecycle
 
-1. **Active (days 0-14):** full read/write on the person's own workspace.
-2. **Read-only (days 14-21):** everything readable, writes refused with a message naming the trial's end and the extension path. The user can still export, screenshot and decide.
-3. **Frozen (after day 21):** the database is archived (copied to an archive root, checksum recorded), the live copy removed, and the account retained so the same email can return to a fresh trial.
-4. **Extension:** payment during active or read-only extends the active window (default: +30 days per payment; the amount and period are the owner's to set). An extension record is written to the trial's audit trail, with the payment provider's reference, not card details.
+1. **Active:** full read/write on the person's own workspace. **Any authenticated activity - a read, a write, an import - refreshes the window to a full 14 days from that moment.** A trial that is genuinely used does not expire.
+2. **Read-only:** after 14 days WITHOUT activity, reads keep working for 7 more days and writes are refused with a message naming the trial's end and how to start again. The user can still export, screenshot and decide.
+3. **Frozen:** after 21 days without activity, the database is archived (copied to an archive root, checksum recorded), the live copy removed, and the account retained so the same email can return to a fresh trial.
+4. **Extension:** activity is the extension. The audit trail records the last-activity refresh so the operator can see, plainly, which trials were used and which were not. (The deferred payment path, if ever enabled, would also write an extension record here - with the provider's reference, never card details.)
 
-## 7. The payment bridge - and what it needs from the owner
+## 7. The payment bridge - DEFERRED, design kept for later
 
-- The extension flow is a **checkout link from a payment provider** (Stripe is the recommendation: hosted checkout, no card data ever touches our server). On the webhook confirming payment, the trial's expiry moves forward and the audit trail records the provider reference.
-- **This is its own tranche and it is BLOCKED on owner-provided credentials:** a Stripe (or equivalent) account. Nothing in this design requires cards to be handled locally - that is the point of hosted checkout.
-- Until the account exists, the extension button says **"extend your trial - coming soon"** rather than promising a flow that cannot complete. A button that leads nowhere is worse than an honest coming-soon.
+- NOT BUILT NOW. Activity extends the trial; payment does not enter this tranche.
+- When the owner wants a paid path, the design is: a **checkout link from a payment provider** (Stripe recommended: hosted checkout, no card data ever touches our server). On the webhook confirming payment, the trial's window extends (default +30 days per payment; the amount and period are the owner's to set) and the audit trail records the provider reference.
+- It would need owner-provided payment credentials - which is one of the reasons it is deferred rather than blocking this tranche.
 
 ## 8. Resource protection
 
@@ -75,13 +75,13 @@ The distinction is the product: the showcase answers "what can this do?", the re
 1. From a clean browser: register with an email, receive a code, enter it, land in an EMPTY workspace.
 2. Import a model (XMI) and see its loss report, coverage, and the orphan/isolated-group analytic.
 3. A second registration gets a DIFFERENT workspace; cross-trial access is refused by construction and proven by test.
-4. Time-travelled to day 15: writes are refused with the extension message; reads still work. Day 22: archived; the same email can start a fresh trial.
+4. Time-travelled: 13 days without activity -> writes refused with the end message, reads still work. Activity on day 13 -> the window refreshes to a full 14 days from that moment. 21 days without activity -> archived; the same email can start a fresh trial.
 5. Rate limits demonstrably stop a burst of code requests.
 6. The showcase at trial.modelwrite.org is byte-for-byte unchanged in behaviour.
 
 ## 11. Unknowns, stated
 
-- **Email delivery:** the code must reach a person. This needs an email provider credential (a transactional mail service, or the host's relay). BLOCKED on owner-provided credentials, same as payment.
+- **Email delivery:** the code must reach a person. This needs an email provider credential (a transactional mail service, or the host's relay). BLOCKED on owner-provided credentials - and now the ONLY credential gate, since payment is deferred.
 - **The analytics layer:** the registered trial's headline value - trends and exports - lands with the analytics-interfaces work; until then the registered trial still shows loss reports, coverage and graph gaps, which are already built.
 
 ## 12. Order of work
@@ -89,5 +89,5 @@ The distinction is the product: the showcase answers "what can this do?", the re
 1. Identity + sessions + provisioning + isolation (the security core), tested by the cross-trial refusal.
 2. Lifecycle enforcement + reaper.
 3. The two-door website copy and the registration pages.
-4. Payment extension - when credentials exist.
-5. The analytics interfaces behind the registered trial as they land.
+4. The analytics interfaces behind the registered trial as they land.
+5. Payment extension - only if and when the owner enables it.
