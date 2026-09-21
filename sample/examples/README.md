@@ -41,10 +41,11 @@ Fetch the non-bundle-safe examples (and the large bundle-safe ones) with:
 - **SysML v1 XMI** - importable. The binding is mw-binding-xmi (engine/binding-xmi),
   and the real-vendor measurement is engine/binding-xmi/tests/real_tmt.rs (plus
   real_magicdraw.rs for the smaller coffee-machine corpus already in sample/corpus/).
-- **SysML v2 (.sysml)** - textual notation, NOT XMI. Reading it needs a NEW
-  binding (a SysML v2 textual-notation reader), which is its own tranche of work
-  and is deliberately out of scope here. The .sysml files are bundled as corpus
-  material for that FUTURE reader; they cannot be imported today.
+- **SysML v2 (.sysml)** - textual notation, NOT XMI. The reader now EXISTS:
+  mw-binding-sysmlv2 (engine/binding-sysmlv2) reads a stated subset and is
+  Direction::ImportOnly - IT IS A VIEWER. It imports and names what it does not
+  carry; it cannot export, and the round-trip harness refuses it by design. Read
+  the crate README for the subset before relying on it.
 - **Gaphor (.gaphor)** - Gaphor's own XML model format, NOT the OMG uml:/SysML XMI
   the reader understands. Bundled as corpus material; a Gaphor binding does not
   exist today.
