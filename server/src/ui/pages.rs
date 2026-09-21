@@ -15,8 +15,10 @@ use crate::api::{
     create_branch_core, create_project_core, load_model, map_store_error, validate_name, ApiState,
 };
 use crate::auth::{identity as resolve_identity, Identity, Permission};
+use crate::binding_registry;
 use crate::error::ApiError;
 use crate::store::{Commit, Store};
+use crate::ui::dropzone;
 use crate::ui::layout;
 use crate::ui::review::merge_form_markup;
 
@@ -174,6 +176,7 @@ fn render_project_list(
         state.auth.mechanism(),
         &rows,
         notice,
+        &binding_registry::bindings(),
         &nav,
     ))
 }
@@ -183,10 +186,15 @@ fn project_list_page(
     mechanism: &str,
     rows: &[ProjectRow],
     notice: Option<&str>,
+    bindings: &[binding::BindingInfo],
     nav: &layout::Nav,
 ) -> Markup {
+    // The drop zone is the FIRST thing on the page: the front door is "bring your model", not
+    // "pick from this list". The list, the New project box and the expert binding dropdown all
+    // stay, below it, for the person who already knows what they want.
     let body = html! {
-        h1 { "Projects" }
+        (dropzone::dropzone_markup(bindings, identity.may(Permission::Write)))
+        h2 { "Projects" }
         p class="meta" { "Every model is a project; open one to read its sections and gate history." }
         @if let Some(notice) = notice {
             section class="form-errors" {

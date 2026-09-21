@@ -111,6 +111,17 @@ pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) ->
             "/ui",
             get(ui::pages::project_list).post(ui::pages::create_project),
         )
+        // E1 - the drop-zone front door: its own route, plus the one-button acceptance the
+        // result page posts to. The projects page renders the same drop zone as its primary
+        // element.
+        .route(
+            "/onboard",
+            get(ui::dropzone::onboard_page).post(ui::dropzone::onboard_upload),
+        )
+        .route(
+            "/ui/projects/:project/onboard/accept",
+            post(ui::dropzone::onboard_accept),
+        )
         .route("/ui/projects/:project", get(ui::pages::project_page))
         .route(
             "/ui/projects/:project/changes",

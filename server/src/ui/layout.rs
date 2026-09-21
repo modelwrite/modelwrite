@@ -1307,6 +1307,105 @@ li.impact-req .impact-req-name { color: var(--text-2); font-size: 13px; }
 }
 .context-bar .ctx-actions a.ctx-action:hover { border-color: var(--accent); text-decoration: none; }
 
+/* -- the drop zone: the front door (E1) ---------------------------------- */
+/* The first thing on the projects page and the whole of /onboard: one target,
+   no format choice, no project-name box required first. It is a real
+   multipart file upload, so the flow completes with JavaScript disabled; the
+   inline script only adds drag-and-drop on top of the same input. */
+
+.mw-dropzone {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.5rem 1.25rem;
+  margin-bottom: 1.75rem;
+}
+.mw-dropzone.mw-dragging { border-color: var(--accent); background: var(--accent-tint); }
+.mw-dropzone h1 { margin-bottom: 0.4rem; }
+.mw-dropzone-hint { color: var(--text-2); font-size: 13px; margin: 0 0 1rem; max-width: 46rem; }
+.mw-dropzone-form { margin: 0; }
+.mw-dropzone-form input[type="file"] {
+  display: block;
+  width: 100%;
+  max-width: 40rem;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.75rem;
+}
+.mw-dropzone-actions { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; margin: 0.9rem 0 0; }
+.mw-dropzone-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-strong);
+  min-height: 1rem;
+}
+.mw-dropzone-advanced { margin-top: 0.9rem; }
+.mw-dropzone-advanced summary { font-size: 12px; color: var(--text-2); cursor: pointer; }
+.mw-dropzone-advanced summary:hover { color: var(--text); }
+.mw-dropzone-advanced .advanced-grid { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.mw-dropzone-advanced .advanced-grid p { margin: 0; }
+.mw-dropzone-advanced input[type="text"], .mw-dropzone-advanced select { max-width: 22rem; }
+
+/* -- the onboarding result: the engine's numbers, in words ---------------- */
+
+.onboard-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.onboard-summary p { margin: 0 0 0.6rem; font-size: 14px; }
+.onboard-summary p:last-child { margin-bottom: 0; }
+
+.onboard-facts {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1.25rem;
+  font-size: 13px;
+  background: var(--surface);
+}
+.onboard-facts th {
+  text-align: left;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.onboard-facts th.num, .onboard-facts td.num { text-align: right; }
+.onboard-facts td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-muted); }
+.onboard-facts td.num { font-family: var(--font-mono); }
+
+ul.onboard-classes { list-style: none; margin: 0 0 1.25rem; padding: 0; }
+ul.onboard-classes li {
+  font-size: 13px;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--surface);
+}
+.onboard-classes .lc-count { font-family: var(--font-mono); font-weight: 650; color: var(--warn); }
+.onboard-classes .lc-name { font-family: var(--font-mono); color: var(--text); }
+.onboard-classes .lc-example { color: var(--text-3); font-size: 12px; }
+
+.onboard-accept { margin: 0.5rem 0 1rem; }
+.onboard-accept button { font-size: 15px; padding: 0.6rem 1.1rem; }
+details.onboard-losses { margin-top: 0.5rem; }
+details.onboard-losses > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0.3rem 0;
+}
+details.onboard-losses > summary:hover { color: var(--accent-strong); }
+
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {

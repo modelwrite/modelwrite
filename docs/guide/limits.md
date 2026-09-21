@@ -38,10 +38,11 @@ refuses it by design.
 <!-- generated:binding-list -->
 | Binding | id@version | Direction | Reads |
 |---|---|---|---|
+| Capella / Arcadia (.capella) | `capella-arcadia@1.0` | viewer (ImportOnly) | components, functions, functional and component exchanges, allocations and constraints |
 | SysML v1 (UML profile) XMI | `sysml-v1-xmi@2.4` | read/write | blocks, requirements, properties and Satisfy/Allocate traceability |
 | SysML v2 textual notation (.sysml) | `sysml-v2-textual@1.0` | viewer (ImportOnly) | part/attribute/item definitions, requirements, satisfy traceability and documentation |
 
-The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4` and `sysml-v2-textual@1.0`.
+The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4` and `sysml-v2-textual@1.0`; `capella-arcadia@1.0` is not registered in the server, so the workbench does not offer it.
 <!-- /generated -->
 
 Consequence: a SysML v2 model can be read and measured at the engine level, but it

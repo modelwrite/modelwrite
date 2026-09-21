@@ -109,10 +109,11 @@ only as prose. See [docs/guide/mcp-agents.md](docs/guide/mcp-agents.md) and
 <!-- generated:binding-list -->
 | Binding | id@version | Direction | Reads |
 |---|---|---|---|
+| Capella / Arcadia (.capella) | `capella-arcadia@1.0` | viewer (ImportOnly) | components, functions, functional and component exchanges, allocations and constraints |
 | SysML v1 (UML profile) XMI | `sysml-v1-xmi@2.4` | read/write | blocks, requirements, properties and Satisfy/Allocate traceability |
 | SysML v2 textual notation (.sysml) | `sysml-v2-textual@1.0` | viewer (ImportOnly) | part/attribute/item definitions, requirements, satisfy traceability and documentation |
 
-The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4` and `sysml-v2-textual@1.0`.
+The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4` and `sysml-v2-textual@1.0`; `capella-arcadia@1.0` is not registered in the server, so the workbench does not offer it.
 <!-- /generated -->
 
 - **XMI (SysML v1)** — import and export through the XMI reader, with a named loss
@@ -181,6 +182,7 @@ install path and what the chart does not do (TLS, backups, HA).
 | `mw-agent` | AGPL-3.0-or-later |
 | `mw-analytics` | AGPL-3.0-or-later |
 | `mw-binding` | AGPL-3.0-or-later |
+| `mw-binding-capella` | AGPL-3.0-or-later |
 | `mw-binding-sysmlv2` | AGPL-3.0-or-later |
 | `mw-binding-xmi` | AGPL-3.0-or-later |
 | `mw-capi` | AGPL-3.0-or-later |

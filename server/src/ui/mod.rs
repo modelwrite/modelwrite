@@ -21,6 +21,7 @@ pub mod assist;
 pub mod composition;
 pub mod create;
 pub mod diagram;
+pub mod dropzone;
 pub mod edit;
 pub mod export;
 pub mod gate;

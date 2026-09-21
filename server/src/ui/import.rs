@@ -38,7 +38,7 @@ const DEFAULT_BRANCH: &str = "main";
 
 /// A human-readable byte count, so the page can state the body limit as "512 MiB" rather
 /// than a bare 536870912 that a person has to count.
-fn human_bytes(bytes: u64) -> String {
+pub(crate) fn human_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -71,7 +71,7 @@ fn form_length_limit(rejection: &axum::extract::rejection::FormRejection) -> boo
 /// a loss knows which half is measured and which half is the binding's word: the engine diffed
 /// the binding's own OKF->XMI->OKF round trip; the native XMI->OKF read is NOT independently
 /// measured and rests on the binding's self-reported loss report.
-fn fidelity_note_markup(direction: Option<Direction>) -> Markup {
+pub(crate) fn fidelity_note_markup(direction: Option<Direction>) -> Markup {
     match direction {
         Some(Direction::ImportOnly) => html! {
             p class="fidelity-note" {
@@ -617,16 +617,16 @@ async fn perform_stream_import(
 /// The values the hash-based acceptance form carries: the retained artifact's hash plus the
 /// commit metadata the original import already captured, and the checked losses. There is no
 /// artifact and no binding field: both are recovered from the import record the hash names.
-struct AcceptForm {
-    artifact_hash: String,
-    branch: String,
-    message: String,
-    holder: String,
-    accept_losses: Vec<String>,
+pub(crate) struct AcceptForm {
+    pub(crate) artifact_hash: String,
+    pub(crate) branch: String,
+    pub(crate) message: String,
+    pub(crate) holder: String,
+    pub(crate) accept_losses: Vec<String>,
 }
 
 impl AcceptForm {
-    fn from_form(form: &HashMap<String, String>) -> Self {
+    pub(crate) fn from_form(form: &HashMap<String, String>) -> Self {
         let artifact_hash = form.get("artifactHash").cloned().unwrap_or_default();
         let branch = form
             .get("branch")
@@ -642,10 +642,17 @@ impl AcceptForm {
         // "Accept all" carries every blocking entry identity in ONE hidden field, so a single
         // click accepts the whole report without checking 252 boxes. The identities are
         // newline-joined; an entry identity never contains a newline.
+        //
+        // Split with str::lines, never with split('\n'): the HTML form-encoding algorithm
+        // REQUIRES a browser to write every LF in a field value as CRLF (the urlencoded
+        // serializer says so, for legacy reasons), so a real browser submits CRLF-joined
+        // identities. Splitting on '\n' alone left a trailing carriage return on all 252 of
+        // them, none matched the report, and the one-button acceptance silently refused itself.
+        // str::lines splits on LF and strips one trailing CR, which is exactly this encoding.
         let accept_losses = if accept_all {
             form.get("all_losses")
                 .map(|raw| {
-                    raw.split('\n')
+                    raw.lines()
                         .filter(|identity| !identity.is_empty())
                         .map(str::to_string)
                         .collect()
@@ -1094,7 +1101,7 @@ fn import_form_markup(project: &str, bindings: &[BindingInfo], can_import: bool)
 // The outcome pages: retained, lost, and (when refused) the acceptance control.
 
 #[allow(clippy::too_many_arguments)]
-fn blocking_page(
+pub(crate) fn blocking_page(
     identity: &Identity,
     mechanism: &str,
     project: &str,
@@ -1198,7 +1205,7 @@ const SELECT_ALL_SCRIPT: &str = r#"(function () {
 /// for the 252-loss report, with the per-entry boxes still there for a person who wants to
 /// decide each one.
 #[allow(clippy::too_many_arguments)]
-fn accept_form_markup(
+pub(crate) fn accept_form_markup(
     project: &str,
     artifact_hash: &str,
     branch: &str,
@@ -1265,7 +1272,7 @@ fn accept_form_markup(
 
 /// What was retained, stated on the page rather than only in a log: the source artifact,
 /// content-addressed, and - once committed - the commit it landed as.
-fn retained_markup(artifact_hash: &str, commit_hash: Option<&str>) -> Markup {
+pub(crate) fn retained_markup(artifact_hash: &str, commit_hash: Option<&str>) -> Markup {
     html! {
         section class="model-section" id="retained" {
             h2 { "Retained" }
@@ -1284,7 +1291,7 @@ fn retained_markup(artifact_hash: &str, commit_hash: Option<&str>) -> Markup {
 /// The loss report, grouped by verdict with the blocking entries first: unmappable, then
 /// lossy, then exact. Every entry names its subject, and the summary is taken from the
 /// report itself, so the page can never claim a lossless migration the report contradicts.
-fn loss_report_markup(report: &LossReport) -> Markup {
+pub(crate) fn loss_report_markup(report: &LossReport) -> Markup {
     let mut unmappable: Vec<&Mapping> = Vec::new();
     let mut lossy: Vec<&Mapping> = Vec::new();
     let mut exact: Vec<&Mapping> = Vec::new();
