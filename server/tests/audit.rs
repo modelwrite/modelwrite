@@ -95,6 +95,7 @@ fn identity(subject: &str) -> Identity {
         subject: subject.to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }
 }
 

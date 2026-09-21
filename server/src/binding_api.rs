@@ -524,7 +524,7 @@ pub async fn import_artifact(
     // bytes to the SAME core the workbench page calls, so the two cannot diverge.
     let artifact_bytes = decode_artifact(&body.artifact);
     match import_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &ImportCore {
             binding: &body.binding,
@@ -769,11 +769,11 @@ pub async fn import_artifact_stream(
     // bytes are read back only to hand them to the binding, which needs the whole document.
     let temp_path = staged.into_temp_path();
     let artifact_hash = state
-        .store
+        .store_for(&identity)
         .put_blob_file(temp_path.as_ref())
         .map_err(map_store_error)?;
     let artifact_bytes = state
-        .store
+        .store_for(&identity)
         .blob(&artifact_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| {
@@ -785,7 +785,7 @@ pub async fn import_artifact_stream(
         })?;
 
     match import_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &ImportCore {
             binding: &binding,
@@ -887,7 +887,7 @@ pub async fn accept_import_artifact(
     };
 
     match accept_import_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &artifact_hash,
         &branch,
@@ -949,7 +949,7 @@ pub async fn import_report(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let record = state
-        .store
+        .store_for(&identity)
         .import_report(&project, &artifact_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("import {}", artifact_hash)))?;
@@ -983,12 +983,12 @@ pub async fn get_artifact(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let record = state
-        .store
+        .store_for(&identity)
         .import_report(&project, &artifact_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("import {}", artifact_hash)))?;
     let bytes = state
-        .store
+        .store_for(&identity)
         .blob(&record.artifact_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| {

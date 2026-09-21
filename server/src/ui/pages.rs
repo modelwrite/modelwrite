@@ -94,7 +94,7 @@ pub async fn create_project(
         );
     }
     match create_project_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &identity.subject,
         mechanism,
         state.auth.authorizer().unwrap_or(""),
@@ -138,7 +138,10 @@ fn render_project_list(
     if !identity.may(Permission::Read) {
         return Err(ApiError::forbidden("read permission required"));
     }
-    let projects = state.store.list_projects().map_err(map_store_error)?;
+    let projects = state
+        .store_for(identity)
+        .list_projects()
+        .map_err(map_store_error)?;
     let mut rows = Vec::new();
     for project in projects {
         // A caller scoped to particular projects must not learn the names of the others:
@@ -147,13 +150,16 @@ fn render_project_list(
             continue;
         }
         let branch_count = state
-            .store
+            .store_for(identity)
             .list_branches(&project.name)
             .map_err(map_store_error)?
             .len();
-        let latest = latest_commit(state.store.as_ref(), &project.name)?;
-        let (blocks, requirements) =
-            model_size(state.store.as_ref(), &project.name, latest.as_ref());
+        let latest = latest_commit(state.store_for(identity).as_ref(), &project.name)?;
+        let (blocks, requirements) = model_size(
+            state.store_for(identity).as_ref(),
+            &project.name,
+            latest.as_ref(),
+        );
         rows.push(ProjectRow {
             name: project.name,
             branch_count,
@@ -285,7 +291,7 @@ fn render_project_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -293,12 +299,15 @@ fn render_project_page(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let branches = state
-        .store
+        .store_for(identity)
         .list_branches(project)
         .map_err(map_store_error)?;
     let mut rows = Vec::new();
     for (name, tip) in branches {
-        let commit = state.store.commit(project, &tip).map_err(map_store_error)?;
+        let commit = state
+            .store_for(identity)
+            .commit(project, &tip)
+            .map_err(map_store_error)?;
         rows.push(BranchRow { name, tip, commit });
     }
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
@@ -469,7 +478,7 @@ pub async fn create_branch(
         );
     }
     match create_branch_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &identity.subject,
         mechanism,

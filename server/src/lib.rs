@@ -14,7 +14,9 @@ pub mod locks_api;
 pub mod merge;
 pub mod merge_api;
 pub mod proposal_api;
+pub mod registered;
 pub mod store;
+pub mod trial;
 pub mod ui;
 
 pub use error::{ApiError, BodyTooLarge};
@@ -85,18 +87,25 @@ pub fn app_with_limit(state: AppState, max_body_bytes: u64) -> Router {
         evidence_dir: state.evidence_dir,
         auth: state.auth,
         max_body_bytes,
+        registered: None,
     };
-    Router::new()
-        .route("/health", get(health))
-        .route("/version", get(version))
-        // A person given the trial's address types the BARE hostname, not /ui.
-        // Serving 404 there made the deployment look broken when it was working,
-        // which is a failure of the front door rather than of the service. The
-        // root sends a visitor to the workbench; every real route is unchanged.
+    workbench_router(api_state, max_body_bytes)
+        // A person given the trial's address types the BARE hostname, not /ui. Serving 404 there
+        // made the deployment look broken when it was working. The root sends a visitor to the
+        // workbench; every real route is unchanged.
         .route(
             "/",
             get(|| async { axum::response::Redirect::temporary("/ui") }),
         )
+}
+
+/// The workbench + JSON API route table, shared by the showcase and the registered tier. The
+/// registered tier builds the same table with a different [api::ApiState] (session auth plus a
+/// per-trial store resolver), so every route keeps its permission and scope checks unchanged.
+pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/version", get(version))
         .route(
             "/ui",
             get(ui::pages::project_list).post(ui::pages::create_project),

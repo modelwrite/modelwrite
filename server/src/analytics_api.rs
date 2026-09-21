@@ -76,7 +76,7 @@ pub async fn project_analytics(
         ));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -85,14 +85,14 @@ pub async fn project_analytics(
     }
 
     let commit = resolve_commit(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         query.commit.as_deref(),
         query.branch.as_deref(),
     )?;
     // The existing load path: commit row, then its blob, then parse. No second reader.
-    let model =
-        load_model(state.store.as_ref(), &project, &commit.hash).map_err(map_store_error)?;
+    let model = load_model(state.store_for(&identity).as_ref(), &project, &commit.hash)
+        .map_err(map_store_error)?;
 
     let spec_refs: Vec<&str> = spec.iter().map(String::as_str).collect();
     let report = analytics::portfolio_report(&spec_refs, &[&model]);

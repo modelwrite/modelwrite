@@ -29,7 +29,7 @@ pub async fn list_audit(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -41,7 +41,7 @@ pub async fn list_audit(
         return Err(ApiError::bad_request("limit must be at least 1"));
     }
     let entries = state
-        .store
+        .store_for(&identity)
         .audit(&project, limit)
         .map_err(map_store_error)?;
     Ok(Json(entries))

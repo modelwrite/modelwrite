@@ -158,7 +158,7 @@ fn render_edit_form(
     }
     validate_element_name(element_id)?;
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -166,16 +166,17 @@ fn render_edit_form(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let tip = state
-        .store
+        .store_for(identity)
         .branch_tip(project, branch)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", branch)))?;
-    let root = load_model(state.store.as_ref(), project, &tip).map_err(map_store_error)?;
+    let root =
+        load_model(state.store_for(identity).as_ref(), project, &tip).map_err(map_store_error)?;
     let element = element_in(&root, element_id)
         .ok_or_else(|| ApiError::not_found(format!("element {}", element_id)))?;
     let input = EditInput::from_element(branch, element);
     let holders = state
-        .store
+        .store_for(identity)
         .holders_of(project, &[element_id.to_string()], now_seconds())
         .map_err(map_store_error)?;
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
@@ -228,7 +229,7 @@ pub async fn submit_edit(
             edit_success_page(&identity, mechanism, &project, &commit, &nav),
         ),
         Ok(EditOutcome::Invalid { input, errors }) => {
-            let holders = current_holders(&state, &project, &element);
+            let holders = current_holders(&state, &identity, &project, &element);
             layout::html_response(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 edit_page(
@@ -237,7 +238,7 @@ pub async fn submit_edit(
             )
         }
         Ok(EditOutcome::Locked { input, message }) => {
-            let holders = current_holders(&state, &project, &element);
+            let holders = current_holders(&state, &identity, &project, &element);
             layout::html_response(
                 StatusCode::CONFLICT,
                 edit_page(
@@ -287,7 +288,7 @@ fn perform_edit(
         return Err(ApiError::bad_request("commit message must not be empty"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -295,11 +296,12 @@ fn perform_edit(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let tip = state
-        .store
+        .store_for(identity)
         .branch_tip(project, &input.branch)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", input.branch)))?;
-    let root = load_model(state.store.as_ref(), project, &tip).map_err(map_store_error)?;
+    let root =
+        load_model(state.store_for(identity).as_ref(), project, &tip).map_err(map_store_error)?;
     if element_in(&root, element_id).is_none() {
         return Err(ApiError::not_found(format!("element {}", element_id)));
     }
@@ -333,7 +335,7 @@ fn perform_edit(
     // and commit. The holder is the verified identity, never a field the browser supplies.
     let now = now_seconds();
     let holder = identity.subject.as_str();
-    let locks = match state.store.acquire_locks(
+    let locks = match state.store_for(identity).acquire_locks(
         project,
         &input.branch,
         &[element_id.to_string()],
@@ -353,7 +355,7 @@ fn perform_edit(
             // the overwrite the lock prevented is the highest-value event this feature
             // produces, and the log exists to show what was tried, not only what succeeded.
             if let Err(recording) = record_refusal(
-                state.store.as_ref(),
+                state.store_for(identity).as_ref(),
                 project,
                 &identity.subject,
                 state.auth.mechanism(),
@@ -386,7 +388,7 @@ fn perform_edit(
             StoreError::Backend("the edited model could not be stored".to_string())
         })?;
         commit_core(
-            state.store.as_ref(),
+            state.store_for(identity).as_ref(),
             &CommitCore {
                 project,
                 branch: &input.branch,
@@ -421,7 +423,10 @@ fn perform_edit(
 
     // The lease was for the duration of the request. Release it whatever the commit did, so
     // the element is never left locked after the request finishes.
-    if let Err(release) = state.store.release_locks(project, holder, &lock_ids, None) {
+    if let Err(release) = state
+        .store_for(identity)
+        .release_locks(project, holder, &lock_ids, None)
+    {
         eprintln!("could not release the edit lock: {:?}", release);
     }
 
@@ -442,9 +447,14 @@ fn perform_edit(
 /// The live leases on the element, best-effort for re-rendering a refused edit. The
 /// authoritative lock check already ran in [perform_edit]; this only makes the page truthful
 /// about who holds the element when it refuses.
-fn current_holders(state: &ApiState, project: &str, element_id: &str) -> Vec<Lock> {
+fn current_holders(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+    element_id: &str,
+) -> Vec<Lock> {
     state
-        .store
+        .store_for(identity)
         .holders_of(project, &[element_id.to_string()], now_seconds())
         .unwrap_or_default()
 }

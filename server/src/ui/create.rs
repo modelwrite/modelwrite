@@ -147,7 +147,7 @@ fn perform_create_model(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -201,7 +201,7 @@ fn perform_create_model(
     // Creating a model is a FIRST commit: the branch must not already hold one, or the "start
     // one" door would silently append onto an existing model.
     if state
-        .store
+        .store_for(identity)
         .branch_tip(project, &branch)
         .map_err(map_store_error)?
         .is_some()
@@ -218,7 +218,7 @@ fn perform_create_model(
     })?;
     let now = now_seconds();
     let commit = match commit_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         &CommitCore {
             project,
             branch: &branch,
@@ -428,7 +428,7 @@ fn render_element_form(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -437,7 +437,7 @@ fn render_element_form(
     }
     validate_name("branch name", branch)?;
     if state
-        .store
+        .store_for(identity)
         .branch_tip(project, branch)
         .map_err(map_store_error)?
         .is_none()
@@ -563,7 +563,7 @@ fn perform_create_element(
         });
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -571,11 +571,12 @@ fn perform_create_element(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let tip = state
-        .store
+        .store_for(identity)
         .branch_tip(project, &input.branch)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", input.branch)))?;
-    let root = load_model(state.store.as_ref(), project, &tip).map_err(map_store_error)?;
+    let root =
+        load_model(state.store_for(identity).as_ref(), project, &tip).map_err(map_store_error)?;
     let candidate = add_element(&root, &input);
 
     // The document must still be a valid OKF model. A duplicate id, or a requirement without
@@ -596,7 +597,7 @@ fn perform_create_element(
     })?;
     let now = now_seconds();
     let commit = match commit_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         &CommitCore {
             project,
             branch: &input.branch,

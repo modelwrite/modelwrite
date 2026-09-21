@@ -66,7 +66,7 @@ pub async fn acquire_locks(
         ));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -91,7 +91,7 @@ pub async fn acquire_locks(
             now + body.ttl_seconds
         ),
     };
-    let locks = match state.store.acquire_locks(
+    let locks = match state.store_for(&identity).acquire_locks(
         &project,
         &body.branch,
         &elements,
@@ -108,7 +108,7 @@ pub async fn acquire_locks(
                 // As with a refused commit: failing to record a refusal must not change the
                 // answer. The acquire was correctly refused; the caller is told so.
                 if let Err(recording) = record_refusal(
-                    state.store.as_ref(),
+                    state.store_for(&identity).as_ref(),
                     &project,
                     &identity.subject,
                     state.auth.mechanism(),
@@ -138,7 +138,7 @@ pub async fn list_locks(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -146,7 +146,7 @@ pub async fn list_locks(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let locks = state
-        .store
+        .store_for(&identity)
         .locks(&project, now_seconds())
         .map_err(map_store_error)?;
     Ok(Json(locks))
@@ -172,7 +172,7 @@ pub async fn release_locks(
     }
     verify_actor(&state.auth, &identity, Some(&body.holder))?;
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -193,7 +193,7 @@ pub async fn release_locks(
         detail: "released lock(s)".to_string(),
     };
     let released = state
-        .store
+        .store_for(&identity)
         .release_locks(&project, &body.holder, &body.ids, Some(&audit))
         .map_err(map_store_error)?;
     Ok(Json(json!({ "released": released })))

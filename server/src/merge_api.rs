@@ -131,7 +131,7 @@ pub async fn merge_branches(
     validate_name("branch name", &body.other)?;
 
     match merge_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &MergeCore {
             branch: &body.branch,

@@ -7,6 +7,9 @@ use sha2::{Digest, Sha256};
 #[cfg(feature = "postgres")]
 pub mod postgres;
 pub mod sqlite;
+pub mod trials;
+
+pub use trials::{TrialRegistry, TrialStoreResolver};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {

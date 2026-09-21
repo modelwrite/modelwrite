@@ -368,6 +368,7 @@ async fn a_proposal_is_recorded_over_http_and_fetched_by_id() {
         subject: "alex".to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }));
 
     // Retain the artifact and record its report by attempting an import without acceptances.
@@ -475,6 +476,7 @@ async fn a_human_with_write_accepts_a_proposal_and_the_commit_names_both() {
         subject: "alex".to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }));
 
     let created = router
@@ -556,6 +558,7 @@ async fn a_refusal_is_recorded() {
         subject: "alex".to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }));
     store.create_project("coffee", None).unwrap();
     let id = store

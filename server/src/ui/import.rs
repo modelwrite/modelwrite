@@ -197,7 +197,7 @@ fn render_import_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -541,11 +541,11 @@ async fn perform_stream_import(
     // file into the blob store under its hash rather than buffering it.
     let temp_path = staged.into_temp_path();
     let artifact_hash = state
-        .store
+        .store_for(identity)
         .put_blob_file(temp_path.as_ref())
         .map_err(map_store_error)?;
     let artifact_bytes = state
-        .store
+        .store_for(identity)
         .blob(&artifact_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| {
@@ -557,7 +557,7 @@ async fn perform_stream_import(
         })?;
 
     match import_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         project,
         &ImportCore {
             binding: &binding,
@@ -765,7 +765,7 @@ fn perform_accept_import(
     verify_actor(&state.auth, identity, holder)?;
 
     match accept_import_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         project,
         &input.artifact_hash,
         &input.branch,
@@ -882,7 +882,7 @@ fn perform_import(
     // SAME core the endpoint calls.
     let artifact_bytes = decode_artifact(&input.artifact);
     match import_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         project,
         &ImportCore {
             binding: &input.binding,

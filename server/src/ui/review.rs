@@ -87,7 +87,7 @@ fn render_compare_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -114,19 +114,20 @@ fn render_compare_page(
             body,
         ));
     };
-    let from_hash = resolve_ref(state.store.as_ref(), project, from)?;
-    let to_hash = resolve_ref(state.store.as_ref(), project, to)?;
+    let from_hash = resolve_ref(state.store_for(identity).as_ref(), project, from)?;
+    let to_hash = resolve_ref(state.store_for(identity).as_ref(), project, to)?;
     let from_commit = state
-        .store
+        .store_for(identity)
         .commit(project, &from_hash)
         .map_err(map_store_error)?;
     let to_commit = state
-        .store
+        .store_for(identity)
         .commit(project, &to_hash)
         .map_err(map_store_error)?;
-    let reference =
-        load_model(state.store.as_ref(), project, &from_hash).map_err(map_store_error)?;
-    let candidate = load_model(state.store.as_ref(), project, &to_hash).map_err(map_store_error)?;
+    let reference = load_model(state.store_for(identity).as_ref(), project, &from_hash)
+        .map_err(map_store_error)?;
+    let candidate = load_model(state.store_for(identity).as_ref(), project, &to_hash)
+        .map_err(map_store_error)?;
 
     // THE ENGINE'S DIFF and THE ENGINE'S GATE: rendered, never recomputed, so the page can
     // never disagree with the gate. Note what is NOT here: this page runs the engine and
@@ -137,7 +138,7 @@ fn render_compare_page(
     let from_label = side_label(from, &from_hash);
     let to_label = side_label(to, &to_hash);
     let impact = impact_panel(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         &from_label,
         &to_label,
         &reference,
@@ -1032,7 +1033,7 @@ fn perform_merge(
     let author = identity.subject.clone();
 
     match merge_core(
-        state.store.as_ref(),
+        state.store_for(identity).as_ref(),
         project,
         &MergeCore {
             branch: &form.branch,

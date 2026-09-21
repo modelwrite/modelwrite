@@ -34,6 +34,7 @@ fn admin() -> AuthConfig {
         subject: "alex".to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     })
 }
 
@@ -43,6 +44,7 @@ fn viewer() -> AuthConfig {
         subject: "viewer".to_string(),
         roles: vec!["viewer".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     })
 }
 

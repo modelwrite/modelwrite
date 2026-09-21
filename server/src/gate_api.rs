@@ -27,10 +27,18 @@ pub async fn run_gate(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    let reference =
-        load_model(state.store.as_ref(), &project, &body.reference).map_err(map_store_error)?;
-    let candidate =
-        load_model(state.store.as_ref(), &project, &body.candidate).map_err(map_store_error)?;
+    let reference = load_model(
+        state.store_for(&identity).as_ref(),
+        &project,
+        &body.reference,
+    )
+    .map_err(map_store_error)?;
+    let candidate = load_model(
+        state.store_for(&identity).as_ref(),
+        &project,
+        &body.candidate,
+    )
+    .map_err(map_store_error)?;
 
     let mut outcome = gate::run(&reference, &candidate, false);
 
@@ -41,8 +49,8 @@ pub async fn run_gate(
     // resolution or was-gated failure refuses the integration, exactly like a single-model
     // failure; the composition findings are merged into the evidence so the report cannot
     // blur a proof and a claim.
-    let composition =
-        crate::composition::check(state.store.as_ref(), &candidate).map_err(map_store_error)?;
+    let composition = crate::composition::check(state.store_for(&identity).as_ref(), &candidate)
+        .map_err(map_store_error)?;
     outcome.failures.extend(composition.failures);
     outcome.passed = outcome.failures.is_empty();
     outcome.evidence["composition"] = composition.evidence;
@@ -51,7 +59,7 @@ pub async fn run_gate(
         serde_json::to_value(&outcome.failures).expect("failures serialize");
 
     let branch = state
-        .store
+        .store_for(&identity)
         .commit(&project, &body.candidate)
         .map_err(map_store_error)?
         .map(|c| c.branch)
@@ -89,7 +97,7 @@ pub async fn run_gate(
         ),
     };
     state
-        .store
+        .store_for(&identity)
         .record_gate_run(&run, Some(&audit))
         .map_err(map_store_error)?;
 
@@ -133,7 +141,10 @@ pub async fn list_gate_runs(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    let runs = state.store.gate_runs(&project).map_err(map_store_error)?;
+    let runs = state
+        .store_for(&identity)
+        .gate_runs(&project)
+        .map_err(map_store_error)?;
     let out: Vec<Value> = runs.iter().map(gate_run_json).collect();
     Ok(Json(Value::Array(out)))
 }
@@ -179,12 +190,12 @@ pub async fn commit_checks(
     // "this model does not exist" from "this model exists and nobody checked it", and the
     // 404 names only the missing commit, never internal detail.
     let commit = state
-        .store
+        .store_for(&identity)
         .commit(&project, &hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
     let runs = state
-        .store
+        .store_for(&identity)
         .gate_runs_for_commit(&project, &hash)
         .map_err(map_store_error)?;
     let checked = !runs.is_empty();

@@ -1641,6 +1641,7 @@ dependencies = [
  "postgres",
  "r2d2",
  "r2d2_postgres",
+ "rand 0.8.8",
  "rusqlite",
  "rustls",
  "rustls-native-certs",

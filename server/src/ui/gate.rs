@@ -53,14 +53,17 @@ fn render_gate_list(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    let mut runs = state.store.gate_runs(project).map_err(map_store_error)?;
+    let mut runs = state
+        .store_for(identity)
+        .gate_runs(project)
+        .map_err(map_store_error)?;
     // The store returns runs in insertion order; the page lists the most recent first.
     runs.reverse();
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
@@ -174,7 +177,7 @@ fn render_gate_detail(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -182,7 +185,7 @@ fn render_gate_detail(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let run = state
-        .store
+        .store_for(identity)
         .gate_runs(project)
         .map_err(map_store_error)?
         .into_iter()

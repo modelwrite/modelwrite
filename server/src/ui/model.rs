@@ -82,7 +82,7 @@ pub async fn overview_page(
     if query.branch.as_deref().is_none_or(str::is_empty)
         && query.commit.as_deref().is_none_or(str::is_empty)
     {
-        match default_branch(&state, &project) {
+        match default_branch(&state, &identity, &project) {
             Ok(Some(branch)) => {
                 let mut url = format!(
                     "/ui/projects/{}/overview?branch={}",
@@ -142,14 +142,14 @@ pub(crate) fn load_view(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
     {
         return Err(ApiError::not_found(format!("project {}", project)));
     }
-    let hash = match resolve_hash(state, project, query) {
+    let hash = match resolve_hash(state, identity, project, query) {
         Ok(hash) => hash,
         Err(error) => {
             // A project with no commits at all has no model to render. The page says what to
@@ -157,7 +157,7 @@ pub(crate) fn load_view(
             // empty state, not an error: a named branch that has no tip while another does
             // is still a real 404.
             let branches = state
-                .store
+                .store_for(identity)
                 .list_branches(project)
                 .map_err(map_store_error)?;
             if branches.is_empty() {
@@ -167,11 +167,12 @@ pub(crate) fn load_view(
         }
     };
     let commit = state
-        .store
+        .store_for(identity)
         .commit(project, &hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
-    let root = load_model(state.store.as_ref(), project, &hash).map_err(map_store_error)?;
+    let root =
+        load_model(state.store_for(identity).as_ref(), project, &hash).map_err(map_store_error)?;
     Ok(LoadedView::Model { commit, root })
 }
 
@@ -198,13 +199,13 @@ fn render_model_page(
             nav.branch = Some(view_branch(query, &commit));
             nav.commit = Some(commit.hash.clone());
             let branches = state
-                .store
+                .store_for(identity)
                 .list_branches(project)
                 .map_err(map_store_error)?;
             let latest_run = if identity.may(Permission::Write) || identity.may(Permission::Review)
             {
                 state
-                    .store
+                    .store_for(identity)
                     .gate_runs(project)
                     .map_err(map_store_error)?
                     .into_iter()
@@ -239,9 +240,13 @@ pub(crate) fn view_branch(query: &ModelQuery, commit: &Commit) -> String {
 /// The branch a bare overview URL resolves to: the main line when it exists, otherwise the
 /// alphabetically-first branch (the store returns branches sorted by name). Returns None for a
 /// project with no branches at all.
-fn default_branch(state: &ApiState, project: &str) -> Result<Option<String>, ApiError> {
+fn default_branch(
+    state: &ApiState,
+    identity: &Identity,
+    project: &str,
+) -> Result<Option<String>, ApiError> {
     let branches = state
-        .store
+        .store_for(identity)
         .list_branches(project)
         .map_err(map_store_error)?;
     if branches.is_empty() {
@@ -257,6 +262,7 @@ fn default_branch(state: &ApiState, project: &str) -> Result<Option<String>, Api
 /// (defaulting to `main`), using only the existing store reads.
 pub(crate) fn resolve_hash(
     state: &ApiState,
+    identity: &Identity,
     project: &str,
     query: &ModelQuery,
 ) -> Result<String, ApiError> {
@@ -271,7 +277,7 @@ pub(crate) fn resolve_hash(
         .filter(|branch| !branch.is_empty())
         .unwrap_or("main");
     state
-        .store
+        .store_for(identity)
         .branch_tip(project, branch)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {} has no commits", branch)))

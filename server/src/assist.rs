@@ -991,7 +991,7 @@ pub async fn assist(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let outcome = assist_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &body.branch,
         &body.request,

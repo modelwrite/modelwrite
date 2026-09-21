@@ -100,7 +100,7 @@ pub async fn record_proposal(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -129,7 +129,7 @@ pub async fn record_proposal(
         detail: task_goal.clone(),
     };
     state
-        .store
+        .store_for(&identity)
         .record_proposal(
             &project,
             &identity.subject,
@@ -141,7 +141,7 @@ pub async fn record_proposal(
         )
         .map_err(map_store_error)?;
     let record = state
-        .store
+        .store_for(&identity)
         .proposal(&project, &id)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::internal("the proposal could not be read after recording"))?;
@@ -161,7 +161,7 @@ pub async fn get_proposal(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let record = state
-        .store
+        .store_for(&identity)
         .proposal(&project, &id)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("proposal {}", id)))?;
@@ -183,7 +183,7 @@ pub async fn list_proposals(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let records = state
-        .store
+        .store_for(&identity)
         .list_proposals(&project)
         .map_err(map_store_error)?;
     Ok(Json(Value::Array(
@@ -226,7 +226,7 @@ pub async fn accept_proposal(
     validate_name("branch name", &body.branch)?;
 
     let commit = accept_proposal_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &id,
         &identity.subject,
@@ -239,7 +239,7 @@ pub async fn accept_proposal(
         &body.accepted_items,
     )?;
     let record = state
-        .store
+        .store_for(&identity)
         .proposal(&project, &id)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::internal("the proposal could not be read after accepting"))?;
@@ -522,11 +522,11 @@ pub async fn refuse_proposal(
         detail,
     };
     state
-        .store
+        .store_for(&identity)
         .refuse_proposal(&project, &id, &identity.subject, Some(&audit))
         .map_err(map_store_error)?;
     let record = state
-        .store
+        .store_for(&identity)
         .proposal(&project, &id)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::internal("the proposal could not be read after refusing"))?;

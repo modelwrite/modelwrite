@@ -124,7 +124,7 @@ fn render_assist_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -135,7 +135,7 @@ fn render_assist_page(
     nav.section = Some("assist");
     nav.branch = Some("main".to_string());
     let has_model = state
-        .store
+        .store_for(identity)
         .branch_tip(project, "main")
         .map_err(map_store_error)?
         .is_some();
@@ -232,7 +232,7 @@ pub async fn assist_form(
         }
     };
     match assist_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &form.branch,
         &form.request,
@@ -508,7 +508,7 @@ pub async fn accept_proposal_form(
     // The author is the verified identity, never a field the browser supplies.
     let author = identity.subject.clone();
     match accept_proposal_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &id,
         &identity.subject,

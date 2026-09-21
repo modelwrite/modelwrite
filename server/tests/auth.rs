@@ -43,6 +43,7 @@ fn router(auth: AuthConfig) -> Router {
             evidence_dir: dir.path().to_path_buf(),
             auth,
             max_body_bytes: server::DEFAULT_MAX_BODY_BYTES,
+            registered: None,
         })
 }
 
@@ -161,6 +162,7 @@ fn identity(subject: &str, roles: &[&str], projects: &[&str]) -> Identity {
         subject: subject.to_string(),
         roles: roles.iter().map(|s| s.to_string()).collect(),
         projects: projects.iter().map(|s| s.to_string()).collect(),
+        trial_id: None,
     }
 }
 
@@ -464,6 +466,7 @@ async fn a_scoped_identity_only_sees_the_projects_it_may_reach() {
         subject: "alex".to_string(),
         roles: vec!["viewer".to_string()],
         projects: vec!["coffee".to_string()],
+        trial_id: None,
     });
     store.create_project("coffee", None).unwrap();
     store.create_project("tea", None).unwrap();
@@ -512,6 +515,7 @@ async fn a_identity_with_no_roles_is_denied_a_read() {
         subject: "nobody".to_string(),
         roles: Vec::new(),
         projects: vec!["*".to_string()],
+        trial_id: None,
     });
     store.create_project("coffee", None).unwrap();
 
@@ -537,6 +541,7 @@ async fn a_identity_that_reaches_nothing_sees_an_empty_listing() {
         subject: "scopeless".to_string(),
         roles: vec!["viewer".to_string()],
         projects: Vec::new(),
+        trial_id: None,
     });
     store.create_project("coffee", None).unwrap();
 

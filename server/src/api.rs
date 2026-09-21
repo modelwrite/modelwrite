@@ -27,6 +27,31 @@ pub struct ApiState {
     /// state it before a user uploads, and so the streaming import can refuse with the
     /// exact number rather than a bare 413.
     pub max_body_bytes: u64,
+    /// The registered tier, present only when the service runs in registered mode. When
+    /// present, every store access resolves to the CALLER'S OWN trial database, keyed by
+    /// the trial id carried on the session-verified identity.
+    pub registered: Option<Arc<crate::trial::TrialService>>,
+}
+
+impl ApiState {
+    /// The store for this request. In showcase mode this is the one shared store; in
+    /// registered mode it is the per-trial database named by the identity's trial id, which
+    /// arrived from the SESSION, never from the request body or path. Resolution is infallible
+    /// and fails CLOSED: a missing trial id or an unopenable database yields the empty
+    /// placeholder store, which denies every read and write rather than ever reaching another
+    /// trial's data.
+    pub fn store_for(&self, identity: &Identity) -> Arc<dyn Store> {
+        let Some(tier) = &self.registered else {
+            return self.store.clone();
+        };
+        let Some(trial_id) = identity.trial_id.as_deref() else {
+            return self.store.clone();
+        };
+        tier.registry.store_for(trial_id).unwrap_or_else(|error| {
+            eprintln!("could not open trial store {}: {}", trial_id, error);
+            self.store.clone()
+        })
+    }
 }
 
 /// A name that is safe as a URL segment: letters, digits, dot, underscore and hyphen,
@@ -596,7 +621,7 @@ pub async fn create_project(
     }
     validate_name("project name", &body.name)?;
     let project = create_project_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &identity.subject,
         state.auth.mechanism(),
         state.auth.authorizer().unwrap_or(""),
@@ -616,7 +641,10 @@ pub async fn list_projects(
     if !identity.may(Permission::Read) {
         return Err(ApiError::forbidden("read permission required"));
     }
-    let projects = state.store.list_projects().map_err(map_store_error)?;
+    let projects = state
+        .store_for(&identity)
+        .list_projects()
+        .map_err(map_store_error)?;
     // A caller scoped to particular projects must not learn the names of the others. The
     // listing is filtered rather than refused: an identity that reaches nothing gets an
     // empty list, which is the truthful answer to "what may I see".
@@ -655,7 +683,7 @@ pub async fn create_commit(
     let author = resolve_author(&state.auth, &identity, &body.author)?;
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -684,13 +712,14 @@ pub async fn create_commit(
     // commit transaction, so a lock taken after this point cannot be bypassed.
     let now = now_seconds();
     let tip_hash = state
-        .store
+        .store_for(&identity)
         .branch_tip(&project, &body.branch)
         .map_err(map_store_error)?;
     let reference: Option<okf::types::OkfRoot> = match tip_hash.as_deref() {
-        Some(tip) => {
-            Some(load_model(state.store.as_ref(), &project, tip).map_err(map_store_error)?)
-        }
+        Some(tip) => Some(
+            load_model(state.store_for(&identity).as_ref(), &project, tip)
+                .map_err(map_store_error)?,
+        ),
         None => None,
     };
 
@@ -700,7 +729,7 @@ pub async fn create_commit(
     if let Some(holder) = body.holder.as_deref() {
         let touched = commit_touched(reference.as_ref(), &root);
         let held = state
-            .store
+            .store_for(&identity)
             .holders_of(&project, &touched, now_seconds())
             .map_err(map_store_error)?;
         if let Some(blocked) = held.iter().find(|l| l.holder != holder) {
@@ -717,7 +746,7 @@ pub async fn create_commit(
     // audit row in one transaction. Keeping the validation above is deliberate: it refuses
     // an invalid document BEFORE any store read, exactly as before.
     let commit = commit_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &CommitCore {
             project: &project,
             branch: &body.branch,
@@ -764,7 +793,7 @@ pub async fn list_commits(
     }
     let branch = query.branch.unwrap_or_else(|| "main".to_string());
     let commits = state
-        .store
+        .store_for(&identity)
         .commits_on(&project, &branch)
         .map_err(map_store_error)?;
     Ok(Json(Value::Array(
@@ -784,12 +813,12 @@ pub async fn get_commit(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let commit = state
-        .store
+        .store_for(&identity)
         .commit(&project, &hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
     let bytes = state
-        .store
+        .store_for(&identity)
         .blob(&commit.okf_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| {
@@ -823,7 +852,7 @@ pub async fn get_commit_record(
         return Err(ApiError::forbidden("project not in scope"));
     }
     let commit = state
-        .store
+        .store_for(&identity)
         .commit(&project, &hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", hash)))?;
@@ -845,7 +874,8 @@ pub async fn list_references(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    let model = load_model(state.store.as_ref(), &project, &hash).map_err(map_store_error)?;
+    let model = load_model(state.store_for(&identity).as_ref(), &project, &hash)
+        .map_err(map_store_error)?;
     Ok(Json(json!({
         "project": project,
         "commit": hash,
@@ -868,12 +898,13 @@ pub async fn resolve_references(
     if !identity.may_reach(&project) {
         return Err(ApiError::forbidden("project not in scope"));
     }
-    let model = load_model(state.store.as_ref(), &project, &hash).map_err(map_store_error)?;
+    let model = load_model(state.store_for(&identity).as_ref(), &project, &hash)
+        .map_err(map_store_error)?;
     let mut all_resolve = true;
     let mut references = Vec::new();
     for reference in &model.references {
         let reason = check_reference(
-            state.store.as_ref(),
+            state.store_for(&identity).as_ref(),
             &reference.project,
             &reference.revision,
         )
@@ -945,7 +976,7 @@ pub async fn create_branch(
     }
     validate_name("branch name", &body.name)?;
     create_branch_core(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &identity.subject,
         state.auth.mechanism(),
@@ -972,7 +1003,7 @@ pub async fn list_branches(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -980,7 +1011,7 @@ pub async fn list_branches(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let branches = state
-        .store
+        .store_for(&identity)
         .list_branches(&project)
         .map_err(map_store_error)?;
     let out: Vec<Value> = branches
@@ -1014,7 +1045,7 @@ pub async fn delete_branch(
         detail: "branch deleted".to_string(),
     };
     state
-        .store
+        .store_for(&identity)
         .delete_branch(&project, &name, Some(&audit))
         .map_err(map_store_error)?;
     Ok(StatusCode::NO_CONTENT)
@@ -1050,7 +1081,7 @@ pub async fn reset_branch(
     verify_actor(&state.auth, &identity, body.holder.as_deref())?;
     validate_name("branch name", &name)?;
     if state
-        .store
+        .store_for(&identity)
         .project(&project)
         .map_err(map_store_error)?
         .is_none()
@@ -1058,12 +1089,12 @@ pub async fn reset_branch(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let tip_hash = state
-        .store
+        .store_for(&identity)
         .branch_tip(&project, &name)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {}", name)))?;
     let target = state
-        .store
+        .store_for(&identity)
         .commit(&project, &body.to)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {}", body.to)))?;
@@ -1071,10 +1102,10 @@ pub async fn reset_branch(
     // holder has locked. The touched set is the difference between the CURRENT tip model
     // and the TARGET model. A caller that holds the leases passes its holder and proceeds;
     // a caller that does not is refused, because an absent holder cannot be the holder.
-    let tip_model =
-        load_model(state.store.as_ref(), &project, &tip_hash).map_err(map_store_error)?;
-    let target_model =
-        load_model(state.store.as_ref(), &project, &body.to).map_err(map_store_error)?;
+    let tip_model = load_model(state.store_for(&identity).as_ref(), &project, &tip_hash)
+        .map_err(map_store_error)?;
+    let target_model = load_model(state.store_for(&identity).as_ref(), &project, &body.to)
+        .map_err(map_store_error)?;
     let touched = touched_elements(&tip_model, &target_model);
     let guard = CommitGuard {
         holder: body.holder.as_deref().unwrap_or(""),
@@ -1096,13 +1127,13 @@ pub async fn reset_branch(
         detail: format!("reset to {}", body.to),
     };
     let commit = commit_refusal_guard_attributed(
-        state.store.as_ref(),
+        state.store_for(&identity).as_ref(),
         &project,
         &name,
         &identity.subject,
         state.auth.mechanism(),
         state.auth.authorizer().unwrap_or(""),
-        state.store.commit_model(
+        state.store_for(&identity).commit_model(
             &project,
             &name,
             &target.okf_hash,

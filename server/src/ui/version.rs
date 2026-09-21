@@ -64,7 +64,7 @@ fn render_new_version(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -185,7 +185,7 @@ fn render_make_current(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -198,19 +198,19 @@ fn render_make_current(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::bad_request("the candidate branch is required"))?;
     let main_tip = state
-        .store
+        .store_for(identity)
         .branch_tip(project, "main")
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found("branch main has no commits"))?;
     let candidate_tip = state
-        .store
+        .store_for(identity)
         .branch_tip(project, candidate)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("branch {candidate} has no commits")))?;
-    let main_model =
-        load_model(state.store.as_ref(), project, &main_tip).map_err(map_store_error)?;
-    let candidate_model =
-        load_model(state.store.as_ref(), project, &candidate_tip).map_err(map_store_error)?;
+    let main_model = load_model(state.store_for(identity).as_ref(), project, &main_tip)
+        .map_err(map_store_error)?;
+    let candidate_model = load_model(state.store_for(identity).as_ref(), project, &candidate_tip)
+        .map_err(map_store_error)?;
 
     // The gate verdict is the ENGINE's, computed the same way the compare page computes it.
     // The page records nothing here; the merge itself records the audit entry and commit.

@@ -90,6 +90,7 @@ fn viewer() -> Identity {
         subject: "viewer".to_string(),
         roles: vec!["viewer".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }
 }
 
@@ -318,6 +319,7 @@ async fn a_scoped_identity_only_sees_its_projects() {
             subject: "scoped".to_string(),
             roles: vec!["viewer".to_string()],
             projects: vec!["coffee".to_string()],
+            trial_id: None,
         }),
     });
 
@@ -551,6 +553,7 @@ async fn a_scoped_identity_cannot_see_another_projects_model() {
             subject: "scoped".to_string(),
             roles: vec!["viewer".to_string()],
             projects: vec!["coffee".to_string()],
+            trial_id: None,
         }),
     });
 
@@ -984,6 +987,7 @@ fn author() -> Identity {
         subject: "alice".to_string(),
         roles: vec!["author".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }
 }
 
@@ -1486,6 +1490,7 @@ fn reviewer() -> Identity {
         subject: "reviewer".to_string(),
         roles: vec!["reviewer".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }
 }
 

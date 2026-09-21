@@ -10,6 +10,7 @@
 //! projects arrive from configurable claims.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -27,6 +28,10 @@ pub struct Identity {
     pub subject: String,
     pub roles: Vec<String>,
     pub projects: Vec<String>,
+    /// The registered trial this session is scoped to. Only session authentication sets it;
+    /// every other mechanism leaves it `None`, and open/static/jwt identities reach every
+    /// project in the shared store.
+    pub trial_id: Option<String>,
 }
 
 impl Identity {
@@ -38,6 +43,7 @@ impl Identity {
             subject: "anonymous".to_string(),
             roles: vec!["admin".to_string()],
             projects: vec!["*".to_string()],
+            trial_id: None,
         }
     }
 
@@ -57,6 +63,22 @@ impl Identity {
     pub fn may_reach(&self, project: &str) -> bool {
         self.projects.iter().any(|p| p == "*" || p == project)
     }
+}
+
+/// The verified actor behind a request in the REGISTERED tier: the session resolved from a
+/// bearer token or cookie. `expires_at` is seconds since the epoch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIdentity {
+    pub email: String,
+    pub trial_id: String,
+    pub expires_at: i64,
+}
+
+/// Resolves a presented session token to the identity it was issued to. Implemented by the
+/// registered tier's identity store; the resolution refuses expired sessions and sessions
+/// whose trial has been archived.
+pub trait SessionResolver: Send + Sync {
+    fn resolve(&self, token: &str) -> Option<SessionIdentity>;
 }
 
 /// The four capabilities a route can demand. Each maps to the roles that grant it.
@@ -121,6 +143,12 @@ pub enum AuthConfig {
     /// the permission and project-scope decisions be exercised with a specific role or
     /// scope. `from_env` never produces it.
     Fixed(Identity),
+    /// Sessions in the REGISTERED tier: a bearer token (or cookie) issued when a login code
+    /// is redeemed. The token maps to an email and a trial; the identity is that trial's
+    /// owner, an admin over that one trial only.
+    Session {
+        sessions: Arc<dyn SessionResolver>,
+    },
 }
 
 /// Redacted on purpose: a derived Debug would print the token digest or the JWKS keys, and
@@ -167,6 +195,7 @@ impl std::fmt::Debug for AuthConfig {
                 .field("roles", &identity.roles)
                 .field("projects", &identity.projects)
                 .finish(),
+            AuthConfig::Session { .. } => write!(f, "AuthConfig::Session"),
         }
     }
 }
@@ -326,6 +355,7 @@ impl AuthConfig {
             AuthConfig::Jwt { .. } => "jwt",
             AuthConfig::Agent { .. } => "agent",
             AuthConfig::Fixed(_) => "fixed",
+            AuthConfig::Session { .. } => "session",
         }
     }
 
@@ -369,6 +399,7 @@ fn static_identity() -> Identity {
         subject: "admin".to_string(),
         roles: vec!["admin".to_string()],
         projects: vec!["*".to_string()],
+        trial_id: None,
     }
 }
 
@@ -409,6 +440,7 @@ pub fn parse_identity_from_agent(token: &str, config: &AuthConfig) -> Option<Ide
             subject: subject.clone(),
             roles: roles.clone(),
             projects: projects.clone(),
+            trial_id: None,
         })
     } else {
         None
@@ -585,6 +617,7 @@ pub fn parse_identity_from_jwt(token: &str, config: &AuthConfig) -> Option<Ident
         subject,
         roles,
         projects,
+        trial_id: None,
     })
 }
 
@@ -599,6 +632,25 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     } else {
         Some(rest)
     }
+}
+
+/// The session token for the registered tier: the `Authorization: Bearer` value, or the
+/// `mw_session` cookie when no bearer header is present. The no-JS registration flow stores
+/// the session in a cookie; API clients present it as a bearer token.
+pub fn session_token(headers: &HeaderMap) -> Option<&str> {
+    if let Some(token) = bearer_token(headers) {
+        return Some(token);
+    }
+    let cookie = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    for pair in cookie.split(';') {
+        let pair = pair.trim();
+        if let Some(value) = pair.strip_prefix("mw_session=") {
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 /// Resolve the request's identity against the configured authentication. In open mode every
@@ -626,6 +678,19 @@ pub async fn identity(state: &ApiState, headers: &HeaderMap) -> Result<Identity,
             parse_identity_from_agent(token, &state.auth)
                 .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))
         }
+        AuthConfig::Session { sessions } => {
+            let token =
+                session_token(headers).ok_or_else(|| ApiError::unauthorized("missing session"))?;
+            let session = sessions
+                .resolve(token)
+                .ok_or_else(|| ApiError::unauthorized("invalid or expired session"))?;
+            Ok(Identity {
+                subject: session.email,
+                roles: vec!["admin".to_string()],
+                projects: vec!["*".to_string()],
+                trial_id: Some(session.trial_id),
+            })
+        }
     }
 }
 
@@ -650,6 +715,7 @@ mod tests {
             subject: "test".to_string(),
             roles: roles.iter().map(|s| s.to_string()).collect(),
             projects: vec!["*".to_string()],
+            trial_id: None,
         }
     }
 
@@ -705,6 +771,7 @@ mod tests {
             subject: "s".to_string(),
             roles: vec!["author".to_string()],
             projects: vec!["coffee".to_string()],
+            trial_id: None,
         };
         assert!(scoped.may_reach("coffee"));
         assert!(!scoped.may_reach("tea"));
@@ -713,6 +780,7 @@ mod tests {
             subject: "s".to_string(),
             roles: vec!["author".to_string()],
             projects: vec!["*".to_string()],
+            trial_id: None,
         };
         assert!(wildcard.may_reach("tea"));
     }

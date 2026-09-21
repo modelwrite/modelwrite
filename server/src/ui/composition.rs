@@ -108,14 +108,14 @@ fn composition_markup(
     root: &OkfRoot,
     nav: &layout::Nav,
 ) -> Result<Markup, ApiError> {
-    let raw = raw_model_json(state, commit)?;
+    let raw = raw_model_json(state, identity, commit)?;
     let allocated = allocated_to_map(&raw);
 
     let mut cards: Vec<SubsystemCard> = Vec::new();
     let mut resolved_count = 0usize;
     for reference in &root.references {
         let reason = check_reference(
-            state.store.as_ref(),
+            state.store_for(identity).as_ref(),
             &reference.project,
             &reference.revision,
         )
@@ -134,8 +134,8 @@ fn composition_markup(
         });
     }
 
-    let composition =
-        crate::composition::check(state.store.as_ref(), root).map_err(map_store_error)?;
+    let composition = crate::composition::check(state.store_for(identity).as_ref(), root)
+        .map_err(map_store_error)?;
     let (measured, asserted) = boundary_lists(&composition.evidence);
 
     let example_reachable = nav.projects.iter().any(|p| p == "cafe-stand");
@@ -336,9 +336,13 @@ fn process_flow_markup(layers: &[ProcessLayer]) -> Markup {
 
 /// Read the raw OKF document behind a commit, preserving the fields the typed model drops
 /// (an activity's attributes).
-fn raw_model_json(state: &ApiState, commit: &Commit) -> Result<Value, ApiError> {
+fn raw_model_json(
+    state: &ApiState,
+    identity: &Identity,
+    commit: &Commit,
+) -> Result<Value, ApiError> {
     let bytes = state
-        .store
+        .store_for(identity)
         .blob(&commit.okf_hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::internal("stored model is missing"))?;

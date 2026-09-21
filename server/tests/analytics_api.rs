@@ -233,6 +233,7 @@ async fn a_caller_without_read_is_refused_before_the_store_is_touched() {
         subject: "nobody".to_string(),
         roles: Vec::new(),
         projects: vec!["*".to_string()],
+        trial_id: None,
     };
     let router = app(AppState {
         store: store.clone(),
@@ -266,6 +267,7 @@ async fn a_scoped_caller_is_refused_for_a_project_it_may_not_reach() {
         subject: "viewer".to_string(),
         roles: vec!["viewer".to_string()],
         projects: vec!["tea".to_string()],
+        trial_id: None,
     };
     let router = app(AppState {
         store: store.clone(),

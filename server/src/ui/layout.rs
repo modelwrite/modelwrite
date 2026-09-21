@@ -1233,14 +1233,18 @@ impl Nav {
         current: Option<&str>,
     ) -> Result<Nav, ApiError> {
         let mut projects = Vec::new();
-        for project in state.store.list_projects().map_err(map_store_error)? {
+        for project in state
+            .store_for(identity)
+            .list_projects()
+            .map_err(map_store_error)?
+        {
             if identity.may_reach(&project.name) {
                 projects.push(project.name);
             }
         }
         projects.sort();
         let (branches, recent_commits) = match current {
-            Some(project) => load_versions(state, project)?,
+            Some(project) => load_versions(state, identity, project)?,
             None => (Vec::new(), Vec::new()),
         };
         Ok(Nav {
@@ -1275,13 +1279,14 @@ impl Nav {
 #[allow(clippy::type_complexity)]
 fn load_versions(
     state: &ApiState,
+    identity: &Identity,
     project: &str,
 ) -> Result<(Vec<(String, String)>, Vec<Commit>), ApiError> {
     let branches = state
-        .store
+        .store_for(identity)
         .list_branches(project)
         .map_err(map_store_error)?;
-    let recent = recent_commits(state.store.as_ref(), project, &branches)?;
+    let recent = recent_commits(state.store_for(identity).as_ref(), project, &branches)?;
     Ok((branches, recent))
 }
 

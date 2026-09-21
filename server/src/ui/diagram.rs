@@ -94,20 +94,21 @@ fn render_diagram_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
     {
         return Err(ApiError::not_found(format!("project {project}")));
     }
-    let hash = resolve_hash(state, project, query)?;
+    let hash = resolve_hash(state, identity, project, query)?;
     let commit = state
-        .store
+        .store_for(identity)
         .commit(project, &hash)
         .map_err(map_store_error)?
         .ok_or_else(|| ApiError::not_found(format!("commit {hash}")))?;
-    let root = load_model(state.store.as_ref(), project, &hash).map_err(map_store_error)?;
+    let root =
+        load_model(state.store_for(identity).as_ref(), project, &hash).map_err(map_store_error)?;
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
     nav.section = Some("diagram");
     nav.branch = Some(view_branch(query, &commit));

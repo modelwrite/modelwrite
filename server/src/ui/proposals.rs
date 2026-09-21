@@ -51,7 +51,7 @@ fn render_proposals_page(
         return Err(ApiError::forbidden("project not in scope"));
     }
     if state
-        .store
+        .store_for(identity)
         .project(project)
         .map_err(map_store_error)?
         .is_none()
@@ -59,7 +59,7 @@ fn render_proposals_page(
         return Err(ApiError::not_found(format!("project {}", project)));
     }
     let records = state
-        .store
+        .store_for(identity)
         .list_proposals(project)
         .map_err(map_store_error)?;
     let mut nav = layout::Nav::load(state, identity, Some(project))?;
