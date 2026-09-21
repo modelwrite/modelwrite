@@ -49,11 +49,12 @@ const DANGLING_W: f64 = 180.0;
 const DANGLING_H: f64 = 48.0;
 const DANG_GAP: f64 = 44.0;
 
-/// The two diagram types. The choice is kept in the URL view query like every other view.
+/// The three diagram types. The choice is kept in the URL view query like every other view.
 #[derive(Clone, Copy, PartialEq)]
 enum DiagramView {
     Structure,
     Process,
+    Control,
 }
 
 /// GET /ui/projects/:project/diagram?branch=&commit=&view= - the model's graph as inline SVG.
@@ -136,7 +137,10 @@ fn diagram_markup(
     let body = if let Some(graph) = &root.graph {
         let structure = structure_svg(graph);
         let process = process_svg(graph);
-        let view = if query.view.as_deref() == Some("process") && process.is_some() {
+        let control = control_svg(graph);
+        let view = if query.view.as_deref() == Some("control") && control.is_some() {
+            DiagramView::Control
+        } else if query.view.as_deref() == Some("process") && process.is_some() {
             DiagramView::Process
         } else {
             DiagramView::Structure
@@ -144,6 +148,7 @@ fn diagram_markup(
         let svg: &str = match view {
             DiagramView::Structure => structure.as_str(),
             DiagramView::Process => process.as_ref().expect("process chosen only when present"),
+            DiagramView::Control => control.as_ref().expect("control chosen only when present"),
         };
         let kinds = distinct_kinds(graph);
         let unmappable = symbol::unmappable_findings(graph);
@@ -159,7 +164,7 @@ fn diagram_markup(
             p class="meta" {
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Back to the overview" }
             }
-            (diagram_toolbar(project, commit, view, process.is_some(), &kinds))
+            (diagram_toolbar(project, commit, view, process.is_some(), control.is_some(), &kinds))
             div class="diagram-viewport" {
                 (PreEscaped(svg))
             }
@@ -202,6 +207,7 @@ fn diagram_toolbar(
     commit: &Commit,
     view: DiagramView,
     has_process: bool,
+    has_control: bool,
     kinds: &[(String, usize)],
 ) -> Markup {
     let base = format!("/ui/projects/{}/diagram", crate::ui::urlencode(project));
@@ -213,12 +219,19 @@ fn diagram_toolbar(
         "{base}?commit={}&view=process",
         crate::ui::urlencode(&commit.hash)
     );
+    let control_href = format!(
+        "{base}?commit={}&view=control",
+        crate::ui::urlencode(&commit.hash)
+    );
     html! {
         div class="diagram-toolbar" {
             span class="view-toggle" role="group" aria-label="Diagram type" {
                 a.view-option.current[view == DiagramView::Structure] href=(structure_href) { "Structure" }
                 @if has_process {
                     a.view-option.current[view == DiagramView::Process] href=(process_href) { "Process" }
+                }
+                @if has_control {
+                    a.view-option.current[view == DiagramView::Control] href=(control_href) { "Control" }
                 }
             }
             span class="diagram-controls" {
@@ -294,6 +307,11 @@ fn structure_svg(graph: &Graph) -> String {
 
 fn process_svg(graph: &Graph) -> Option<String> {
     let layout = graph_layout::process_layout(graph)?;
+    Some(render_graph_svg(graph, &layout))
+}
+
+fn control_svg(graph: &Graph) -> Option<String> {
+    let layout = graph_layout::control_layout(graph)?;
     Some(render_graph_svg(graph, &layout))
 }
 

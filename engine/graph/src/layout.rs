@@ -383,6 +383,130 @@ pub fn process_layout(graph: &Graph) -> Option<DiagramLayout> {
     })
 }
 
+/// The control-structure view, when the model declares control-structure nodes by STPA
+/// stereotype (Controller, ControlledProcess, ControlAction, Feedback). Controllers, control
+/// actions and controlled processes are laid left-to-right in the forward flow; feedback nodes
+/// hang in a band beneath them, so the control loop reads as a loop rather than a generic
+/// layered graph. Reuses the same layered engine as the other two views; no new geometry.
+pub fn control_layout(graph: &Graph) -> Option<DiagramLayout> {
+    use crate::stpa::{
+        is_stereotype, STEREOTYPE_CONTROLLER, STEREOTYPE_CONTROL_ACTION, STEREOTYPE_FEEDBACK,
+        STEREOTYPE_PROCESS,
+    };
+
+    let is_control_node = |n: &okf::types::GraphNode| {
+        is_stereotype(n, STEREOTYPE_CONTROLLER)
+            || is_stereotype(n, STEREOTYPE_PROCESS)
+            || is_stereotype(n, STEREOTYPE_CONTROL_ACTION)
+            || is_stereotype(n, STEREOTYPE_FEEDBACK)
+    };
+    let control_count = graph.nodes.iter().filter(|n| is_control_node(n)).count();
+    if control_count == 0 {
+        return None;
+    }
+
+    // The forward row: controllers, control actions and controlled processes. Feedback is
+    // placed separately below because its flow runs back toward the controller.
+    let is_forward = |n: &okf::types::GraphNode| {
+        is_stereotype(n, STEREOTYPE_CONTROLLER)
+            || is_stereotype(n, STEREOTYPE_CONTROL_ACTION)
+            || is_stereotype(n, STEREOTYPE_PROCESS)
+    };
+    let mut forward: Vec<&okf::types::GraphNode> =
+        graph.nodes.iter().filter(|n| is_forward(n)).collect();
+    forward.sort_by(|a, b| a.id.cmp(&b.id));
+    let forward_index: HashMap<&str, usize> = forward
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), i))
+        .collect();
+    let forward_ids: Vec<String> = forward.iter().map(|n| n.id.clone()).collect();
+    let forward_labels: Vec<String> = forward
+        .iter()
+        .map(|n| {
+            if n.name.is_empty() {
+                n.id.clone()
+            } else {
+                n.name.clone()
+            }
+        })
+        .collect();
+
+    let mut rank_edges: Vec<(usize, usize)> = Vec::new();
+    let mut bary_edges: Vec<(usize, usize, f64)> = Vec::new();
+    for edge in &graph.edges {
+        if edge.kind != "triggers" {
+            continue;
+        }
+        if let (Some(&u), Some(&v)) = (
+            forward_index.get(edge.source.as_str()),
+            forward_index.get(edge.target.as_str()),
+        ) {
+            rank_edges.push((u, v));
+            bary_edges.push((u, v, 1.0));
+            bary_edges.push((v, u, 1.0));
+        }
+    }
+
+    let forward_layout = layered_layout(
+        &forward_ids,
+        &forward_labels,
+        &rank_edges,
+        &bary_edges,
+        &LayoutSpacing::default(),
+    );
+
+    // Feedback nodes in a band beneath the forward row, sorted by id for determinism.
+    let spacing = LayoutSpacing::default();
+    let row_bottom = forward_layout
+        .nodes
+        .iter()
+        .map(|n| n.y + n.height)
+        .fold(spacing.margin, f64::max);
+    let fb_gap = 56.0;
+    let mut feedback: Vec<&okf::types::GraphNode> = graph
+        .nodes
+        .iter()
+        .filter(|n| is_stereotype(n, STEREOTYPE_FEEDBACK))
+        .collect();
+    feedback.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut feedback_boxes: Vec<NodeBox> = Vec::new();
+    let mut cursor = spacing.margin;
+    for node in &feedback {
+        let label = if node.name.is_empty() {
+            node.id.clone()
+        } else {
+            node.name.clone()
+        };
+        let (w, h) = node_size(&label);
+        feedback_boxes.push(NodeBox {
+            id: node.id.clone(),
+            x: cursor,
+            y: row_bottom + fb_gap,
+            width: w,
+            height: h,
+        });
+        cursor += w + spacing.h_gap;
+    }
+
+    let mut all_nodes = forward_layout.nodes;
+    all_nodes.extend(feedback_boxes);
+    all_nodes.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut width = forward_layout.width;
+    let mut height = forward_layout.height;
+    for node in &all_nodes {
+        width = width.max(node.x + node.width + spacing.margin);
+        height = height.max(node.y + node.height + spacing.margin);
+    }
+
+    Some(DiagramLayout {
+        nodes: all_nodes,
+        width,
+        height,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // The layered engine shared by both layouts.
 // ---------------------------------------------------------------------------

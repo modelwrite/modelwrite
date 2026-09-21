@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pub mod layout;
 pub mod routing;
+pub mod stpa;
 pub mod symbol;
 
 use std::collections::{HashMap, HashSet};

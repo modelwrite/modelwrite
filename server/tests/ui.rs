@@ -3652,3 +3652,249 @@ async fn the_health_page_names_every_finding_by_id_and_name() {
         html
     );
 }
+
+// ---------------------------------------------------------------------------
+// The STPA completeness screen: the five checks on one page.
+
+fn stpa_fixture(name: &str) -> serde_json::Value {
+    let path = test_support::repo_root().join("sample/stpa").join(name);
+    let text = std::fs::read_to_string(path).expect("STPA fixture must exist");
+    serde_json::from_str(&text).expect("STPA fixture must parse")
+}
+
+async fn commit_stpa_fixture(router: &axum::Router, project: &str, fixture: &str, message: &str) {
+    let committed = router
+        .clone()
+        .oneshot(post(
+            &format!("/projects/{project}/commits"),
+            serde_json::json!({ "branch": "main", "author": "alex", "message": message, "okf": stpa_fixture(fixture) }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        committed.status(),
+        StatusCode::CREATED,
+        "STPA fixture must commit"
+    );
+}
+
+#[tokio::test]
+async fn the_stpa_page_fires_every_check_on_the_defective_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(
+        &router,
+        "fs",
+        "fire-suppression-defective.json",
+        "defective",
+    )
+    .await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/stpa"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // The honest boundary is on the page, verbatim.
+    assert!(
+        html.contains("The analysis is AUTHORED; the check is COMPUTED."),
+        "the honest boundary must be stated, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Modelwrite does not perform STPA"),
+        "the page must never imply it performed the analysis, got:\n{}",
+        html
+    );
+
+    // Check 1: one control action, missing two of the four types, named.
+    assert!(
+        html.contains("Unanalysed control actions (1)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("ca-discharge") && html.contains("wrong-timing-or-order"),
+        "the action and its missing types must be named, got:\n{}",
+        html
+    );
+
+    // Check 2: one open control loop, the controller named.
+    assert!(
+        html.contains("Control loops with no feedback (1)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("controller"),
+        "the controller must be named, got:\n{}",
+        html
+    );
+
+    // Check 3: one hazard with no constraint, one constraint reaching no element.
+    assert!(
+        html.contains("Hazards with no constraint (1) · constraints reaching no element (1)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("haz-1") && html.contains("sc-1"),
+        "hazard and constraint must be named, got:\n{}",
+        html
+    );
+
+    // Check 4: one UCA with no scenario.
+    assert!(
+        html.contains("UCAs with no loss scenario (1)"),
+        "got:\n{}",
+        html
+    );
+    assert!(html.contains("uca-p"), "got:\n{}", html);
+
+    // The four document checks plus the two check-3 halves are five findings.
+    assert!(html.contains("5 findings found."), "got:\n{}", html);
+
+    // Check 5: one commit on the branch.
+    assert!(
+        html.contains("Trend across baselines (1)"),
+        "got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_stpa_page_is_silent_on_the_correct_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(&router, "fs", "fire-suppression-correct.json", "correct").await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/stpa"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    assert!(
+        html.contains("Unanalysed control actions (0)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Control loops with no feedback (0)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Hazards with no constraint (0) · constraints reaching no element (0)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("UCAs with no loss scenario (0)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Complete: no missing UCA types"),
+        "a complete analysis must read as complete, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_stpa_trend_tracks_the_counts_across_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(
+        &router,
+        "fs",
+        "fire-suppression-defective.json",
+        "defective",
+    )
+    .await;
+    commit_stpa_fixture(&router, "fs", "fire-suppression-correct.json", "correct").await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/stpa"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // Two commits on the branch, both trended, oldest first.
+    assert!(
+        html.contains("Trend across baselines (2)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("defective") && html.contains("correct"),
+        "both commit messages must appear in the trend, got:\n{}",
+        html
+    );
+    // The current (correct) tip still reads as complete on the same screen.
+    assert!(
+        html.contains("Complete: no missing UCA types"),
+        "the tip commit's verdict must render, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_control_structure_view_renders_controllers_and_feedback() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(&router, "fs", "fire-suppression-correct.json", "correct").await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/diagram?view=control"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // The control view is offered as a toggle and the controllers/process/feedback render.
+    assert!(html.contains("Control"), "got:\n{}", html);
+    assert!(
+        html.contains("Fire Suppression Controller"),
+        "the controller must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Suppressant Discharge System"),
+        "the controlled process must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Discharge status"),
+        "the feedback signal must render, got:\n{}",
+        html
+    );
+}

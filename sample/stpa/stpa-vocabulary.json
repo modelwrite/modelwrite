@@ -1,0 +1,223 @@
+{
+  "pack": "stpa",
+  "version": "1.0",
+  "title": "STPA / STAMP vocabulary as a declared OKF domain pack",
+  "honestBoundary": "The analysis is AUTHORED; the platform CHECKS it. Modelwrite does not perform STPA, does not infer hazards from a design, and never claims to.",
+  "howToRead": "Every STPA concept is expressed as an existing OKF node kind (block, signal, requirement) carrying a declared stereotype, and every STPA relationship is an existing OKF edge kind (triggers, dependency, reference). No engine change is required to hold this vocabulary; the completeness checks are computed over the resulting typed graph.",
+  "nodeKinds": [
+    {
+      "kind": "block",
+      "meaning": "a thing: a component, a state, an analysis artifact"
+    },
+    {
+      "kind": "signal",
+      "meaning": "an information flow: a command or a reading"
+    },
+    {
+      "kind": "requirement",
+      "meaning": "a system-level constraint or requirement the design must satisfy"
+    }
+  ],
+  "edgeKinds": [
+    {
+      "kind": "triggers",
+      "meaning": "a directional flow: a controller issues a command, a process returns a reading"
+    },
+    {
+      "kind": "dependency",
+      "meaning": "a traceability claim: a hazard is mitigated by a constraint, an element satisfies a constraint"
+    },
+    {
+      "kind": "reference",
+      "meaning": "an analysis artifact names the thing it is about: a UCA names its control action, a loss scenario names its UCA"
+    }
+  ],
+  "stereotypes": [
+    {
+      "name": "Loss",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A system-level loss to be prevented (loss of life, loss of aircraft, loss of mission).",
+      "note": "The top of the losses -> hazards -> constraints chain; authored, never inferred."
+    },
+    {
+      "name": "Hazard",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A system state or condition that, together with a worst-case set of environmental conditions, leads to a loss.",
+      "note": "Linked to the system-level constraints that mitigate it by a dependency edge labelled Mitigate."
+    },
+    {
+      "name": "SystemConstraint",
+      "okf": {
+        "kind": "requirement",
+        "section": "requirements"
+      },
+      "stpaMeaning": "A system-level constraint (a safety requirement) the design must enforce.",
+      "note": "A constraint is a requirement: its coverage by the design is already computed by the platform's requirement-coverage check (Satisfy / Refine / Verify / Allocate)."
+    },
+    {
+      "name": "Controller",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A component that provides control actions and enforces constraints over the process it controls."
+    },
+    {
+      "name": "ControlledProcess",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "The process under the controller's control; it returns feedback about its state."
+    },
+    {
+      "name": "ControlAction",
+      "okf": {
+        "kind": "signal",
+        "section": "signals"
+      },
+      "stpaMeaning": "A command the controller issues to the controlled process.",
+      "note": "A control action is a named signal node so a UCA analysis can reference it by id. The control loop flows Controller --triggers--> ControlAction --triggers--> ControlledProcess."
+    },
+    {
+      "name": "Feedback",
+      "okf": {
+        "kind": "signal",
+        "section": "signals"
+      },
+      "stpaMeaning": "Information the controlled process returns to the controller about its state.",
+      "note": "Feedback is a named signal node; the loop closes ControlledProcess --triggers--> Feedback --triggers--> Controller. A controller with a control action but no feedback path is the classic defect."
+    },
+    {
+      "name": "UnsafeControlAction",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A control action that, in a particular context, leads to a hazard.",
+      "note": "A UCA node carries TWO stereotypes: UnsafeControlAction plus exactly one UCA type token from ucaTypes. It references its control action with a reference edge (UCA --reference--> ControlAction)."
+    },
+    {
+      "name": "LossScenario",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A causal scenario explaining how a UCA could occur and lead to a hazard.",
+      "note": "References the UCA it explains with a reference edge (LossScenario --reference--> UCA)."
+    },
+    {
+      "name": "CausalFactor",
+      "okf": {
+        "kind": "block",
+        "section": "structure"
+      },
+      "stpaMeaning": "A factor that contributes to a loss scenario.",
+      "note": "Referenced from its loss scenario with a reference edge (LossScenario --reference--> CausalFactor)."
+    }
+  ],
+  "ucaTypes": [
+    {
+      "token": "not-provided",
+      "meaning": "the control action is not provided when it is needed"
+    },
+    {
+      "token": "provided",
+      "meaning": "the control action is provided when it should not be, or is unsafe in the context"
+    },
+    {
+      "token": "wrong-timing-or-order",
+      "meaning": "the control action is provided too early, too late, or in the wrong order"
+    },
+    {
+      "token": "stopped-too-soon-or-applied-too-long",
+      "meaning": "the control action is stopped too soon or applied too long"
+    }
+  ],
+  "edges": [
+    {
+      "relation": "controller issues control action",
+      "kind": "triggers",
+      "from": "Controller",
+      "to": "ControlAction"
+    },
+    {
+      "relation": "control action directs controlled process",
+      "kind": "triggers",
+      "from": "ControlAction",
+      "to": "ControlledProcess"
+    },
+    {
+      "relation": "controlled process returns feedback",
+      "kind": "triggers",
+      "from": "ControlledProcess",
+      "to": "Feedback"
+    },
+    {
+      "relation": "feedback reports to controller",
+      "kind": "triggers",
+      "from": "Feedback",
+      "to": "Controller"
+    },
+    {
+      "relation": "hazard is mitigated by a system-level constraint",
+      "kind": "dependency",
+      "from": "Hazard",
+      "to": "SystemConstraint",
+      "label": "Mitigate"
+    },
+    {
+      "relation": "a design element satisfies a constraint",
+      "kind": "dependency",
+      "from": "element",
+      "to": "SystemConstraint",
+      "label": "Satisfy / Refine / Verify / Allocate (existing coverage)"
+    },
+    {
+      "relation": "a UCA analyses a control action",
+      "kind": "reference",
+      "from": "UnsafeControlAction",
+      "to": "ControlAction"
+    },
+    {
+      "relation": "a loss scenario explains a UCA",
+      "kind": "reference",
+      "from": "LossScenario",
+      "to": "UnsafeControlAction"
+    },
+    {
+      "relation": "a loss scenario has a causal factor",
+      "kind": "reference",
+      "from": "LossScenario",
+      "to": "CausalFactor"
+    }
+  ],
+  "checks": [
+    {
+      "id": "unanalysed-control-actions",
+      "summary": "every ControlAction must have a UCA for each of the four UCA types"
+    },
+    {
+      "id": "control-loops-no-feedback",
+      "summary": "a Controller with a ControlAction must have a feedback path"
+    },
+    {
+      "id": "hazards-and-constraints",
+      "summary": "every Hazard must be mitigated by a constraint; every constraint must reach the design"
+    },
+    {
+      "id": "ucas-no-scenario",
+      "summary": "every UCA must be explained by a loss scenario"
+    },
+    {
+      "id": "trend-across-baselines",
+      "summary": "the same counts, per commit on a branch"
+    }
+  ]
+}

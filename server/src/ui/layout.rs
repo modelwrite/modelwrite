@@ -277,6 +277,11 @@ code.tip { color: var(--text-3); margin-left: 0.5rem; font-size: 12px; }
 /* A border plus a text label always accompanies the tint, so the meaning is
    never carried by colour alone. */
 
+/* A whole-screen verdict line: pass (green ink) or fail (red ink), never colour alone
+   (the word always accompanies the tint). */
+.check-passed { color: var(--pass); font-weight: 600; }
+.check-failed { color: var(--fail); font-weight: 600; }
+
 .covered, .uncovered,
 .mw-badge-covered, .mw-badge-uncovered, .mw-badge-unknown,
 .low-confidence {
@@ -1219,6 +1224,7 @@ pub fn html_response(status: StatusCode, markup: Markup) -> Response {
 pub const SECTIONS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("health", "Health"),
+    ("stpa", "STPA"),
     ("structure", "Structure"),
     ("composition", "Composition"),
     ("requirements", "Requirements"),

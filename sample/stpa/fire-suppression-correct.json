@@ -1,0 +1,389 @@
+{
+  "okf": "1.0",
+  "project": "Fire Suppression Controller (correct)",
+  "exportedAt": "2026-09-21T00:00:00Z",
+  "summary": {},
+  "structure": [
+    {
+      "id": "loss-1",
+      "name": "Loss of life",
+      "kind": "block",
+      "stereotypes": [
+        "Loss"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "haz-1",
+      "name": "Uncontrolled fire in protected compartment",
+      "kind": "block",
+      "stereotypes": [
+        "Hazard"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "controller",
+      "name": "Fire Suppression Controller",
+      "kind": "block",
+      "stereotypes": [
+        "Controller"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "discharge",
+      "name": "Suppressant Discharge System",
+      "kind": "block",
+      "stereotypes": [
+        "ControlledProcess"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "uca-np",
+      "name": "Discharge not provided on fire",
+      "kind": "block",
+      "stereotypes": [
+        "UnsafeControlAction",
+        "not-provided"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "uca-p",
+      "name": "Discharge provided when no fire",
+      "kind": "block",
+      "stereotypes": [
+        "UnsafeControlAction",
+        "provided"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "uca-t",
+      "name": "Discharge provided too late",
+      "kind": "block",
+      "stereotypes": [
+        "UnsafeControlAction",
+        "wrong-timing-or-order"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "uca-s",
+      "name": "Discharge stopped too soon",
+      "kind": "block",
+      "stereotypes": [
+        "UnsafeControlAction",
+        "stopped-too-soon-or-applied-too-long"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "ls-np",
+      "name": "Smoke sensor fails to detect fire",
+      "kind": "block",
+      "stereotypes": [
+        "LossScenario"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "ls-p",
+      "name": "False alarm triggers discharge",
+      "kind": "block",
+      "stereotypes": [
+        "LossScenario"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "ls-t",
+      "name": "Detection delayed by sensor latency",
+      "kind": "block",
+      "stereotypes": [
+        "LossScenario"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "ls-s",
+      "name": "Suppressant depleted mid-discharge",
+      "kind": "block",
+      "stereotypes": [
+        "LossScenario"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "interfaces": [],
+  "signals": [
+    {
+      "id": "ca-discharge",
+      "name": "Discharge suppressant",
+      "kind": "signal",
+      "stereotypes": [
+        "ControlAction"
+      ],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "fb-status",
+      "name": "Discharge status",
+      "kind": "signal",
+      "stereotypes": [
+        "Feedback"
+      ],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "requirements": [
+    {
+      "id": "sc-1",
+      "name": "Suppressant must reach every protected compartment",
+      "kind": "requirement",
+      "stereotypes": [
+        "SystemConstraint"
+      ],
+      "attributes": [],
+      "documentation": "",
+      "reqId": "SC-1",
+      "reqText": "The system must deliver suppressant to every protected compartment."
+    }
+  ],
+  "stateMachine": {
+    "name": "Fire Suppression",
+    "regions": []
+  },
+  "activities": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "loss-1",
+        "kind": "block",
+        "name": "Loss of life",
+        "stereotypes": [
+          "Loss"
+        ]
+      },
+      {
+        "id": "haz-1",
+        "kind": "block",
+        "name": "Uncontrolled fire in protected compartment",
+        "stereotypes": [
+          "Hazard"
+        ]
+      },
+      {
+        "id": "controller",
+        "kind": "block",
+        "name": "Fire Suppression Controller",
+        "stereotypes": [
+          "Controller"
+        ]
+      },
+      {
+        "id": "discharge",
+        "kind": "block",
+        "name": "Suppressant Discharge System",
+        "stereotypes": [
+          "ControlledProcess"
+        ]
+      },
+      {
+        "id": "uca-np",
+        "kind": "block",
+        "name": "Discharge not provided on fire",
+        "stereotypes": [
+          "UnsafeControlAction",
+          "not-provided"
+        ]
+      },
+      {
+        "id": "uca-p",
+        "kind": "block",
+        "name": "Discharge provided when no fire",
+        "stereotypes": [
+          "UnsafeControlAction",
+          "provided"
+        ]
+      },
+      {
+        "id": "uca-t",
+        "kind": "block",
+        "name": "Discharge provided too late",
+        "stereotypes": [
+          "UnsafeControlAction",
+          "wrong-timing-or-order"
+        ]
+      },
+      {
+        "id": "uca-s",
+        "kind": "block",
+        "name": "Discharge stopped too soon",
+        "stereotypes": [
+          "UnsafeControlAction",
+          "stopped-too-soon-or-applied-too-long"
+        ]
+      },
+      {
+        "id": "ls-np",
+        "kind": "block",
+        "name": "Smoke sensor fails to detect fire",
+        "stereotypes": [
+          "LossScenario"
+        ]
+      },
+      {
+        "id": "ls-p",
+        "kind": "block",
+        "name": "False alarm triggers discharge",
+        "stereotypes": [
+          "LossScenario"
+        ]
+      },
+      {
+        "id": "ls-t",
+        "kind": "block",
+        "name": "Detection delayed by sensor latency",
+        "stereotypes": [
+          "LossScenario"
+        ]
+      },
+      {
+        "id": "ls-s",
+        "kind": "block",
+        "name": "Suppressant depleted mid-discharge",
+        "stereotypes": [
+          "LossScenario"
+        ]
+      },
+      {
+        "id": "ca-discharge",
+        "kind": "signal",
+        "name": "Discharge suppressant",
+        "stereotypes": [
+          "ControlAction"
+        ]
+      },
+      {
+        "id": "fb-status",
+        "kind": "signal",
+        "name": "Discharge status",
+        "stereotypes": [
+          "Feedback"
+        ]
+      },
+      {
+        "id": "sc-1",
+        "kind": "requirement",
+        "name": "Suppressant must reach every protected compartment",
+        "stereotypes": [
+          "SystemConstraint"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "source": "controller",
+        "target": "ca-discharge",
+        "kind": "triggers",
+        "label": ""
+      },
+      {
+        "source": "ca-discharge",
+        "target": "discharge",
+        "kind": "triggers",
+        "label": ""
+      },
+      {
+        "source": "discharge",
+        "target": "fb-status",
+        "kind": "triggers",
+        "label": ""
+      },
+      {
+        "source": "fb-status",
+        "target": "controller",
+        "kind": "triggers",
+        "label": ""
+      },
+      {
+        "source": "uca-np",
+        "target": "ca-discharge",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "uca-p",
+        "target": "ca-discharge",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "uca-t",
+        "target": "ca-discharge",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "uca-s",
+        "target": "ca-discharge",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "ls-np",
+        "target": "uca-np",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "ls-p",
+        "target": "uca-p",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "ls-t",
+        "target": "uca-t",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "ls-s",
+        "target": "uca-s",
+        "kind": "reference",
+        "label": ""
+      },
+      {
+        "source": "haz-1",
+        "target": "sc-1",
+        "kind": "dependency",
+        "label": "Mitigate"
+      },
+      {
+        "source": "discharge",
+        "target": "sc-1",
+        "kind": "dependency",
+        "label": "Satisfy"
+      }
+    ]
+  },
+  "references": []
+}
