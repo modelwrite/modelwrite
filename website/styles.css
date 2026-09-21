@@ -2,36 +2,37 @@
 
 /* Modelwrite project site.
    Hand-written CSS. No @import, no web fonts, no external requests, no build
-   step. The page is designed to read as an instrument panel rather than a
-   brochure: monospace carries the data, and colour is reserved for the two
-   gate outcomes. */
+   step. The page is designed to read as an engineering drawing: ink on paper,
+   monospace carries the identifiers, and a single green signal marks the
+   verified states. Colour stays reserved for the two gate outcomes. */
 
 /* ---------------------------------------------------------------- tokens */
 
 :root {
-  --ink: #14181d;
-  --ink-soft: #3d4753;
-  --muted: #5b6673;
-  --line: #dfe3e8;
-  --line-strong: #c3cad3;
-  --bg: #ffffff;
-  --panel: #f7f8fa;
-  --panel-2: #eef1f5;
+  --ink: #1b1813;
+  --ink-soft: #3f392e;
+  --muted: #6b6353;
+  --line: #d8d1c0;
+  --line-strong: #b4ab96;
+  --bg: #faf7ef;
+  --panel: #f1ede0;
+  --panel-2: #e7e2d0;
 
-  --accent: #1f4e79;
-  --accent-deep: #16395a;
+  --accent: #175e3e;
+  --accent-deep: #103f2a;
 
-  /* Signal colour is spent on exactly two things: a gate that passed and a
-     gate that failed. Nothing else on the page is coloured. */
-  --pass: #1a7f4b;
-  --pass-bg: #e6f4ec;
-  --pass-line: #bfe0cd;
-  --pass-ink: #0f5c36;
-  --fail: #b3261e;
-  --fail-bg: #fdecea;
-  --fail-line: #f3c6c1;
-  --fail-ink: #8c1d18;
-  --warn: #9a6400;
+  /* The single green signal is spent on exactly two things: a gate that
+     passed and the verified states. A failed gate stays red. Nothing else on
+     the page is coloured. */
+  --pass: #175e3e;
+  --pass-bg: #e3eee6;
+  --pass-line: #c0d8c8;
+  --pass-ink: #12472f;
+  --fail: #a5231c;
+  --fail-bg: #f7e7e3;
+  --fail-line: #e2c3bd;
+  --fail-ink: #7e1d16;
+  --warn: #7d5400;
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
@@ -105,11 +106,11 @@ strong { font-weight: 650; }
   top: 0;
   z-index: 100;
   background: var(--ink);
-  color: #fff;
+  color: var(--bg);
   padding: 0.6rem 1rem;
   border-radius: 0 0 var(--radius-sm) 0;
 }
-.skip:focus { left: 0; color: #fff; }
+.skip:focus { left: 0; color: var(--bg); }
 
 .visually-hidden {
   position: absolute; width: 1px; height: 1px;
@@ -127,7 +128,7 @@ strong { font-weight: 650; }
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(250, 247, 239, 0.94);
   backdrop-filter: saturate(160%) blur(8px);
   border-bottom: 1px solid var(--line);
 }
@@ -143,16 +144,19 @@ strong { font-weight: 650; }
 }
 
 .wordmark {
-  font-family: var(--mono);
-  font-size: 0.9375rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--sans);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
 }
-.wordmark:hover { color: var(--accent); }
-.wordmark__glyph { color: var(--accent); }
+.wordmark:hover { color: var(--ink); }
+.wordmark__mark { display: block; flex: none; }
 
 .masthead nav { margin-left: auto; }
 
@@ -199,6 +203,8 @@ strong { font-weight: 650; }
   margin: 0 0 1rem;
 }
 
+.hero__mark { display: block; margin: 0 0 1.25rem; }
+
 .hero h1 {
   font-size: clamp(2.6rem, 7vw, 4.25rem);
   letter-spacing: -0.035em;
@@ -207,7 +213,7 @@ strong { font-weight: 650; }
 
 .hero__tagline {
   font-size: clamp(1.25rem, 2.6vw, 1.6rem);
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0 0 1.5rem;
@@ -230,11 +236,11 @@ strong { font-weight: 650; }
   padding: 0.62rem 1.1rem;
   border-radius: var(--radius);
   text-decoration: none;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--bg);
 }
-.button:hover { background: var(--accent-deep); border-color: var(--accent-deep); color: #fff; }
+.button:hover { background: var(--ink-soft); border-color: var(--ink-soft); color: var(--bg); }
 
 .button--quiet {
   background: transparent;
@@ -730,7 +736,7 @@ figcaption b { color: var(--ink-soft); }
   white-space: nowrap;
 }
 .door__status--live { color: var(--pass-ink); background: var(--pass-bg); border-color: var(--pass-line); }
-.door__status--soon { color: var(--warn); background: #fdf6e7; border-color: #ecd9a8; }
+.door__status--soon { color: var(--warn); background: #f5ecdb; border-color: #e2d3b3; }
 
 .door__tagline { font-size: 1.0625rem; font-weight: 650; color: var(--ink); margin: 0.4rem 0 0.6rem; }
 .door p { color: var(--ink-soft); font-size: 0.9375rem; margin: 0 0 0.75rem; }

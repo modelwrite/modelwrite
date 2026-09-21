@@ -1,0 +1,490 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modelwrite &mdash; brand exploration</title>
+<style>
+  /* Self-contained. No external requests: system font stacks and inline SVG only. */
+
+  :root {
+    --chrome-bg: #17191d;
+    --chrome-ink: #e8e6df;
+    --chrome-muted: #9aa0a8;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--chrome-bg);
+    color: var(--chrome-ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: inherit; }
+
+  .page-head {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 2.25rem 2rem 0.5rem;
+  }
+  .page-head h1 { font-size: 1.5rem; margin: 0 0 0.4rem; letter-spacing: -0.01em; }
+  .page-head p { margin: 0 0 1.25rem; color: var(--chrome-muted); max-width: 60rem; font-size: 0.9375rem; }
+  .page-head code { font-family: var(--mono); font-size: 0.875em; color: var(--chrome-ink); }
+
+  .grid {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 0 2rem 3rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  .direction {
+    border-radius: 10px;
+    padding: 1.4rem 1.4rem 1.6rem;
+    /* each direction sets its own tokens */
+  }
+
+  /* ----- direction tokens ----- */
+  .d1 { --bg:#faf7ef; --ink:#1b1813; --ink-soft:#3f392e; --muted:#6b6353;
+        --line:#d8d1c0; --line-strong:#b4ab96; --panel:#f1ede0; --panel-2:#e7e2d0;
+        --accent:#175e3e; --accent-deep:#103f2a; }
+  .d2 { --bg:#f4f1e9; --ink:#0f2540; --ink-soft:#465364; --muted:#596674;
+        --line:#d7d3c7; --line-strong:#b9b4a6; --panel:#ebe7db; --panel-2:#e2ddd0;
+        --accent:#7a5d24; --accent-deep:#5d4619; }
+  .d3 { --bg:#f6f8fb; --ink:#10151b; --ink-soft:#3a444f; --muted:#5d6a77;
+        --line:#dde3ea; --line-strong:#c2cbd6; --panel:#eef2f6; --panel-2:#e4eaf1;
+        --accent:#b45309; --accent-deep:#8a3f06; }
+  .d4 { --bg:#ffffff; --ink:#0a0c0e; --ink-soft:#33383f; --muted:#5f6670;
+        --line:#e5e7eb; --line-strong:#c9cdd3; --panel:#f4f5f7; --panel-2:#ecedef;
+        --accent:#d62b1f; --accent-deep:#b01e15; }
+
+  .direction {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+
+  .d-name {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.35rem;
+  }
+  .d-title { font-size: 1.15rem; margin: 0 0 0.15rem; font-weight: 700; letter-spacing: -0.01em; }
+  .d-sub { font-size: 0.8rem; color: var(--muted); margin: 0 0 1.1rem; }
+
+  /* ----- mark row ----- */
+  .marks { display: flex; align-items: flex-end; gap: 1.1rem; margin: 0 0 0.9rem; }
+  .marks .m { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; }
+  .marks .m svg { display: block; }
+  .marks .m span { font-family: var(--mono); font-size: 0.66rem; color: var(--muted); letter-spacing: 0.06em; }
+
+  /* ----- wordmark ----- */
+  .wm {
+    display: flex; align-items: center; gap: 0.55rem;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 0.8rem 0.15rem;
+    margin: 0 0 0.9rem;
+  }
+  .wm svg { display: block; flex: none; }
+  .wm .wm-text { font-family: var(--sans); }
+
+  .d1 .wm-text { font-weight: 650; letter-spacing: 0.015em; font-size: 1.05rem; }
+  .d2 .wm-text { font-weight: 650; letter-spacing: 0.14em; text-transform: uppercase; font-size: 0.98rem; }
+  .d3 .wm-text { font-family: var(--mono); font-weight: 500; font-size: 1.05rem; }
+  .d4 .wm-text { font-weight: 800; letter-spacing: -0.02em; font-size: 1rem; color: var(--muted); }
+  .d4 .wm { align-items: center; }
+
+  .wm .tag {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 3px; padding: 0.14rem 0.4rem;
+  }
+
+  /* ----- palette ----- */
+  .label {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 0.45rem;
+  }
+  .palette { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 0.7rem; }
+  .palette li { display: flex; align-items: center; gap: 0.45rem; }
+  .sw { width: 1.05rem; height: 1.05rem; border-radius: 3px; flex: none; border: 1px solid rgba(0,0,0,0.14); }
+  .palette code { font-family: var(--mono); font-size: 0.7rem; color: var(--ink); }
+  .palette .role { margin-left: auto; font-family: var(--mono); font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* ----- type ----- */
+  .type { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); line-height: 1.55; margin: 0 0 0.9rem; }
+  .type code { color: var(--ink); font-size: 0.95em; word-break: break-all; }
+
+  /* ----- rationale ----- */
+  .rat { font-size: 0.85rem; color: var(--ink-soft); margin: 0 0 1.2rem; border-left: 2px solid var(--accent); padding-left: 0.7rem; }
+
+  /* ----- artefacts ----- */
+  .artefact { border: 1px solid var(--line); border-radius: 7px; padding: 1rem; margin-bottom: 0.9rem; }
+  .artefact:last-child { margin-bottom: 0; }
+
+  .hero-a__kicker { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.5rem; }
+  .hero-a__h { font-size: 1.7rem; margin: 0 0 0.5rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+  .hero-a__p { font-size: 0.85rem; color: var(--ink-soft); margin: 0 0 0.9rem; }
+  .hero-a__btn {
+    display: inline-block; font-family: var(--sans); font-size: 0.8rem; font-weight: 600;
+    padding: 0.5rem 0.9rem; border-radius: 5px; background: var(--ink); color: var(--bg);
+    text-decoration: none; border: 1px solid var(--ink);
+  }
+
+  .cards-a { display: grid; gap: 0.6rem; }
+  .card-a { border: 1px solid var(--line); border-radius: 5px; padding: 0.65rem 0.75rem; background: var(--bg); }
+  .card-a .c-head { display: flex; align-items: baseline; gap: 0.4rem; }
+  .card-a h4 { font-size: 0.85rem; margin: 0; font-weight: 650; }
+  .card-a .c-num { margin-left: auto; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .card-a p { font-size: 0.76rem; color: var(--ink-soft); margin: 0.2rem 0 0.45rem; }
+  .card-a .c-tag { display: inline-flex; align-items: center; gap: 0.3rem; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .card-a .c-tag::before { content: ""; width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--accent); }
+
+  /* ----- diagram ----- */
+  .diagram-a svg { width: 100%; height: auto; display: block; }
+  .diagram-a .box { fill: var(--bg); stroke: var(--line-strong); stroke-width: 1.3; }
+  .diagram-a .req { fill: var(--panel); stroke: var(--line-strong); stroke-width: 1.3; }
+  .diagram-a .arrow { stroke: var(--line-strong); stroke-width: 1.3; fill: none; }
+  .diagram-a .head { fill: var(--line-strong); }
+  .diagram-a .lbl { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+  .diagram-a .sub { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+  .diagram-a .marker { fill: var(--accent); }
+  .diagram-a .marker-t { font-family: var(--mono); font-size: 10px; font-weight: 700; fill: var(--bg); text-anchor: middle; }
+
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>Modelwrite &mdash; brand exploration</h1>
+  <p>Four directions, side by side, each applied to the same three artefacts &mdash; a hero block, a
+  card row, and a diagram fragment. Each mark is drawn at 16, 32 and 120&nbsp;px. Palettes and font
+  stacks are printed so the choice is concrete. Self-contained: no external requests, system fonts
+  and inline SVG only. The name stays <code>modelwrite</code>.</p>
+</header>
+
+<main class="grid">
+
+<!-- ============================================================ D1 DRAUGHTING -->
+<section class="direction d1" aria-labelledby="d1-t">
+  <p class="d-name">01</p>
+  <h2 class="d-title" id="d1-t">Draughting / Blueprint</h2>
+  <p class="d-sub">Engineering-drawing heritage</p>
+
+  <p class="label">Mark &mdash; 16 / 32 / 120 px</p>
+  <div class="marks">
+    <div class="m"><svg viewBox="0 0 32 32" width="16" height="16" role="img" aria-label="Modelwrite mark at 16px"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>16</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Modelwrite mark at 32px"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>32</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="120" height="120" role="img" aria-label="Modelwrite mark at 120px"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>120</span></div>
+  </div>
+
+  <p class="label">Wordmark</p>
+  <div class="wm">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="wm-text">modelwrite</span>
+    <span class="tag">caps alt: MODELWRITE</span>
+  </div>
+
+  <p class="label">Palette</p>
+  <ul class="palette">
+    <li><span class="sw" style="background:#faf7ef"></span><code>#faf7ef</code><span class="role">paper</span></li>
+    <li><span class="sw" style="background:#1b1813"></span><code>#1b1813</code><span class="role">ink</span></li>
+    <li><span class="sw" style="background:#3f392e"></span><code>#3f392e</code><span class="role">soft</span></li>
+    <li><span class="sw" style="background:#6b6353"></span><code>#6b6353</code><span class="role">muted</span></li>
+    <li><span class="sw" style="background:#d8d1c0"></span><code>#d8d1c0</code><span class="role">hairline</span></li>
+    <li><span class="sw" style="background:#b4ab96"></span><code>#b4ab96</code><span class="role">line</span></li>
+    <li><span class="sw" style="background:#f1ede0"></span><code>#f1ede0</code><span class="role">panel</span></li>
+    <li><span class="sw" style="background:#175e3e"></span><code>#175e3e</code><span class="role">signal</span></li>
+  </ul>
+
+  <p class="label">Type</p>
+  <p class="type">Prose: <code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code> &middot; Identifiers: <code>ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace</code></p>
+
+  <p class="rat">The language of the audience is the engineering drawing: line weights, a sheet
+  corner, a datum, a verified tick. Ink on paper reads as precise and unadorned; the single green
+  reserves colour for the one thing that has been verified, everything else stays ink. Monospace
+  carries identifiers, commands and hashes exactly, a clean sans carries the prose.</p>
+
+  <div class="artefact">
+    <p class="hero-a__kicker">Open source analytics platform</p>
+    <p class="hero-a__h">Modelwrite</p>
+    <p class="hero-a__p">Reads the SysML models you already have, measures coverage and traceability, and answers questions with the evidence attached.</p>
+    <a class="hero-a__btn">Open the showcase</a>
+  </div>
+
+  <div class="artefact">
+    <div class="cards-a">
+      <div class="card-a"><div class="c-head"><h4>Requirements</h4><span class="c-num">25</span></div><p>Carried from your model.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Structure</h4><span class="c-num">41</span></div><p>Blocks and composition.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Traceability</h4><span class="c-num">66 / 95</span></div><p>Nodes and edges.</p><span class="c-tag">active</span></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <div class="diagram-a">
+      <svg viewBox="0 0 360 200" role="img" aria-label="Diagram fragment">
+        <rect class="box" x="10" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="132" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="254" y="24" width="86" height="38" rx="4"></rect>
+        <text class="lbl" x="53" y="46" text-anchor="middle">Block A</text>
+        <text class="lbl" x="175" y="46" text-anchor="middle">Block B</text>
+        <text class="lbl" x="297" y="46" text-anchor="middle">Block C</text>
+        <path class="arrow" d="M96 43 H130"></path><polygon class="head" points="130,43 124,40 124,46"></polygon>
+        <path class="arrow" d="M218 43 H252"></path><polygon class="head" points="252,43 246,40 246,46"></polygon>
+        <polygon class="req" points="132,120 246,120 234,154 120,154"></polygon>
+        <text class="sub" x="183" y="131" text-anchor="middle">&laquo;requirement&raquo;</text>
+        <text class="lbl" x="183" y="145" text-anchor="middle">REQ-01</text>
+        <rect class="box" x="254" y="120" width="80" height="38" rx="4"></rect>
+        <text class="lbl" x="294" y="142" text-anchor="middle">Orphan</text>
+        <circle class="marker" cx="346" cy="120" r="8"></circle>
+        <text class="marker-t" x="346" y="124">1</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ D2 INSTITUTIONAL -->
+<section class="direction d2" aria-labelledby="d2-t">
+  <p class="d-name">02</p>
+  <h2 class="d-title" id="d2-t">Institutional / Assured</h2>
+  <p class="d-sub">The programme-office register</p>
+
+  <p class="label">Mark &mdash; 16 / 32 / 120 px</p>
+  <div class="marks">
+    <div class="m"><svg viewBox="0 0 32 32" width="16" height="16" role="img" aria-label="Modelwrite mark at 16px"><circle cx="16" cy="16" r="13" fill="none" stroke="#0f2540" stroke-width="2.4"/><circle cx="16" cy="16" r="9.2" fill="none" stroke="#0f2540" stroke-width="1.2"/><path d="M11 16.5 L15 20.5 L22 12.5" fill="none" stroke="#7a5d24" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>16</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Modelwrite mark at 32px"><circle cx="16" cy="16" r="13" fill="none" stroke="#0f2540" stroke-width="2.4"/><circle cx="16" cy="16" r="9.2" fill="none" stroke="#0f2540" stroke-width="1.2"/><path d="M11 16.5 L15 20.5 L22 12.5" fill="none" stroke="#7a5d24" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>32</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="120" height="120" role="img" aria-label="Modelwrite mark at 120px"><circle cx="16" cy="16" r="13" fill="none" stroke="#0f2540" stroke-width="2.4"/><circle cx="16" cy="16" r="9.2" fill="none" stroke="#0f2540" stroke-width="1.2"/><path d="M11 16.5 L15 20.5 L22 12.5" fill="none" stroke="#7a5d24" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>120</span></div>
+  </div>
+
+  <p class="label">Wordmark</p>
+  <div class="wm">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="#0f2540" stroke-width="2.4"/><circle cx="16" cy="16" r="9.2" fill="none" stroke="#0f2540" stroke-width="1.2"/><path d="M11 16.5 L15 20.5 L22 12.5" fill="none" stroke="#7a5d24" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="wm-text">Modelwrite</span>
+  </div>
+
+  <p class="label">Palette</p>
+  <ul class="palette">
+    <li><span class="sw" style="background:#f4f1e9"></span><code>#f4f1e9</code><span class="role">bone</span></li>
+    <li><span class="sw" style="background:#0f2540"></span><code>#0f2540</code><span class="role">navy</span></li>
+    <li><span class="sw" style="background:#465364"></span><code>#465364</code><span class="role">steel</span></li>
+    <li><span class="sw" style="background:#596674"></span><code>#596674</code><span class="role">slate</span></li>
+    <li><span class="sw" style="background:#d7d3c7"></span><code>#d7d3c7</code><span class="role">hairline</span></li>
+    <li><span class="sw" style="background:#b9b4a6"></span><code>#b9b4a6</code><span class="role">line</span></li>
+    <li><span class="sw" style="background:#7a5d24"></span><code>#7a5d24</code><span class="role">brass</span></li>
+  </ul>
+
+  <p class="label">Type</p>
+  <p class="type">Display: confident sans, wide tracking, caps &mdash; <code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code> &middot; Register IDs: <code>ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace</code></p>
+
+  <p class="rat">The programme-office register: deep navy and bone, a formal double-ruled seal,
+  generous space, nothing playful. It reads as something an accreditation board accepts at a glance.
+  The brass is a hairline accent on the seal only; the weight and restraint carry the assurance.</p>
+
+  <div class="artefact">
+    <p class="hero-a__kicker">Open source analytics platform</p>
+    <p class="hero-a__h">Modelwrite</p>
+    <p class="hero-a__p">Reads the SysML models you already have, measures coverage and traceability, and answers questions with the evidence attached.</p>
+    <a class="hero-a__btn">Open the showcase</a>
+  </div>
+
+  <div class="artefact">
+    <div class="cards-a">
+      <div class="card-a"><div class="c-head"><h4>Requirements</h4><span class="c-num">25</span></div><p>Carried from your model.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Structure</h4><span class="c-num">41</span></div><p>Blocks and composition.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Traceability</h4><span class="c-num">66 / 95</span></div><p>Nodes and edges.</p><span class="c-tag">active</span></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <div class="diagram-a">
+      <svg viewBox="0 0 360 200" role="img" aria-label="Diagram fragment">
+        <rect class="box" x="10" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="132" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="254" y="24" width="86" height="38" rx="4"></rect>
+        <text class="lbl" x="53" y="46" text-anchor="middle">Block A</text>
+        <text class="lbl" x="175" y="46" text-anchor="middle">Block B</text>
+        <text class="lbl" x="297" y="46" text-anchor="middle">Block C</text>
+        <path class="arrow" d="M96 43 H130"></path><polygon class="head" points="130,43 124,40 124,46"></polygon>
+        <path class="arrow" d="M218 43 H252"></path><polygon class="head" points="252,43 246,40 246,46"></polygon>
+        <polygon class="req" points="132,120 246,120 234,154 120,154"></polygon>
+        <text class="sub" x="183" y="131" text-anchor="middle">&laquo;requirement&raquo;</text>
+        <text class="lbl" x="183" y="145" text-anchor="middle">REQ-01</text>
+        <rect class="box" x="254" y="120" width="80" height="38" rx="4"></rect>
+        <text class="lbl" x="294" y="142" text-anchor="middle">Orphan</text>
+        <circle class="marker" cx="346" cy="120" r="8"></circle>
+        <text class="marker-t" x="346" y="124">1</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ D3 ANALYTICS -->
+<section class="direction d3" aria-labelledby="d3-t">
+  <p class="d-name">03</p>
+  <h2 class="d-title" id="d3-t">Analytics / Instrument</h2>
+  <p class="d-sub">A measurement instrument</p>
+
+  <p class="label">Mark &mdash; 16 / 32 / 120 px</p>
+  <div class="marks">
+    <div class="m"><svg viewBox="0 0 32 32" width="16" height="16" role="img" aria-label="Modelwrite mark at 16px"><circle cx="8" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="24" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><path d="M11.2 8 H20.8" stroke="#10151b" stroke-width="2"/><path d="M24 11.2 V17 L19 21" fill="none" stroke="#10151b" stroke-width="2"/><polygon points="16,27 21,23 16,19 11,23" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="21" cy="16" r="1.9" fill="#b45309"/></svg><span>16</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Modelwrite mark at 32px"><circle cx="8" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="24" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><path d="M11.2 8 H20.8" stroke="#10151b" stroke-width="2"/><path d="M24 11.2 V17 L19 21" fill="none" stroke="#10151b" stroke-width="2"/><polygon points="16,27 21,23 16,19 11,23" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="21" cy="16" r="1.9" fill="#b45309"/></svg><span>32</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="120" height="120" role="img" aria-label="Modelwrite mark at 120px"><circle cx="8" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="24" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><path d="M11.2 8 H20.8" stroke="#10151b" stroke-width="2"/><path d="M24 11.2 V17 L19 21" fill="none" stroke="#10151b" stroke-width="2"/><polygon points="16,27 21,23 16,19 11,23" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="21" cy="16" r="1.9" fill="#b45309"/></svg><span>120</span></div>
+  </div>
+
+  <p class="label">Wordmark</p>
+  <div class="wm">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="24" cy="8" r="3.2" fill="none" stroke="#10151b" stroke-width="2"/><path d="M11.2 8 H20.8" stroke="#10151b" stroke-width="2"/><path d="M24 11.2 V17 L19 21" fill="none" stroke="#10151b" stroke-width="2"/><polygon points="16,27 21,23 16,19 11,23" fill="none" stroke="#10151b" stroke-width="2"/><circle cx="21" cy="16" r="1.9" fill="#b45309"/></svg>
+    <span class="wm-text">modelwrite</span>
+    <span class="tag">v1.0</span>
+  </div>
+
+  <p class="label">Palette</p>
+  <ul class="palette">
+    <li><span class="sw" style="background:#f6f8fb"></span><code>#f6f8fb</code><span class="role">field</span></li>
+    <li><span class="sw" style="background:#10151b"></span><code>#10151b</code><span class="role">ink</span></li>
+    <li><span class="sw" style="background:#3a444f"></span><code>#3a444f</code><span class="role">soft</span></li>
+    <li><span class="sw" style="background:#5d6a77"></span><code>#5d6a77</code><span class="role">muted</span></li>
+    <li><span class="sw" style="background:#dde3ea"></span><code>#dde3ea</code><span class="role">hairline</span></li>
+    <li><span class="sw" style="background:#c2cbd6"></span><code>#c2cbd6</code><span class="role">line</span></li>
+    <li><span class="sw" style="background:#eef2f6"></span><code>#eef2f6</code><span class="role">panel</span></li>
+    <li><span class="sw" style="background:#b45309"></span><code>#b45309</code><span class="role">caveat</span></li>
+  </ul>
+
+  <p class="label">Type</p>
+  <p class="type">Wordmark &amp; labels: <code>ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace</code> &middot; Prose: <code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code></p>
+
+  <p class="rat">A measurement instrument, not a brochure: a cool neutral field, data in monospace,
+  and one amber reserved for the basis and caveat marks &mdash; the provenance note and the limit flag
+  are the only things that call attention. The mark is built from the product's own graph notation,
+  so the identity is the diagram language itself.</p>
+
+  <div class="artefact">
+    <p class="hero-a__kicker">Open source analytics platform</p>
+    <p class="hero-a__h">Modelwrite</p>
+    <p class="hero-a__p">Reads the SysML models you already have, measures coverage and traceability, and answers questions with the evidence attached.</p>
+    <a class="hero-a__btn">Open the showcase</a>
+  </div>
+
+  <div class="artefact">
+    <div class="cards-a">
+      <div class="card-a"><div class="c-head"><h4>Requirements</h4><span class="c-num">25</span></div><p>Carried from your model.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Structure</h4><span class="c-num">41</span></div><p>Blocks and composition.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Traceability</h4><span class="c-num">66 / 95</span></div><p>Nodes and edges.</p><span class="c-tag">active</span></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <div class="diagram-a">
+      <svg viewBox="0 0 360 200" role="img" aria-label="Diagram fragment">
+        <rect class="box" x="10" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="132" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="254" y="24" width="86" height="38" rx="4"></rect>
+        <text class="lbl" x="53" y="46" text-anchor="middle">Block A</text>
+        <text class="lbl" x="175" y="46" text-anchor="middle">Block B</text>
+        <text class="lbl" x="297" y="46" text-anchor="middle">Block C</text>
+        <path class="arrow" d="M96 43 H130"></path><polygon class="head" points="130,43 124,40 124,46"></polygon>
+        <path class="arrow" d="M218 43 H252"></path><polygon class="head" points="252,43 246,40 246,46"></polygon>
+        <polygon class="req" points="132,120 246,120 234,154 120,154"></polygon>
+        <text class="sub" x="183" y="131" text-anchor="middle">&laquo;requirement&raquo;</text>
+        <text class="lbl" x="183" y="145" text-anchor="middle">REQ-01</text>
+        <rect class="box" x="254" y="120" width="80" height="38" rx="4"></rect>
+        <text class="lbl" x="294" y="142" text-anchor="middle">Orphan</text>
+        <circle class="marker" cx="346" cy="120" r="8"></circle>
+        <text class="marker-t" x="346" y="124">1</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ D4 MARK-FIRST -->
+<section class="direction d4" aria-labelledby="d4-t">
+  <p class="d-name">04</p>
+  <h2 class="d-title" id="d4-t">Mark-first / Bold</h2>
+  <p class="d-sub">The mark carries the brand</p>
+
+  <p class="label">Mark &mdash; 16 / 32 / 120 px</p>
+  <div class="marks">
+    <div class="m"><svg viewBox="0 0 32 32" width="16" height="16" role="img" aria-label="Modelwrite mark at 16px"><rect x="4" y="4" width="24" height="24" rx="3" fill="#0a0c0e"/><path d="M8 24 L24 8" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round"/></svg><span>16</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Modelwrite mark at 32px"><rect x="4" y="4" width="24" height="24" rx="3" fill="#0a0c0e"/><path d="M8 24 L24 8" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round"/></svg><span>32</span></div>
+    <div class="m"><svg viewBox="0 0 32 32" width="120" height="120" role="img" aria-label="Modelwrite mark at 120px"><rect x="4" y="4" width="24" height="24" rx="3" fill="#0a0c0e"/><path d="M8 24 L24 8" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round"/></svg><span>120</span></div>
+  </div>
+
+  <p class="label">Wordmark</p>
+  <div class="wm">
+    <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect x="4" y="4" width="24" height="24" rx="3" fill="#0a0c0e"/><path d="M8 24 L24 8" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round"/></svg>
+    <span class="wm-text">modelwrite</span>
+  </div>
+
+  <p class="label">Palette</p>
+  <ul class="palette">
+    <li><span class="sw" style="background:#ffffff"></span><code>#ffffff</code><span class="role">white</span></li>
+    <li><span class="sw" style="background:#0a0c0e"></span><code>#0a0c0e</code><span class="role">black</span></li>
+    <li><span class="sw" style="background:#5f6670"></span><code>#5f6670</code><span class="role">grey</span></li>
+    <li><span class="sw" style="background:#e5e7eb"></span><code>#e5e7eb</code><span class="role">line</span></li>
+    <li><span class="sw" style="background:#d62b1f"></span><code>#d62b1f</code><span class="role">signal</span></li>
+  </ul>
+
+  <p class="label">Type</p>
+  <p class="type">Wordmark: bold sans, secondary &mdash; <code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code> &middot; Data: <code>ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace</code></p>
+
+  <p class="rat">The mark carries the brand; the wordmark is quiet and secondary. High-contrast black
+  on white with a single reserved red, minimal decoration, and a mark that is legible in a browser
+  tab before the page loads.</p>
+
+  <div class="artefact">
+    <p class="hero-a__kicker">Open source analytics platform</p>
+    <p class="hero-a__h">Modelwrite</p>
+    <p class="hero-a__p">Reads the SysML models you already have, measures coverage and traceability, and answers questions with the evidence attached.</p>
+    <a class="hero-a__btn">Open the showcase</a>
+  </div>
+
+  <div class="artefact">
+    <div class="cards-a">
+      <div class="card-a"><div class="c-head"><h4>Requirements</h4><span class="c-num">25</span></div><p>Carried from your model.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Structure</h4><span class="c-num">41</span></div><p>Blocks and composition.</p><span class="c-tag">active</span></div>
+      <div class="card-a"><div class="c-head"><h4>Traceability</h4><span class="c-num">66 / 95</span></div><p>Nodes and edges.</p><span class="c-tag">active</span></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <div class="diagram-a">
+      <svg viewBox="0 0 360 200" role="img" aria-label="Diagram fragment">
+        <rect class="box" x="10" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="132" y="24" width="86" height="38" rx="4"></rect>
+        <rect class="box" x="254" y="24" width="86" height="38" rx="4"></rect>
+        <text class="lbl" x="53" y="46" text-anchor="middle">Block A</text>
+        <text class="lbl" x="175" y="46" text-anchor="middle">Block B</text>
+        <text class="lbl" x="297" y="46" text-anchor="middle">Block C</text>
+        <path class="arrow" d="M96 43 H130"></path><polygon class="head" points="130,43 124,40 124,46"></polygon>
+        <path class="arrow" d="M218 43 H252"></path><polygon class="head" points="252,43 246,40 246,46"></polygon>
+        <polygon class="req" points="132,120 246,120 234,154 120,154"></polygon>
+        <text class="sub" x="183" y="131" text-anchor="middle">&laquo;requirement&raquo;</text>
+        <text class="lbl" x="183" y="145" text-anchor="middle">REQ-01</text>
+        <rect class="box" x="254" y="120" width="80" height="38" rx="4"></rect>
+        <text class="lbl" x="294" y="142" text-anchor="middle">Orphan</text>
+        <circle class="marker" cx="346" cy="120" r="8"></circle>
+        <text class="marker-t" x="346" y="124">1</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
