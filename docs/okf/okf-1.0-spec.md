@@ -1,4 +1,4 @@
-﻿# OKF 1.0 — Open Knowledge Format
+# OKF 1.0 — Open Knowledge Format
 
 Status: normative, v1.0-draft
 
@@ -25,7 +25,7 @@ consumer: portals, analysis, AI, and the gate.
 | structure | Element[] | no | Blocks and interface blocks. |
 | interfaces | Element[] | no | Ports and interfaces (empty in the reference corpus). |
 | signals | Element[] | no | Signals and events. |
-| requirements | Requirement[] | no | Requirements with reqId and reqText. |
+| requirements | Requirement[] | no | Requirements with reqId (may be empty) and reqText. |
 | stateMachine | object | yes | name plus regions of states. |
 | activities | Activity[] | no | Activity diagrams: nodes and control edges. |
 | graph | object | yes | Every element as a node and every relationship as an edge. |
@@ -51,8 +51,11 @@ validation.
 Element: id (required, opaque, stable), name, kind, stereotypes[],
 attributes[] (each with name, type, aggregation, default), documentation.
 
-Requirement: everything in Element plus reqId (required, non-empty) and
-reqText.
+Requirement: everything in Element plus reqId and reqText. reqId is the
+human-facing identifier carried by the source model; it MAY be empty when the
+source carries none (a real vendor model does: see the TMT import), in which
+case the requirement is still uniquely identified by its ELEMENT id, which is
+what every traceability answer uses.
 
 State: id (required), name, entry, doActivity, exit. The entry, doActivity
 and exit fields reference behaviour names, not ids.
@@ -87,7 +90,10 @@ mismatch is a warning, never a failure.
 2. project is non-empty.
 3. graph and stateMachine are present.
 4. No duplicate element ids; no empty ids.
-5. Every requirement has a non-empty reqId.
+5. Every requirement carries a reqId field. It MAY be empty: a warning names
+   any requirement whose reqId is empty, so the gap is visible rather than
+   silent, but it is not an error and does not refuse the document. The
+   TRACEABILITY key is the element id (rule 4), not the reqId.
 6. The graph has at least one node; all kinds come from the tables.
 7. Every edge endpoint resolves to a node; all kinds come from the tables.
 8. Summary counts match section sizes (warning only).
