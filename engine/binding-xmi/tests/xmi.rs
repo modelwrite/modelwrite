@@ -646,7 +646,10 @@ fn a_requirement_with_an_empty_id_is_carried_and_validates() {
 
     // The requirement is still a graph node, keyed by its element id.
     let graph = root.graph.as_ref().expect("graph present");
-    assert!(graph.nodes.iter().any(|n| n.id == "req-unnamed" && n.kind == "requirement"));
+    assert!(graph
+        .nodes
+        .iter()
+        .any(|n| n.id == "req-unnamed" && n.kind == "requirement"));
 
     // The imported document validates: the empty reqId is a warning, not an error.
     let report = okf::validate::validate(&root);

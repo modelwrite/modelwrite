@@ -138,6 +138,64 @@ fn a_real_tmt_vendor_export_imports_with_every_loss_named() {
 }
 
 #[test]
+#[ignore = "reads the 36 MB TMT fixture; run explicitly"]
+fn the_real_tmt_model_validates_so_the_only_blocker_is_the_losses() {
+    // The honest end state the SECOND blocker hid: the imported TMT document now
+    // VALIDATES, so the only remaining blocker is the human decision on the 48,553
+    // blocking losses. The two template requirements with an empty reqId (#parent,
+    // #child) are accepted as warnings - NAMED, not hidden - because a missing
+    // human-facing SysML id is a fact about the source, not a structural error.
+    let bytes = real_model();
+    let binding = XmiBinding::new();
+    let (root, report) = binding.import(&bytes).expect("import must succeed");
+
+    let validation = okf::validate::validate(&root);
+    println!("=== TMT COMMIT VALIDATION (empty reqId accepted as a warning) ===");
+    println!("valid                 : {}", validation.valid);
+    println!("errors                : {}", validation.errors.len());
+    for error in &validation.errors {
+        println!("  error: {error}");
+    }
+    let empty_reqid: Vec<&String> = validation
+        .warnings
+        .iter()
+        .filter(|w| w.contains("empty reqId"))
+        .collect();
+    println!("empty-reqId warnings  : {}", empty_reqid.len());
+    for warning in &empty_reqid {
+        println!("  warning: {warning}");
+    }
+
+    assert!(
+        validation.valid,
+        "the TMT model must validate: {:?}",
+        validation.errors
+    );
+    assert_eq!(
+        empty_reqid.len(),
+        2,
+        "exactly two unnamed requirements must be named: {:?}",
+        empty_reqid
+    );
+
+    // The ONLY remaining blocker is the unaccepted losses: accept all 48,553 and
+    // the import commits (the round-trip test above proves fidelity; this test
+    // proves validation; nothing else stands between the import and the commit).
+    assert_eq!(
+        report.blocking().len(),
+        48553,
+        "48,553 blocking losses remain the sole blocker"
+    );
+    let verbatim: Vec<String> = root
+        .requirements
+        .iter()
+        .filter(|r| r.req_id.is_empty())
+        .map(|r| format!("{} (name={:?}, reqId={:?})", r.id, r.name, r.req_id))
+        .collect();
+    println!("unnamed requirements  : {verbatim:?}");
+}
+
+#[test]
 fn the_real_tmt_model_round_trips_through_the_harness() {
     // GAP: an imported-then-exported real model must retain what the import
     // carries. The engine's own diff - not the binding's claim - is the arbiter

@@ -99,10 +99,7 @@ fn accepts_an_empty_requirement_id_as_a_warning() {
     root.requirements[0].req_id = String::new();
     let report = validate::validate(&root);
     assert!(report.valid, "unexpected errors: {:?}", report.errors);
-    assert!(report
-        .warnings
-        .iter()
-        .any(|w| w.contains("empty reqId")));
+    assert!(report.warnings.iter().any(|w| w.contains("empty reqId")));
     assert!(!report.errors.iter().any(|e| e.contains("reqId")));
 }
 
