@@ -7,6 +7,12 @@
 //! canvas extent, and - because every iteration is over a sorted collection and every tie is
 //! broken by node id - the same model always produces byte-identical geometry.
 //!
+//! The canvas is sized by what is DRAWN rather than by the rank structure. The vertical gap
+//! between stacked boxes follows the content (see [fitted_v_gap]): a rank that holds many boxes
+//! tightens its spacing instead of stretching the canvas to the height of the rank, so a wide,
+//! shallow picture - a filtered whole, one hub and the wide rank around it - composes in the frame
+//! it is consumed at instead of becoming a tall, mostly empty strip.
+//!
 //! Two layouts are provided:
 //!
 //! * [structure_layout] - a layered (Sugiyama-style) arrangement of the whole graph. Nodes are
@@ -98,6 +104,15 @@ pub const NODE_MIN_W: f64 = 64.0;
 pub const NODE_MAX_W: f64 = 260.0;
 /// The height of every node box: a name line and a small kind line.
 pub const NODE_H: f64 = 48.0;
+/// The shape a drawing is consumed at: the 16:9 slide the export measures its own labels against
+/// (1920x1080). Only the ratio matters - the canvas sizing below is dimensionless.
+const FRAME_ASPECT: f64 = 16.0 / 9.0;
+/// The tightest the vertical gap may become, in canvas units. The gap is not only a separation:
+/// it is the channel an orthogonal edge turns in when it detours between two stacked boxes, and
+/// the router's own clearance constants (a 12-unit stub and a 12-unit lane gap) are the smallest
+/// channel it can turn in. Closing the gap further does not just look cramped - edges start
+/// crossing boxes. A caller that asks for a smaller gap than this gets exactly what it asked for.
+const ROUTABLE_V_GAP: f64 = 12.0;
 /// The estimated horizontal advance per character, shared by sizing and truncation so the two
 /// can never disagree about how much text fits a box.
 pub const CHAR_W: f64 = 7.4;
@@ -793,13 +808,62 @@ fn barycentre(neighbours: &[(usize, f64)], positions: &HashMap<usize, usize>) ->
     }
 }
 
+/// The width the columns occupy: one column per rank, each as wide as its widest box, the
+/// horizontal gap between them and the margin at both ends. The width does not depend on the
+/// vertical gap, so the two are settled one after the other.
+fn canvas_width(order: &[Vec<usize>], sizes: &[(f64, f64)], spacing: &LayoutSpacing) -> f64 {
+    let mut cursor = spacing.margin;
+    for layer in order {
+        let layer_w = layer.iter().map(|&u| sizes[u].0).fold(0.0, f64::max);
+        cursor += layer_w + spacing.h_gap;
+    }
+    cursor - spacing.h_gap + spacing.margin
+}
+
+/// The vertical gap between boxes stacked in a column.
+///
+/// A gap is a spacing, not a floor: a column of thirty boxes pays thirty times for a gap that
+/// exists to separate two of them. Held constant, that gap is what made the canvas follow the RANK
+/// STRUCTURE rather than the boxes - a rank that is deep but narrow stretched the drawing to the
+/// height of the rank however little of that height the rest of the picture used, and a filtered
+/// whole (one hub and the wide rank around it) came out as a tall, thin, half-empty strip whose
+/// labels shrink with the height once the drawing is fitted into a slide.
+///
+/// So the gap follows the content: it tightens - never past [ROUTABLE_V_GAP], the channel the
+/// router needs to turn in, and never past the gap the caller asked for - until the canvas has the
+/// shape of the frame the artefact is consumed at ([FRAME_ASPECT], the 16:9 slide the export
+/// measures its own labels against). A drawing that already composes in that frame keeps its spacing
+/// exactly, and tightening can only make a label read larger, never smaller: the canvas loses
+/// height while its width is untouched.
+fn fitted_v_gap(
+    order: &[Vec<usize>],
+    sizes: &[(f64, f64)],
+    spacing: &LayoutSpacing,
+    width: f64,
+) -> f64 {
+    // The tallest column may be as tall as the frame is, and no taller.
+    let budget = width / FRAME_ASPECT - spacing.margin * 2.0;
+    let mut v_gap = spacing.v_gap;
+    for layer in order {
+        if layer.len() < 2 {
+            continue;
+        }
+        let boxes: f64 = layer.iter().map(|&u| sizes[u].1).sum();
+        let room = (budget - boxes) / (layer.len() - 1) as f64;
+        v_gap = v_gap.min(room);
+    }
+    v_gap.max(spacing.v_gap.min(ROUTABLE_V_GAP))
+}
+
 /// Turn the ordered layers into concrete coordinates: columns left-to-right, nodes stacked and
-/// vertically centred within the tallest layer, the whole canvas padded by the margin.
+/// vertically centred within the tallest column, the whole canvas padded by the margin.
 fn assign_positions(
     order: &[Vec<usize>],
     sizes: &[(f64, f64)],
     spacing: &LayoutSpacing,
 ) -> (Vec<(f64, f64)>, f64, f64) {
+    let width = canvas_width(order, sizes, spacing);
+    let v_gap = fitted_v_gap(order, sizes, spacing, width);
     let n_layers = order.len();
     let mut layer_w = vec![0.0f64; n_layers];
     let mut layer_h = vec![0.0f64; n_layers];
@@ -809,7 +873,7 @@ fn assign_positions(
         }
         if !layer.is_empty() {
             let sum: f64 = layer.iter().map(|&u| sizes[u].1).sum();
-            layer_h[i] = sum + (layer.len() - 1) as f64 * spacing.v_gap;
+            layer_h[i] = sum + (layer.len() - 1) as f64 * v_gap;
         }
     }
     let max_h = layer_h.iter().cloned().fold(0.0, f64::max);
@@ -820,14 +884,13 @@ fn assign_positions(
         x_off[i] = cursor;
         cursor += layer_w[i] + spacing.h_gap;
     }
-    let width = cursor - spacing.h_gap + spacing.margin;
 
     let mut positions = vec![(0.0, 0.0); sizes.len()];
     for (i, layer) in order.iter().enumerate() {
         let mut y = spacing.margin + (max_h - layer_h[i]) / 2.0;
         for &u in layer {
             positions[u] = (x_off[i], y);
-            y += sizes[u].1 + spacing.v_gap;
+            y += sizes[u].1 + v_gap;
         }
     }
     let height = spacing.margin + max_h + spacing.margin;
