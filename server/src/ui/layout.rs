@@ -19,7 +19,11 @@ use crate::auth::{Identity, Permission};
 use crate::error::ApiError;
 use crate::store::{Commit, Store};
 
-const STYLE: &str = r#"
+/// The ONE stylesheet the whole product wears: the site, the workbench pages, the presentation
+/// view and the standalone SVG export all take their palette from this block. It is
+/// `pub(crate)` for exactly that reason - ui/export.rs resolves the tokens below by name rather
+/// than restating them, so a rebrand cannot leave a downloaded artefact wearing the old colours.
+pub(crate) const STYLE: &str = r#"
 /* =========================================================================
    modelwrite design system
    Hand-written, no build step, nothing fetched. Every colour is a custom

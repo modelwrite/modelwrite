@@ -190,6 +190,7 @@ fn diagram_markup(
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Back to the overview" }
             }
             (diagram_toolbar(project, commit, view, has_process, has_control, &kinds))
+            (diagram_export_scopes(project, commit, view, graph))
             div class="diagram-viewport" {
                 (PreEscaped(svg))
             }
@@ -337,6 +338,560 @@ fn kind_label(kind: &str) -> &str {
     }
 }
 
+/// The export scopes, ON THE PAGE. The whole model is complete and, at slide scale, unreadable,
+/// so what to draw belongs to the reader - and each option is SIZED here, in the same numbers the
+/// exported file will have, because "export by kind" is only a choice if a person can see which
+/// kind produces a picture they can read.
+fn diagram_export_scopes(
+    project: &str,
+    commit: &Commit,
+    view: DiagramView,
+    graph: &Graph,
+) -> Markup {
+    let options = scope_options(graph, view);
+    let base = format!(
+        "/ui/projects/{}/diagram.svg?commit={}&view={}",
+        crate::ui::urlencode(project),
+        crate::ui::urlencode(&commit.hash),
+        view.as_str()
+    );
+    let full_px = options
+        .first()
+        .map(|option| option.label_px)
+        .unwrap_or_default();
+    let elements = elements_in_picker_order(graph);
+    let hops: Vec<(usize, String)> = (1..=MAX_HOPS)
+        .map(|radius| {
+            let label = if radius == 1 {
+                "1 relationship".to_string()
+            } else {
+                format!("{radius} relationships")
+            };
+            (radius, label)
+        })
+        .collect();
+    html! {
+        section class="diagram-exports" aria-label="Export a drawing" {
+            h2 { "Export a drawing" }
+            p class="diagram-exports-note" {
+                "The full drawing is complete and correct, and on a 1920×1080 slide its labels land "
+                "at " (format!("{full_px:.1}")) " px — nobody can read that. Narrow the drawing to "
+                "what the report or the review is about. Narrowing usually buys label size, but not "
+                "always: the canvas height follows how DEEP the structure is, not how many boxes it "
+                "has, so every option below is measured on the real layout and the ones that are "
+                "still unreadable say so. Every export also names its scope and its counts on its "
+                "face, so a filtered picture can never be mistaken for the whole model."
+            }
+            ul class="export-scopes" {
+                @for option in &options {
+                    li class="export-scope" {
+                        a class="export-scope-link" href={ (base) "&" (option.scoped.scope.query()) } {
+                            (scope_title(option))
+                        }
+                        span class="export-scope-detail" { " — " (scope_detail(option)) }
+                    }
+                }
+            }
+            form class="export-neighbourhood" method="get"
+                 action={ "/ui/projects/" (crate::ui::urlencode(project)) "/diagram.svg" } {
+                h3 { "One element and its neighbourhood" }
+                p {
+                    "Draws the element you pick and everything within the radius you pick, in either "
+                    "direction along every relationship. This is the \"show me this part of the model\" "
+                    "export a review uses."
+                }
+                input type="hidden" name="commit" value=(commit.hash);
+                input type="hidden" name="view" value=(view.as_str());
+                input type="hidden" name="scope" value="neighbourhood";
+                label { "Element "
+                    select name="element" {
+                        @for node in &elements {
+                            option value=(node.id) {
+                                (display_name(node)) " — " (kind_label(&node.kind))
+                            }
+                        }
+                    }
+                }
+                label { "within "
+                    select name="hops" {
+                        @for (radius, label) in &hops {
+                            option value=(radius) selected[*radius == DEFAULT_HOPS] { (label) }
+                        }
+                    }
+                }
+                button type="submit" { "Download the neighbourhood" }
+            }
+        }
+    }
+}
+
+/// The name of a node as a person reads it: its name, or its id when it has none.
+fn display_name(node: &GraphNode) -> &str {
+    if node.name.is_empty() {
+        &node.id
+    } else {
+        &node.name
+    }
+}
+
+/// What a scope option draws, as the link a person clicks.
+fn scope_title(option: &ScopeOption) -> String {
+    let scoped = &option.scoped;
+    if scoped.is_full() {
+        "the whole model (complete)".to_string()
+    } else {
+        scoped.label()
+    }
+}
+
+/// What a scope option gives you: the counts, and the label size it lands at on a slide. The
+/// measure is stated as a number because that is the whole point of offering the option.
+fn scope_detail(option: &ScopeOption) -> String {
+    let readability = if option.legible {
+        "readable"
+    } else {
+        "still too small to read"
+    };
+    format!(
+        "{} · labels {:.1} px at slide scale — {readability}",
+        option.scoped.counts(),
+        option.label_px
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Scoping: how much of the model a drawing shows.
+//
+// The full drawing is complete and correct - and for a model of any size it is also unreadable
+// at slide scale. Ninety-nine labelled boxes on one canvas land their labels at single-digit
+// pixels, which is the same as exporting nothing. A scope is a filter on the LAYOUT INPUT: the
+// same renderer, the same determinism, fewer elements, a smaller canvas, larger labels. Every
+// scope also carries its counts, because a filtered picture that did not say so could be
+// mistaken for the whole model.
+// ---------------------------------------------------------------------------
+
+/// The frame an exported picture is most often read in: one 1920x1080 slide.
+pub(crate) const SLIDE_W: f64 = 1920.0;
+pub(crate) const SLIDE_H: f64 = 1080.0;
+/// The node label size in user units, as the ONE stylesheet declares it
+/// (`svg g.node .node-name { font-size: 13px }` in ui/layout.rs). A test pins the two together,
+/// so this measure cannot silently drift from the type the pages actually set.
+pub(crate) const NODE_LABEL_PX: f64 = 13.0;
+/// A label below this lands too small to read on the slide it was put on.
+pub(crate) const LEGIBLE_LABEL_PX: f64 = 11.0;
+/// The default and maximum neighbourhood radius, in relationships.
+pub(crate) const DEFAULT_HOPS: usize = 1;
+pub(crate) const MAX_HOPS: usize = 3;
+/// How many containment branches the diagram page offers as one-click exports.
+const CONTAINMENT_LINKS: usize = 6;
+
+/// The size a node label lands at when a drawing of this canvas is fitted into one slide. This is
+/// the honest measure of "can a person read it": it is the label's own size scaled by exactly the
+/// factor the whole drawing is scaled by, so it is computable without rendering anything.
+pub(crate) fn slide_label_px(canvas_w: f64, canvas_h: f64) -> f64 {
+    if canvas_w <= 0.0 || canvas_h <= 0.0 {
+        return 0.0;
+    }
+    NODE_LABEL_PX * (SLIDE_W / canvas_w).min(SLIDE_H / canvas_h)
+}
+
+/// Whether a drawing of this canvas keeps its labels readable on a slide.
+pub(crate) fn legible_at_slide_scale(canvas_w: f64, canvas_h: f64) -> bool {
+    slide_label_px(canvas_w, canvas_h) >= LEGIBLE_LABEL_PX
+}
+
+/// A scope that names something the model does not define is a REQUEST error, not a drawing
+/// error: the two are kept apart so the handler can answer 404 or 400 correctly.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ScopeError {
+    /// The scope centres on an element this model does not have.
+    UnknownElement(String),
+    /// The scope asks for a kind this model has no elements of.
+    NoSuchKind(String),
+}
+
+impl ScopeError {
+    pub(crate) fn message(&self) -> String {
+        match self {
+            ScopeError::UnknownElement(id) => format!("this model has no element {id}"),
+            ScopeError::NoSuchKind(kind) => format!("this model has no {kind} elements"),
+        }
+    }
+}
+
+/// The part of a model a drawing shows.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DiagramScope {
+    /// Every element and every relationship: the only COMPLETE scope.
+    Full,
+    /// Only these element kinds, and the relationships among them. The kind list is kept sorted
+    /// and deduplicated, so two addresses that mean the same scope export the same bytes.
+    Kinds(Vec<String>),
+    /// One element and everything within `hops` relationships of it, in either direction.
+    Neighbourhood { element: String, hops: usize },
+    /// One container and everything it contains, through part/contains edges.
+    Containment { element: String },
+}
+
+/// The element a scope is centred on, resolved when the scope is applied so the caption can name
+/// what the reader is looking at rather than only which id was asked for.
+#[derive(Debug, Clone)]
+pub(crate) struct Focus {
+    pub name: String,
+    pub id: String,
+}
+
+impl Focus {
+    /// The element as a person reads it: its name, with its id when the two differ.
+    fn label(&self) -> String {
+        if self.name == self.id {
+            self.id.clone()
+        } else {
+            format!("{} ({})", self.name, self.id)
+        }
+    }
+}
+
+/// The drawing a scope resolves to: the sub-graph to draw, and what it is a subset of. The counts
+/// travel with the drawing because they are what makes a filtered picture honest.
+#[derive(Debug, Clone)]
+pub(crate) struct ScopedGraph {
+    pub graph: Graph,
+    pub scope: DiagramScope,
+    /// The element the scope is centred on, for the element-centred scopes.
+    pub focus: Option<Focus>,
+    pub elements: usize,
+    pub relationships: usize,
+    pub total_elements: usize,
+    pub total_relationships: usize,
+}
+
+impl ScopedGraph {
+    /// The whole model as a scope: what the diagram page and the presentation view draw.
+    pub(crate) fn full(graph: &Graph) -> ScopedGraph {
+        DiagramScope::Full
+            .apply(graph)
+            .expect("the full scope always applies")
+    }
+
+    /// The human phrase for a caption: what the picture is of.
+    pub(crate) fn label(&self) -> String {
+        match &self.scope {
+            DiagramScope::Full => "the whole model".to_string(),
+            DiagramScope::Kinds(kinds) => format!(
+                "only {} elements",
+                kinds
+                    .iter()
+                    .map(|kind| kind_label(kind))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
+            DiagramScope::Neighbourhood { hops, .. } => format!(
+                "{} and everything within {hops} relationship{}",
+                self.focus_label(),
+                if *hops == 1 { "" } else { "s" }
+            ),
+            DiagramScope::Containment { .. } => {
+                format!("{} and its containment descendants", self.focus_label())
+            }
+        }
+    }
+
+    /// The centred element, or the id the scope was asked for when it could not be named.
+    fn focus_label(&self) -> String {
+        match &self.focus {
+            Some(focus) => focus.label(),
+            None => match &self.scope {
+                DiagramScope::Neighbourhood { element, .. }
+                | DiagramScope::Containment { element } => element.clone(),
+                _ => String::new(),
+            },
+        }
+    }
+
+    /// The counts as the caption states them: "42/99 elements, 60/165 relationships".
+    pub(crate) fn counts(&self) -> String {
+        format!(
+            "{}/{} elements, {}/{} relationships",
+            self.elements, self.total_elements, self.relationships, self.total_relationships
+        )
+    }
+
+    /// Whether this drawing is the whole model. Only this one may be called complete.
+    pub(crate) fn is_full(&self) -> bool {
+        self.scope == DiagramScope::Full
+    }
+}
+
+impl DiagramScope {
+    /// The canonical token, written into the provenance line, the metadata element and the file
+    /// name. One spelling, so a scope can be named, quoted and grepped.
+    pub(crate) fn as_str(&self) -> String {
+        match self {
+            DiagramScope::Full => "full".to_string(),
+            DiagramScope::Kinds(kinds) => format!("kinds:{}", kinds.join(",")),
+            DiagramScope::Neighbourhood { element, hops } => {
+                format!("neighbourhood:{element}:{hops}")
+            }
+            DiagramScope::Containment { element } => format!("containment:{element}"),
+        }
+    }
+
+    /// The query fragment that addresses this scope, so a link and the filter it reaches can
+    /// never disagree about what was asked for.
+    pub(crate) fn query(&self) -> String {
+        match self {
+            DiagramScope::Full => "scope=full".to_string(),
+            DiagramScope::Kinds(kinds) => format!("scope=kinds&kinds={}", kinds.join(",")),
+            DiagramScope::Neighbourhood { element, hops } => format!(
+                "scope=neighbourhood&element={}&hops={hops}",
+                crate::ui::urlencode(element)
+            ),
+            DiagramScope::Containment { element } => format!(
+                "scope=containment&element={}",
+                crate::ui::urlencode(element)
+            ),
+        }
+    }
+
+    /// Resolve this scope against a model: the sub-graph to draw, plus the counts that keep a
+    /// filtered picture honest. Deterministic by construction - the subsets are filtered out of
+    /// the model's own node and edge order, so the same scope always yields the same bytes.
+    pub(crate) fn apply(&self, graph: &Graph) -> Result<ScopedGraph, ScopeError> {
+        let total_elements = graph.nodes.len();
+        let total_relationships = graph.edges.len();
+        let named = |id: &str| -> Result<Focus, ScopeError> {
+            let node = graph
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .ok_or_else(|| ScopeError::UnknownElement(id.to_string()))?;
+            let name = if node.name.is_empty() {
+                node.id.clone()
+            } else {
+                node.name.clone()
+            };
+            Ok(Focus {
+                name,
+                id: node.id.clone(),
+            })
+        };
+
+        // The WHOLE MODEL is drawn exactly as the model is: no filtering at all, so nothing -
+        // not even an edge whose endpoint the model does not define - can be lost to the scope
+        // machinery. Completeness is a tested property of the full export and stays one.
+        let mut focus: Option<Focus> = None;
+        let keep: Option<BTreeSet<&str>> = match self {
+            DiagramScope::Full => None,
+            DiagramScope::Kinds(kinds) => {
+                let present: BTreeSet<&str> = graph.nodes.iter().map(|n| n.kind.as_str()).collect();
+                for kind in kinds {
+                    if !present.contains(kind.as_str()) {
+                        return Err(ScopeError::NoSuchKind(kind.clone()));
+                    }
+                }
+                let wanted: BTreeSet<&str> = kinds.iter().map(String::as_str).collect();
+                Some(
+                    graph
+                        .nodes
+                        .iter()
+                        .filter(|node| wanted.contains(node.kind.as_str()))
+                        .map(|node| node.id.as_str())
+                        .collect(),
+                )
+            }
+            DiagramScope::Neighbourhood { element, hops } => {
+                let adjacency = adjacency(graph);
+                let mut seen: BTreeSet<&str> = BTreeSet::new();
+                seen.insert(element.as_str());
+                let mut frontier: Vec<&str> = vec![element.as_str()];
+                for _ in 0..(*hops).min(MAX_HOPS) {
+                    let mut next: Vec<&str> = Vec::new();
+                    for id in &frontier {
+                        for other in adjacency.get(id).map(Vec::as_slice).unwrap_or(&[]) {
+                            if seen.insert(other) {
+                                next.push(other);
+                            }
+                        }
+                    }
+                    if next.is_empty() {
+                        break;
+                    }
+                    frontier = next;
+                }
+                focus = Some(named(element)?);
+                Some(seen)
+            }
+            DiagramScope::Containment { element } => {
+                let children = containment_children(graph);
+                let mut seen: BTreeSet<&str> = BTreeSet::new();
+                seen.insert(element.as_str());
+                let mut frontier: Vec<&str> = vec![element.as_str()];
+                while let Some(id) = frontier.pop() {
+                    for child in children.get(id).map(Vec::as_slice).unwrap_or(&[]) {
+                        if seen.insert(child) {
+                            frontier.push(child);
+                        }
+                    }
+                }
+                focus = Some(named(element)?);
+                Some(seen)
+            }
+        };
+
+        // The scope a drawing is of, or the whole model untouched.
+        let (nodes, edges): (Vec<GraphNode>, Vec<GraphEdge>) = match &keep {
+            None => (graph.nodes.clone(), graph.edges.clone()),
+            Some(keep) => (
+                graph
+                    .nodes
+                    .iter()
+                    .filter(|node| keep.contains(node.id.as_str()))
+                    .cloned()
+                    .collect(),
+                // Edges survive only when BOTH endpoints do. An edge with one endpoint filtered out
+                // would otherwise be drawn as an unresolved marker, which would be an artefact of
+                // the scope rather than a fact about the model.
+                graph
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        keep.contains(edge.source.as_str()) && keep.contains(edge.target.as_str())
+                    })
+                    .cloned()
+                    .collect(),
+            ),
+        };
+        Ok(ScopedGraph {
+            elements: nodes.len(),
+            relationships: edges.len(),
+            graph: Graph { nodes, edges },
+            scope: self.clone(),
+            focus,
+            total_elements,
+            total_relationships,
+        })
+    }
+}
+
+/// Undirected adjacency over every relationship, restricted to endpoints the model defines.
+fn adjacency(graph: &Graph) -> BTreeMap<&str, Vec<&str>> {
+    let ids: BTreeSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let mut adjacency: BTreeMap<&str, Vec<&str>> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), Vec::new()))
+        .collect();
+    for edge in &graph.edges {
+        let (source, target) = (edge.source.as_str(), edge.target.as_str());
+        if source == target || !ids.contains(source) || !ids.contains(target) {
+            continue;
+        }
+        adjacency.entry(source).or_default().push(target);
+        adjacency.entry(target).or_default().push(source);
+    }
+    adjacency
+}
+
+/// The containment children of each element: part/contains edges point container -> contained.
+fn containment_children(graph: &Graph) -> BTreeMap<&str, Vec<&str>> {
+    let ids: BTreeSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for edge in &graph.edges {
+        if !matches!(edge.kind.as_str(), "part" | "contains") {
+            continue;
+        }
+        let (source, target) = (edge.source.as_str(), edge.target.as_str());
+        if !ids.contains(source) || !ids.contains(target) {
+            continue;
+        }
+        children.entry(source).or_default().push(target);
+    }
+    children
+}
+
+/// The containers that hold something, most-populated branch first: the branches a reviewer can
+/// export in one click. Ties break on id, so the list is stable from load to load.
+fn containment_roots(graph: &Graph) -> Vec<(String, usize)> {
+    let children = containment_children(graph);
+    let mut roots: Vec<(String, usize)> = children
+        .keys()
+        .map(|root| {
+            let mut seen: BTreeSet<&str> = BTreeSet::new();
+            let mut frontier: Vec<&str> = vec![root];
+            while let Some(id) = frontier.pop() {
+                for child in children.get(id).map(Vec::as_slice).unwrap_or(&[]) {
+                    if child != root && seen.insert(child) {
+                        frontier.push(child);
+                    }
+                }
+            }
+            ((*root).to_string(), seen.len())
+        })
+        .collect();
+    roots.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    roots
+}
+
+/// A scope offered on the diagram page, SIZED: what it draws and how large its labels land on a
+/// slide. The page offers only scopes the view can actually draw.
+pub(crate) struct ScopeOption {
+    pub scoped: ScopedGraph,
+    /// The node label size this drawing lands at when fitted into one slide.
+    pub label_px: f64,
+    /// Whether that size is readable.
+    pub legible: bool,
+}
+
+/// Every scope the diagram page offers for one drawing: the whole model first, then each kind,
+/// then the kinds a review usually asks for together, then the most-populated containment
+/// branches. Each is sized through the REAL layout, so the numbers on the page are the numbers
+/// the exported file will have.
+pub(crate) fn scope_options(graph: &Graph, view: DiagramView) -> Vec<ScopeOption> {
+    let mut scopes: Vec<DiagramScope> = vec![DiagramScope::Full];
+    if view == DiagramView::Structure {
+        for (kind, _) in distinct_kinds(graph) {
+            scopes.push(DiagramScope::Kinds(vec![kind]));
+        }
+        let present = |kind: &str| graph.nodes.iter().any(|node| node.kind == kind);
+        if present("block") && present("requirement") {
+            scopes.push(DiagramScope::Kinds(vec![
+                "block".to_string(),
+                "requirement".to_string(),
+            ]));
+        }
+        for (root, _) in containment_roots(graph).into_iter().take(CONTAINMENT_LINKS) {
+            scopes.push(DiagramScope::Containment { element: root });
+        }
+    }
+    scopes
+        .into_iter()
+        .filter_map(|scope| {
+            let scoped = scope.apply(graph).ok()?;
+            let layout = layout_for(&scoped.graph, view)?;
+            let (width, height) = canvas_extent(&scoped.graph, &layout, true);
+            Some(ScopeOption {
+                label_px: slide_label_px(width, height),
+                legible: legible_at_slide_scale(width, height),
+                scoped,
+            })
+        })
+        .collect()
+}
+
+/// Every element of a drawing, ordered the way the picker lists them: the filter bar's kind
+/// order first, then name, then id, so the list is stable and groups like with like.
+pub(crate) fn elements_in_picker_order(graph: &Graph) -> Vec<&GraphNode> {
+    let mut nodes: Vec<&GraphNode> = graph.nodes.iter().collect();
+    nodes.sort_by(|a, b| {
+        kind_sort_key(&a.kind)
+            .cmp(&kind_sort_key(&b.kind))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    nodes
+}
+
 // ---------------------------------------------------------------------------
 // SVG composition.
 // ---------------------------------------------------------------------------
@@ -367,6 +922,17 @@ impl SvgOptions<'_> {
 /// The height of the caption band the export draws beneath the drawing.
 const CAPTION_H: f64 = 34.0;
 
+/// The layout of one view, when the model declares it. The structure view always exists for a
+/// graph; the process and control views are optional, and a scope that leaves the model nothing
+/// for one of them to draw is a scope that view cannot offer.
+pub(crate) fn layout_for(graph: &Graph, view: DiagramView) -> Option<DiagramLayout> {
+    match view {
+        DiagramView::Structure => Some(graph_layout::structure_layout(graph)),
+        DiagramView::Process => graph_layout::process_layout(graph),
+        DiagramView::Control => graph_layout::control_layout(graph),
+    }
+}
+
 /// The SVG of one view, rendered by the SAME renderer the page uses. Returns None when the model
 /// does not declare that view (the process and control views are optional).
 pub(crate) fn diagram_svg(
@@ -374,12 +940,74 @@ pub(crate) fn diagram_svg(
     view: DiagramView,
     options: &SvgOptions<'_>,
 ) -> Option<String> {
-    let layout = match view {
-        DiagramView::Structure => graph_layout::structure_layout(graph),
-        DiagramView::Process => graph_layout::process_layout(graph)?,
-        DiagramView::Control => graph_layout::control_layout(graph)?,
-    };
+    let layout = layout_for(graph, view)?;
     Some(render_graph_svg(graph, &layout, options))
+}
+
+/// The canvas a drawing occupies: the layout extent, a lane for dangling-endpoint markers when an
+/// edge names a node the model does not define, and - for an export - the caption band. Split out
+/// of [render_graph_svg] so a caller can SIZE a drawing before drawing it: legibility is a
+/// property of the canvas, and a scope is chosen on that measure.
+struct Canvas {
+    width: f64,
+    height: f64,
+    /// The drawing's own height, without the caption band.
+    drawing_h: f64,
+    /// The dangling markers: their id and centre, in the order they are drawn.
+    dangling: Vec<(String, (f64, f64))>,
+}
+
+fn canvas_for(graph: &Graph, layout: &DiagramLayout, caption: bool) -> Canvas {
+    let node_ids: BTreeSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let mut dangling_ids: BTreeSet<&str> = BTreeSet::new();
+    for edge in &graph.edges {
+        for endpoint in [edge.source.as_str(), edge.target.as_str()] {
+            if !node_ids.contains(endpoint) {
+                dangling_ids.insert(endpoint);
+            }
+        }
+    }
+
+    let band_y = layout.height + DANG_GAP + DANGLING_H / 2.0;
+    let mut cursor = MARGIN;
+    let mut dangling: Vec<(String, (f64, f64))> = Vec::new();
+    for id in dangling_ids {
+        dangling.push((id.to_string(), (cursor + DANGLING_W / 2.0, band_y)));
+        cursor += DANGLING_W + 24.0;
+    }
+    let width = layout.width.max(cursor + MARGIN - 24.0);
+    let drawing_h = if dangling.is_empty() {
+        layout.height
+    } else {
+        layout.height + DANG_GAP + DANGLING_H + MARGIN
+    };
+    let band = if caption { CAPTION_H } else { 0.0 };
+    Canvas {
+        width,
+        height: drawing_h + band,
+        drawing_h,
+        dangling,
+    }
+}
+
+/// The canvas a drawing of this graph would occupy, without drawing it. This is what the scoping
+/// options are measured on, and what the export is measured against when it says how readable it
+/// is at slide scale.
+pub(crate) fn canvas_extent(graph: &Graph, layout: &DiagramLayout, caption: bool) -> (f64, f64) {
+    let canvas = canvas_for(graph, layout, caption);
+    (canvas.width, canvas.height)
+}
+
+/// The canvas a drawing of this model, in this view, would occupy - or None when the view has
+/// nothing to draw. The exported file states the label size this canvas lands at on a slide, so
+/// the measurement is taken from the same arithmetic the renderer uses.
+pub(crate) fn drawing_canvas(
+    graph: &Graph,
+    view: DiagramView,
+    caption: bool,
+) -> Option<(f64, f64)> {
+    let layout = layout_for(graph, view)?;
+    Some(canvas_extent(graph, &layout, caption))
 }
 
 /// One endpoint of an edge as the renderer sees it: a placed node box, or a dangling marker.
@@ -403,38 +1031,16 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<
     let box_by_id: HashMap<&str, &NodeBox> =
         layout.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
-    let mut dangling_set: BTreeSet<&str> = BTreeSet::new();
-    for edge in &graph.edges {
-        if !node_by_id.contains_key(edge.source.as_str()) {
-            dangling_set.insert(edge.source.as_str());
-        }
-        if !node_by_id.contains_key(edge.target.as_str()) {
-            dangling_set.insert(edge.target.as_str());
-        }
-    }
-    let dangling_ids: Vec<String> = dangling_set.into_iter().map(|s| s.to_string()).collect();
-    let has_dangling = !dangling_ids.is_empty();
-
-    let mut dangling_centers: HashMap<String, (f64, f64)> = HashMap::new();
-    let band_y = layout.height + DANG_GAP + DANGLING_H / 2.0;
-    let mut cursor = MARGIN;
-    for id in &dangling_ids {
-        dangling_centers.insert(id.clone(), (cursor + DANGLING_W / 2.0, band_y));
-        cursor += DANGLING_W + 24.0;
-    }
-    let canvas_w = layout.width.max(cursor + MARGIN - 24.0);
-    // The drawing's own height; the caption band is added beneath it only for an export.
-    let drawing_h = if has_dangling {
-        layout.height + DANG_GAP + DANGLING_H + MARGIN
-    } else {
-        layout.height
-    };
-    let band = if options.caption.is_some() {
-        CAPTION_H
-    } else {
-        0.0
-    };
-    let canvas_h = drawing_h + band;
+    let canvas = canvas_for(graph, layout, options.caption.is_some());
+    let canvas_w = canvas.width;
+    let canvas_h = canvas.height;
+    let drawing_h = canvas.drawing_h;
+    let dangling_ids: Vec<String> = canvas.dangling.iter().map(|(id, _)| id.clone()).collect();
+    let dangling_centers: HashMap<&str, (f64, f64)> = canvas
+        .dangling
+        .iter()
+        .map(|(id, center)| (id.as_str(), *center))
+        .collect();
 
     let mut svg = String::new();
     if options.sized {
@@ -503,7 +1109,7 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<
     }
 
     for id in &dangling_ids {
-        let (cx, cy) = dangling_centers[id];
+        let (cx, cy) = dangling_centers[id.as_str()];
         push_dangling(&mut svg, id, cx, cy);
     }
 
@@ -529,6 +1135,20 @@ fn edge_group(kind: &str) -> &'static str {
         "part" | "contains" => "containment",
         "dependency" => "dependency",
         "include" | "triggers" | "transition" => "flow",
+        _ => "neutral",
+    }
+}
+
+/// The ARROWHEAD class for an edge group. The stylesheet names the accent arrow after the token it
+/// wears (--accent) rather than after the relationship, so a dependency edge needs the mapping:
+/// without it the polygon matched no rule at all and SVG's default fill - BLACK - painted every
+/// dependency arrowhead, on the page and in the export. Measured, not guessed: the rendered
+/// export painted rgb(0, 0, 0) for the arrow whose line was accent blue.
+fn arrow_group(group: &str) -> &'static str {
+    match group {
+        "dependency" => "accent",
+        "containment" => "containment",
+        "flow" => "flow",
         _ => "neutral",
     }
 }
@@ -627,7 +1247,7 @@ fn push_edge(
         }
     };
 
-    push_arrowhead(svg, head_x, head_y, head_dx, head_dy, group);
+    push_arrowhead(svg, head_x, head_y, head_dx, head_dy, arrow_group(group));
     if !edge.label.is_empty() {
         svg.push_str(&format!(
             "<text class='edge-label' x='{:.1}' y='{:.1}' text-anchor='middle'>{}</text>",

@@ -18,19 +18,22 @@ use maud::{html, Markup, PreEscaped, DOCTYPE};
 use crate::api::ApiState;
 use crate::auth::{identity as resolve_identity, Identity};
 use crate::error::ApiError;
-use crate::ui::diagram::resolve_view;
-use crate::ui::export::{inline_diagram, DiagramSource, RENDERER_NAME, RENDERER_VERSION};
+use crate::ui::diagram::{resolve_view, ScopedGraph};
+use crate::ui::export::{
+    inline_diagram, shared_root_block, DiagramSource, RENDERER_NAME, RENDERER_VERSION,
+};
 use crate::ui::layout;
 use crate::ui::model::{load_view, view_branch, LoadedView, ModelQuery};
 
-/// The presentation page's own stylesheet: a full-viewport stage, the caption, and nothing else.
-/// The diagram itself is styled by the stylesheet inlined in the SVG. No font is fetched.
-const PRESENT_STYLE: &str = r#"
-:root { color-scheme: light; }
+/// The presentation page's own rules: a full-viewport stage, the caption, and nothing else. The
+/// diagram itself is styled by the stylesheet inlined in the SVG. No font is fetched, and - like
+/// the export - these rules carry no colour literal: every value is one of the SHARED tokens the
+/// workbench pages declare, so the projector view cannot drift from the product either.
+const PRESENT_RULES: &str = r#"
 html, body { margin: 0; height: 100%; }
 body.present {
-  display: flex; flex-direction: column; background: #ffffff; color: #1f2328;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex; flex-direction: column; background: var(--surface); color: var(--text);
+  font-family: var(--font-ui);
 }
 .present-stage {
   flex: 1 1 auto; min-height: 0;
@@ -40,14 +43,26 @@ body.present {
 .present-stage svg.mw-diagram-svg { width: 100%; height: 100%; display: block; }
 .present-caption {
   flex: 0 0 auto; display: flex; align-items: baseline; gap: 0.5rem 1rem; flex-wrap: wrap;
-  border-top: 1px solid #d1d9e0; background: #f6f8fa;
-  padding: 0.5rem 0.9rem; font-size: 13px; color: #59636e;
+  border-top: 1px solid var(--border); background: var(--surface-1);
+  padding: 0.5rem 0.9rem; font-size: 13px; color: var(--text-2);
 }
-.present-caption code { font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace; color: #1f2328; }
+.present-caption code { font-family: var(--font-mono); color: var(--text); }
 .present-actions { margin-left: auto; display: inline-flex; gap: 1rem; }
-.present-actions a { color: #1d4ed8; font-weight: 600; }
-.present-actions a:hover { color: #2563eb; }
+.present-actions a { color: var(--accent); font-weight: 600; }
+.present-actions a:hover { color: var(--accent-strong); }
 "#;
+
+/// The page's stylesheet: the SHARED token block from the one workbench stylesheet, then the stage
+/// rules written in those tokens. The presentation view is the same product as the pages and the
+/// same product as the download, so it reads the palette from the same single place.
+fn present_style() -> String {
+    format!(
+        "{}
+{}",
+        shared_root_block(),
+        PRESENT_RULES
+    )
+}
 
 /// GET /ui/projects/:project/present?branch=&commit=&view= - the diagram, full screen, no chrome.
 pub async fn present_page(
@@ -89,13 +104,17 @@ fn render_present(
         .ok_or_else(|| ApiError::not_found("this model has no graph section to draw"))?;
     let branch = view_branch(query, &commit);
     let view = resolve_view(graph, query.view.as_deref());
+    // The presentation view is the whole model, and it says so: a scale-and-project picture is
+    // exactly where a filtered drawing could otherwise be taken for the complete one.
+    let scoped = ScopedGraph::full(graph);
     let source = DiagramSource {
         project,
         commit: &commit,
         branch: &branch,
         view,
+        scoped: &scoped,
     };
-    let diagram = inline_diagram(&source, graph).ok_or_else(|| {
+    let diagram = inline_diagram(&source, &scoped.graph).ok_or_else(|| {
         ApiError::not_found(format!("this model declares no {} diagram", view.as_str()))
     })?;
 
@@ -115,13 +134,14 @@ fn render_present(
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (title) }
-                style { (PreEscaped(PRESENT_STYLE)) }
+                style { (PreEscaped(present_style())) }
             }
             body class="present" {
                 main class="present-stage" { (PreEscaped(diagram)) }
                 footer class="present-caption" {
                     span class="present-id" {
                         (project) " · commit " code { (commit.hash) } " · " (view.label())
+                        " · scope: the whole model (" (scoped.counts()) ")"
                         " · " (RENDERER_NAME) "/" (RENDERER_VERSION)
                     }
                     span class="present-actions" {
