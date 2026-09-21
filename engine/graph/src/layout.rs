@@ -104,9 +104,21 @@ pub const NODE_MIN_W: f64 = 64.0;
 pub const NODE_MAX_W: f64 = 260.0;
 /// The height of every node box: a name line and a small kind line.
 pub const NODE_H: f64 = 48.0;
-/// The shape a drawing is consumed at: the 16:9 slide the export measures its own labels against
-/// (1920x1080). Only the ratio matters - the canvas sizing below is dimensionless.
-const FRAME_ASPECT: f64 = 16.0 / 9.0;
+/// The slide an exported drawing is measured against, and the label sizes that make it readable:
+/// the renderer draws a node label at 13 px and calls 11 px the smallest a reader can read, so a
+/// canvas is a SLIDE PICTURE when it fits inside 1920x1080 scaled by that ratio (about 2269x1276).
+/// The same three numbers live in the renderer (server/src/ui/diagram.rs); they are repeated here
+/// because a layout has to know what shape it is composing for, and that shape is the slide.
+const SLIDE_W: f64 = 1920.0;
+const SLIDE_H: f64 = 1080.0;
+const NODE_LABEL_PX: f64 = 13.0;
+const READABLE_LABEL_PX: f64 = 11.0;
+/// The shape a drawing is consumed at. Only the ratio matters for the canvas' shape.
+const FRAME_ASPECT: f64 = SLIDE_W / SLIDE_H;
+/// The smallest change in canvas area or fitted size that counts as an improvement, so the shape
+/// search cannot chase floating-point noise into a different drawing.
+const AREA_EPSILON: f64 = 1e-6;
+const FIT_EPSILON: f64 = 1e-9;
 /// The tightest the vertical gap may become, in canvas units. The gap is not only a separation:
 /// it is the channel an orthogonal edge turns in when it detours between two stacked boxes, and
 /// the router's own clearance constants (a 12-unit stub and a 12-unit lane gap) are the smallest
@@ -539,7 +551,8 @@ fn layered_layout(
     let layers = assign_layers(n, rank_edges);
     let mut layers = settle_isolates(n, rank_edges, bary_edges, layers);
     let order = order_layers(&mut layers, n, bary_edges);
-    let (positions, width, height) = assign_positions(&order, &sizes, spacing);
+    let columns = compact_columns(&order, &sizes, spacing);
+    let (positions, width, height) = assign_positions(&columns, &sizes, spacing);
 
     let mut nodes: Vec<NodeBox> = (0..n)
         .map(|i| NodeBox {
@@ -853,6 +866,89 @@ fn fitted_v_gap(
         v_gap = v_gap.min(room);
     }
     v_gap.max(spacing.v_gap.min(ROUTABLE_V_GAP))
+}
+
+/// The fit of a canvas onto the slide it is consumed on: the scale its labels land at. The larger
+/// the fit, the more of the slide the drawing uses.
+fn canvas_fit(width: f64, height: f64) -> f64 {
+    (SLIDE_W / width).min(SLIDE_H / height)
+}
+
+/// Whether a canvas is small enough to be read as a slide picture.
+fn is_slide_picture(width: f64, height: f64) -> bool {
+    canvas_fit(width, height) >= READABLE_LABEL_PX / NODE_LABEL_PX
+}
+
+/// The ordered ranks with each rank's boxes cut into columns of at most the given number of boxes.
+fn columns_with_rows(order: &[Vec<usize>], rows: usize) -> Vec<Vec<usize>> {
+    order
+        .iter()
+        .flat_map(|layer| layer.chunks(rows.max(1)).map(<[usize]>::to_vec))
+        .collect()
+}
+
+/// Shape the columns the boxes are placed in.
+///
+/// A rank's boxes stack vertically, so a rank that holds thirty of them makes the canvas as tall as
+/// the rank is deep however little of that height the rest of the picture uses. Fitting that canvas
+/// onto a slide then shrinks every label with it: the drawing is complete and readable but badly
+/// composed, a tall strip with half the frame empty beside it. The canvas is following the RANK
+/// STRUCTURE rather than the boxes.
+///
+/// So a wide rank is placed as several columns - the ranks stay in order, left to right, and a
+/// rank's boxes stay in the order the barycentre pass fixed, so the picture still reads as the
+/// layered view it is - and the shape is chosen by what it is FOR:
+///
+/// * the fit onto the slide is as large as it can be, because that is what makes a drawing read;
+/// * the canvas is never larger than it was without compaction, so the boxes can only ever take up
+///   more of it, never less;
+/// * and a SURVEY stays a survey. A drawing too large to read on a slide is offered as a whole-model
+///   view, and the product says so on its face ("still too small to read") and offers a scope
+///   instead. Compaction may make a survey compose better; it may not silently turn one into a
+///   slide picture, because that is a change to what the product promises about that view, not to
+///   how it is drawn.
+///
+/// Every step is over counted collections in an order [order_layers] already fixed, so the shape is
+/// a pure function of the sizes and that order.
+fn compact_columns(
+    order: &[Vec<usize>],
+    sizes: &[(f64, f64)],
+    spacing: &LayoutSpacing,
+) -> Vec<Vec<usize>> {
+    let tallest = order.iter().map(Vec::len).max().unwrap_or(0);
+    if tallest <= 1 {
+        // Nothing stacks: a chain of ranks of one box is already the smallest canvas it can be.
+        return order.to_vec();
+    }
+
+    let (_, base_width, base_height) = assign_positions(order, sizes, spacing);
+    let base_area = base_width * base_height;
+    let base_fit = canvas_fit(base_width, base_height);
+    let survey = !is_slide_picture(base_width, base_height);
+    let mut best = order.to_vec();
+    let mut best_fit = base_fit;
+    let mut best_area = base_area;
+
+    for rows in 1..tallest {
+        let columns = columns_with_rows(order, rows);
+        let (_, width, height) = assign_positions(&columns, sizes, spacing);
+        let area = width * height;
+        if area > base_area - AREA_EPSILON {
+            continue;
+        }
+        if survey && is_slide_picture(width, height) {
+            continue;
+        }
+        let fit = canvas_fit(width, height);
+        let improvement = fit > best_fit + FIT_EPSILON
+            || ((fit - best_fit).abs() <= FIT_EPSILON && area < best_area - AREA_EPSILON);
+        if improvement {
+            best = columns;
+            best_fit = fit;
+            best_area = area;
+        }
+    }
+    best
 }
 
 /// Turn the ordered layers into concrete coordinates: columns left-to-right, nodes stacked and

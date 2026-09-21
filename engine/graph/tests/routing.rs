@@ -97,6 +97,44 @@ fn route_avoids_an_intermediate_box() {
 }
 
 #[test]
+fn route_escapes_its_own_row_band_when_a_box_blocks_the_first_leg() {
+    // The source and the target share a row, and a box sits in that row beside the source. The
+    // direct route runs straight into it, and so does the first leg of every lane detour (the
+    // channel the router picks lies past the obstruction, on the target's side). The route has to
+    // leave its row band through the channel between the source and the obstruction instead.
+    let t = node("t", 0.0, 100.0, 80.0, 40.0);
+    let blocker = node("b", 200.0, 100.0, 120.0, 40.0);
+    let s = node("s", 400.0, 100.0, 80.0, 40.0);
+    let boxes = [t.clone(), blocker.clone(), s.clone()];
+    let refs: Vec<&NodeBox> = boxes.iter().collect();
+    let pts = routing::route(&s, &t, &refs);
+
+    assert_eq!(
+        pts[0],
+        (400.0, 120.0),
+        "leaves the source's left side centre"
+    );
+    assert_eq!(
+        *pts.last().unwrap(),
+        (80.0, 120.0),
+        "lands on the target's right side centre"
+    );
+    for pair in pts.windows(2) {
+        assert!(
+            seg_axis_aligned(pair[0], pair[1]),
+            "segments are axis-aligned: {:?}",
+            pair
+        );
+        assert!(
+            !seg_intersects_box(pair[0], pair[1], &blocker),
+            "the route must escape its row band, not run through the box in it: {:?}->{:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[test]
 fn route_does_not_cross_any_obstacle() {
     // A small cluster of boxes; every edge between distinct boxes must avoid all the others.
     let boxes = [

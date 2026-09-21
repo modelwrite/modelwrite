@@ -189,6 +189,12 @@ fn detour_horizontal(
             fallback = Some(pts);
         }
     }
+    // Neither lane is reachable the way the detour starts: leave the row band first and try again.
+    for lane in lanes {
+        if let Some(pts) = escape_route(sx, sy, tx, ty, lane, obstacles) {
+            return pts;
+        }
+    }
     fallback.unwrap_or_else(|| vec![(sx, sy), (tx, ty)])
 }
 
@@ -276,13 +282,11 @@ fn channel_x(lo: f64, hi: f64, y_lo: f64, y_hi: f64, obstacles: &[&NodeBox]) -> 
     first_gap(lo, hi, &blockers)
 }
 
-/// The centre of the first gap in `[lo, hi]` between the (sorted, merged) blocking intervals;
-/// falls back to the midpoint when no gap is wide enough.
-fn first_gap(lo: f64, hi: f64, intervals: &[(f64, f64)]) -> f64 {
-    let mut sorted = intervals.to_vec();
-    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+/// Merge overlapping spans in place, ascending by their start.
+fn merge_spans(spans: &mut Vec<(f64, f64)>) {
+    spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut merged: Vec<(f64, f64)> = Vec::new();
-    for &(a, b) in &sorted {
+    for &(a, b) in spans.iter() {
         if let Some(last) = merged.last_mut() {
             if a <= last.1 {
                 if b > last.1 {
@@ -293,6 +297,14 @@ fn first_gap(lo: f64, hi: f64, intervals: &[(f64, f64)]) -> f64 {
         }
         merged.push((a, b));
     }
+    *spans = merged;
+}
+
+/// The centre of the first gap in `[lo, hi]` between the (sorted, merged) blocking intervals;
+/// falls back to the midpoint when no gap is wide enough.
+fn first_gap(lo: f64, hi: f64, intervals: &[(f64, f64)]) -> f64 {
+    let mut merged = intervals.to_vec();
+    merge_spans(&mut merged);
     let mut cursor = lo;
     for &(a, b) in &merged {
         if a - cursor > MIN_CHANNEL {
@@ -304,6 +316,102 @@ fn first_gap(lo: f64, hi: f64, intervals: &[(f64, f64)]) -> f64 {
         return (cursor + hi) / 2.0;
     }
     (lo + hi) / 2.0
+}
+
+/// The x-ranges of the boxes that overlap the rectangle `[lo, hi] x [y_lo, y_hi]`, merged.
+fn blocked_spans(
+    lo: f64,
+    hi: f64,
+    y_lo: f64,
+    y_hi: f64,
+    obstacles: &[&NodeBox],
+) -> Vec<(f64, f64)> {
+    let mut spans: Vec<(f64, f64)> = obstacles
+        .iter()
+        .filter(|b| b.y < y_hi && b.y + b.height > y_lo)
+        .filter(|b| b.x < hi && b.x + b.width > lo)
+        .map(|b| (b.x, b.x + b.width))
+        .collect();
+    merge_spans(&mut spans);
+    spans
+}
+
+/// The centre of every free vertical channel in `[lo, hi]`: an x that no box overlapping the
+/// y-span `[y_lo, y_hi]` covers, with at least [MIN_CHANNEL] of clearance. Ascending.
+fn free_channels(lo: f64, hi: f64, y_lo: f64, y_hi: f64, obstacles: &[&NodeBox]) -> Vec<f64> {
+    let merged = blocked_spans(lo, hi, y_lo, y_hi, obstacles);
+    let mut channels = Vec::new();
+    let mut cursor = lo;
+    for &(a, b) in &merged {
+        if a - cursor > MIN_CHANNEL {
+            channels.push((cursor + a) / 2.0);
+        }
+        cursor = cursor.max(b);
+    }
+    if hi - cursor > MIN_CHANNEL {
+        channels.push((cursor + hi) / 2.0);
+    }
+    channels
+}
+
+/// How many channels the escape route will try at each end. The nearest one is almost always the
+/// answer; a handful keeps the search bounded on a wide drawing.
+const ESCAPE_CHANNELS: usize = 4;
+
+/// A route that leaves its starting row band instead of running through what is in it.
+///
+/// The lane detours start with a leg that runs straight out of the source's side at the anchor's
+/// y, so a box in that row band blocks every one of them however clear the lanes are - which is
+/// exactly what happens as soon as a rank is placed as more than one column, and the source's own
+/// rank-mate sits beside it. This variant turns FIRST: out to the nearest free channel between the
+/// source and the target, along the lane, down through the nearest free channel at the target's
+/// end, and in to the anchor. Every segment is axis-aligned, the anchors are unchanged, and the
+/// whole path is verified clear of every box before it is returned - so it can only ever replace a
+/// route that would have crossed one.
+fn escape_route(
+    sx: f64,
+    sy: f64,
+    tx: f64,
+    ty: f64,
+    lane: f64,
+    obstacles: &[&NodeBox],
+) -> Option<Vec<(f64, f64)>> {
+    let (lo, hi) = order(sx, tx);
+    let (sy_lo, sy_hi) = order(sy, lane);
+    let (ty_lo, ty_hi) = order(ty, lane);
+    let mut out = free_channels(lo, hi, sy_lo, sy_hi, obstacles);
+    let mut back = free_channels(lo, hi, ty_lo, ty_hi, obstacles);
+    // Nearest the source first, then nearest the target, ties by position: deterministic.
+    out.sort_by(|a, b| {
+        (a - sx)
+            .abs()
+            .partial_cmp(&(b - sx).abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    back.sort_by(|a, b| {
+        (a - tx)
+            .abs()
+            .partial_cmp(&(b - tx).abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    for &x0 in out.iter().take(ESCAPE_CHANNELS) {
+        for &x1 in back.iter().take(ESCAPE_CHANNELS) {
+            let pts = vec![
+                (sx, sy),
+                (x0, sy),
+                (x0, lane),
+                (x1, lane),
+                (x1, ty),
+                (tx, ty),
+            ];
+            if path_clear(&pts, obstacles) {
+                return Some(pts);
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

@@ -260,58 +260,21 @@ fn slide_fit(width: f64, height: f64) -> f64 {
     (1920.0 / width).min(1080.0 / height)
 }
 
-/// The y of every box whose id starts with the prefix, ascending.
-fn ys_of(layout: &DiagramLayout, prefix: &str) -> Vec<f64> {
-    let mut ys: Vec<f64> = layout
-        .nodes
-        .iter()
-        .filter(|n| n.id.starts_with(prefix))
-        .map(|n| n.y)
-        .collect();
-    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    ys
+/// Every distinct column (x offset) a layout placed a box in, ascending.
+fn columns_of(layout: &DiagramLayout) -> Vec<f64> {
+    let mut xs: Vec<f64> = layout.nodes.iter().map(|n| n.x).collect();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    xs.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    xs
 }
 
-#[test]
-fn a_deep_rank_tightens_its_spacing_so_the_canvas_follows_the_boxes() {
-    let g = star(11);
-    let layout = layout::structure_layout(&g);
-    let spacing = LayoutSpacing::default();
+/// The area the boxes themselves occupy, which is what a canvas can be full of.
+fn box_area(layout: &DiagramLayout) -> f64 {
+    layout.nodes.iter().map(|n| n.width * n.height).sum()
+}
 
-    // The same boxes laid out with the spacing held constant: one column of eleven children.
-    let (root_w, _) = layout::node_size("Root");
-    let (part_w, part_h) = layout::node_size("Part");
-    let strip_w = spacing.margin * 2.0 + root_w + spacing.h_gap + part_w;
-    let strip_h = spacing.margin * 2.0 + 11.0 * part_h + 10.0 * spacing.v_gap;
-
-    // The columns do not move: only the gap between stacked boxes follows the content.
-    assert!(
-        (layout.width - strip_w).abs() < 1e-9,
-        "the horizontal layout must be untouched: {:.1} vs {:.1}",
-        layout.width,
-        strip_w
-    );
-    assert!(
-        layout.height < strip_h,
-        "eleven stacked boxes must tighten their spacing: {:.0} tall, not {:.0}",
-        layout.height,
-        strip_h
-    );
-    // ... and never past the floor: two boxes always stay visibly apart.
-    let ys = ys_of(&layout, "part-");
-    let gap = ys[1] - ys[0] - part_h;
-    assert!(
-        (gap - 12.0).abs() < 1e-9,
-        "the gap must tighten to the tightest routable channel, got {gap:.2}"
-    );
-    // COMPOSITION IMPROVING WITHOUT legibility regressing: fitted into one slide the same boxes
-    // read at least as large as they did with the constant spacing.
-    assert!(
-        slide_fit(layout.width, layout.height) > slide_fit(strip_w, strip_h),
-        "tightening the canvas must not shrink a label at slide scale"
-    );
-    // Nothing is dropped and nothing overlaps (a closed gap would overlap the boxes).
-    assert_eq!(layout.nodes.len(), 12, "every box is still placed");
+/// Every pair of boxes is disjoint.
+fn assert_no_overlap(layout: &DiagramLayout) {
     for i in 0..layout.nodes.len() {
         for j in (i + 1)..layout.nodes.len() {
             let (a, b) = (&layout.nodes[i], &layout.nodes[j]);
@@ -320,6 +283,132 @@ fn a_deep_rank_tightens_its_spacing_so_the_canvas_follows_the_boxes() {
                 && a.y < b.y + b.height
                 && b.y < a.y + a.height;
             assert!(!overlap, "boxes {} and {} overlap", a.id, b.id);
+        }
+    }
+}
+
+#[test]
+fn a_deep_rank_is_cut_into_columns_so_the_canvas_composes() {
+    let g = star(11);
+    let layout = layout::structure_layout(&g);
+    let spacing = LayoutSpacing::default();
+
+    // What the same boxes are with every rank held in one column: a strip twelve boxes tall.
+    let (root_w, _) = layout::node_size("Root");
+    let (part_w, part_h) = layout::node_size("Part");
+    let strip_w = spacing.margin * 2.0 + root_w + spacing.h_gap + part_w;
+    let strip_h = spacing.margin * 2.0 + 11.0 * part_h + 10.0 * spacing.v_gap;
+
+    // COMPOSITION: a landscape picture rather than a portrait strip, with the boxes taking up more
+    // of the canvas, and reading larger when the canvas is fitted onto a slide.
+    assert!(
+        layout.width > layout.height,
+        "a star must compose as a landscape picture, got {:.0}x{:.0}",
+        layout.width,
+        layout.height
+    );
+    assert!(
+        box_area(&layout) / (layout.width * layout.height)
+            > box_area(&layout) / (strip_w * strip_h),
+        "the boxes must take up more of the compacted canvas than of the strip"
+    );
+    assert!(
+        slide_fit(layout.width, layout.height) > slide_fit(strip_w, strip_h),
+        "compaction must not shrink a label at slide scale: {:.2} px against {:.2} px",
+        13.0 * slide_fit(layout.width, layout.height),
+        13.0 * slide_fit(strip_w, strip_h)
+    );
+    // The wide rank really was cut, and its boxes stay right of the container they belong to.
+    assert!(
+        columns_of(&layout).len() > 2,
+        "eleven boxes in one rank must be placed as several columns"
+    );
+    let root = layout.box_for("root").expect("the container is placed");
+    for part in layout.nodes.iter().filter(|n| n.id.starts_with("part-")) {
+        assert!(root.x < part.x, "the container stays left of its parts");
+    }
+    assert_eq!(layout.nodes.len(), 12, "every box is still placed");
+    assert_no_overlap(&layout);
+}
+
+#[test]
+fn a_slide_picture_is_free_to_improve() {
+    // A drawing that already reads on a slide is not held back by the survey rule: the compaction
+    // pulls it into the frame's shape as far as it can.
+    let g = star(8);
+    let layout = layout::structure_layout(&g);
+    let spacing = LayoutSpacing::default();
+    let (root_w, _) = layout::node_size("Root");
+    let (part_w, part_h) = layout::node_size("Part");
+    let strip_w = spacing.margin * 2.0 + root_w + spacing.h_gap + part_w;
+    let strip_h = spacing.margin * 2.0 + 8.0 * part_h + 7.0 * spacing.v_gap;
+    assert!(
+        13.0 * slide_fit(strip_w, strip_h) >= 11.0,
+        "this drawing is a slide picture before anything is done to it"
+    );
+    assert!(
+        slide_fit(layout.width, layout.height) > slide_fit(strip_w, strip_h),
+        "a slide picture may be made to read larger"
+    );
+    assert_eq!(layout.nodes.len(), 9);
+    assert_no_overlap(&layout);
+}
+
+#[test]
+fn a_survey_stays_a_survey_and_composes_better() {
+    let g = expected().graph.clone().expect("corpus graph");
+    let layout = layout::structure_layout(&g);
+    let spacing = LayoutSpacing::default();
+    // Without compaction the corpus's deepest rank (thirty boxes) alone is 1,904 units tall, which
+    // makes the drawing 2,114 tall for a drawing 2,130 wide: a near-square canvas that fits a
+    // 16:9 slide only by leaving half of it empty.
+    let strip_h = spacing.margin * 2.0 + 30.0 * layout::NODE_H + 29.0 * spacing.v_gap;
+    assert!(
+        layout.width > layout.height,
+        "the whole model must compose as a landscape picture, got {:.0}x{:.0}",
+        layout.width,
+        layout.height
+    );
+    assert!(
+        layout.height < strip_h,
+        "the whole model must compose inside the frame, not to the height of its deepest rank: \
+         {:.0} tall against {:.0}",
+        layout.height,
+        strip_h
+    );
+    // It is still a SURVEY: a whole-model view is not a slide picture, and the product says so on
+    // the export's face rather than pretending otherwise. Compaction may not quietly promote it.
+    let stated = 13.0 * slide_fit(layout.width, layout.height);
+    assert!(
+        stated < 11.0,
+        "a survey must stay a survey: the whole model now states {stated:.2} px"
+    );
+    assert_eq!(layout.nodes.len(), 99, "every node is still placed");
+    assert_no_overlap(&layout);
+}
+
+#[test]
+fn stacked_boxes_never_come_closer_than_the_channel_a_route_turns_in() {
+    // The gap between two boxes in one column is the channel an orthogonal route turns in between
+    // them. The router's stub and lane clearance is 12 units, and a narrower gap leaves routes
+    // crossing boxes - measured on the corpus, a gap of 11 leaves 4 crossing edges and 12 leaves
+    // none - so the layout never closes it further.
+    let corpus = expected().graph.clone().expect("corpus graph");
+    for g in [star(60), corpus] {
+        let layout = layout::structure_layout(&g);
+        for column in columns_of(&layout) {
+            let mut boxes: Vec<&layout::NodeBox> =
+                layout.nodes.iter().filter(|n| n.x == column).collect();
+            boxes.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap());
+            for pair in boxes.windows(2) {
+                let gap = pair[1].y - (pair[0].y + pair[0].height);
+                assert!(
+                    gap >= 12.0 - 1e-9,
+                    "boxes {} and {} are {gap:.2} apart in their column",
+                    pair[0].id,
+                    pair[1].id
+                );
+            }
         }
     }
 }
@@ -347,52 +436,4 @@ fn a_drawing_that_already_composes_keeps_the_spacing_it_was_given() {
             "a landscape drawing keeps its columns: {x:.1} vs {expected:.1}"
         );
     }
-}
-
-#[test]
-fn the_corpus_canvas_follows_the_boxes_not_the_deepest_rank() {
-    let g = expected().graph.clone().expect("corpus graph");
-    let layout = layout::structure_layout(&g);
-    let spacing = LayoutSpacing::default();
-    // The corpus's deepest rank holds thirty boxes. With the spacing held constant that rank alone
-    // is 1,904 units tall and makes the whole drawing 2,114 tall for a drawing 2,130 wide - a
-    // near-square canvas that fits a 16:9 slide only by leaving half of it empty.
-    let strip_h = spacing.margin * 2.0 + 30.0 * layout::NODE_H + 29.0 * spacing.v_gap;
-    assert!(
-        layout.height < strip_h,
-        "the whole model must follow its boxes: {:.0} tall, not {:.0}",
-        layout.height,
-        strip_h
-    );
-    assert!(
-        layout.height > spacing.margin * 2.0 + 30.0 * layout::NODE_H,
-        "the boxes still need their own height and a gap between them"
-    );
-    assert!(
-        slide_fit(layout.width, layout.height) > slide_fit(layout.width, strip_h),
-        "the whole model must read larger on a slide than it did, measured {:.2} px",
-        13.0 * slide_fit(layout.width, layout.height)
-    );
-}
-
-#[test]
-fn the_vertical_gap_never_closes_completely() {
-    // Sixty children in one rank: the frame cannot be filled, so the gap goes to its floor and
-    // stops there rather than letting the boxes touch.
-    let g = star(60);
-    let layout = layout::structure_layout(&g);
-    let spacing = LayoutSpacing::default();
-    let (_, part_h) = layout::node_size("Part");
-    let ys = ys_of(&layout, "part-");
-    assert_eq!(ys.len(), 60);
-    for pair in ys.windows(2) {
-        let gap = pair[1] - pair[0] - part_h;
-        assert!(
-            (gap - 12.0).abs() < 1e-9,
-            "the floor keeps the boxes and the routes apart, got a gap of {gap:.2}"
-        );
-    }
-    // The floor is a property of the layout, not of this drawing: a caller that asks for less than
-    // the routable channel keeps its own smaller gap.
-    assert!(spacing.v_gap >= 12.0, "the default spacing is routable");
 }
