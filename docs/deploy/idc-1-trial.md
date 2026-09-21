@@ -136,6 +136,39 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
   3103, which broke the hand-run reset with "Bind for 127.0.0.1:3103 failed: port is already
   allocated"; moved to 3104.
 
+## Weekly forced reset (canary)
+
+The hourly reset's change-detection guard skips the rebuild whenever the trial is
+already clean - so a broken rebuild can go unnoticed: in the log, "no changes since
+the last reset, skipping" and a failed rebuild looked identical. That happened
+2026-09-21, when the seed container's port (then `SEED_PORT=3103`) collided with the
+registered tier's `modelwrite-app.service`, and the breakage was only exposed by a
+hand-run `FORCE=1`. A weekly FORCED run makes that class of masking impossible.
+
+- Timer: `modelwrite-trial-verify.timer`, `OnCalendar=Mon *-*-* 03:30:00` UTC
+  (weekly, `Persistent=true`). Monday 03:30 UTC is a quiet hour, offset from `:00`
+  so it cannot collide with the hourly reset (which fires at `:00:00`).
+- Service: `modelwrite-trial-verify.service` (Type=oneshot) runs the SAME
+  `reset-trial.sh` with `Environment=FORCE=1`, so it always performs the full
+  rebuild instead of skipping. A full rebuild once a week is cheap; every hour
+  would defeat the guard entirely.
+- Loud failure, not just logged: on failure the script already prints
+  `RESET FAILED - restarting modelwrite.service on the last good database`, and the
+  unit now exits non-zero (so `systemctl status` shows `failed`) and fires
+  `OnFailure=algolotl-failure-notify@%n.service` - the host's existing
+  business-events pager already used by the algolotl fleet. No new email or
+  webhook dependency was introduced.
+- Backups: the forced run takes one extra backup a week under the existing policy.
+  Retention (48, ~2 days of hourly churn) is unaffected - one ~221 KB file a week
+  is negligible, so there is no backup storm.
+
+Check it:
+
+```sh
+systemctl list-timers modelwrite-trial-reset.timer modelwrite-trial-verify.timer
+systemctl status modelwrite-trial-verify.service
+```
+
 ## Seed (canonical + reproducible)
 
 - Canonical capture: `/opt/modelwrite/seed/manifest.json` + `documents/` (exact stored
@@ -153,6 +186,7 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
 sudo journalctl -u modelwrite -f                 # logs
 sudo systemctl start modelwrite-trial-reset.service   # reset by hand (skips if unchanged)
 sudo env FORCE=1 /opt/modelwrite/deploy/reset-trial.sh   # force a reset, ignoring the guard
+sudo systemctl start modelwrite-trial-verify.service   # weekly FORCE=1 canary (full rebuild; check for failed)
 sudo systemctl restart modelwrite                # restart
 ```
 
