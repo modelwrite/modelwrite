@@ -19,7 +19,10 @@ pub fn bindings() -> Vec<BindingInfo> {
 /// The concrete bindings, in registry order. resolve and bindings both read this, so a new
 /// standard is added in exactly one place.
 fn implementations() -> Vec<Box<dyn Binding>> {
-    vec![Box::new(binding_xmi::XmiBinding::new())]
+    vec![
+        Box::new(binding_xmi::XmiBinding::new()),
+        Box::new(binding_sysmlv2::SysmlV2Binding::new()),
+    ]
 }
 
 /// Resolve a binding id and version to its implementation. Matching is exact: an unknown

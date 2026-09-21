@@ -71,13 +71,30 @@ fn form_length_limit(rejection: &axum::extract::rejection::FormRejection) -> boo
 /// a loss knows which half is measured and which half is the binding's word: the engine diffed
 /// the binding's own OKF->XMI->OKF round trip; the native XMI->OKF read is NOT independently
 /// measured and rests on the binding's self-reported loss report.
-fn fidelity_note_markup() -> Markup {
-    html! {
-        p class="fidelity-note" {
-            "Fidelity: the engine measured the binding's own OKF->XMI->OKF round trip and diffed "
-            "it. The native XMI->OKF read of your artifact is NOT independently measured - the "
-            "loss report is the binding's own account of that read."
-        }
+fn fidelity_note_markup(direction: Option<Direction>) -> Markup {
+    match direction {
+        Some(Direction::ImportOnly) => html! {
+            p class="fidelity-note" {
+                "This binding is a " strong { "viewer" } " (import-only): it reads the source into "
+                "OKF but cannot write it back, so no round trip is measured. The loss report is "
+                "the binding's own account of its native read, which is NOT independently measured."
+            }
+        },
+        Some(Direction::ImportAndExport) => html! {
+            p class="fidelity-note" {
+                "Fidelity: the engine measured the binding's own OKF->XMI->OKF round trip and diffed "
+                "it. The native XMI->OKF read of your artifact is NOT independently measured - the "
+                "loss report is the binding's own account of that read."
+            }
+        },
+        None => html! {
+            p class="fidelity-note" {
+                "Fidelity: for a read/write binding the engine measures and diffs the binding's own "
+                "round trip; a viewer (import-only) cannot write back, so no round trip is measured. "
+                "The native read of your artifact is NOT independently measured - the loss report is "
+                "the binding's own account of it."
+            }
+        },
     }
 }
 
@@ -969,7 +986,7 @@ fn import_page_markup(
             " (" (max_body_bytes) " bytes, set by MW_MAX_BODY_BYTES). Uploads larger than "
             "that are refused before import with a 413 that names the limit."
         }
-        (fidelity_note_markup())
+        (fidelity_note_markup(None))
         h2 { "Upload a file" }
         (upload_form_markup(project, bindings, can_import))
         h2 { "Or paste a small artifact" }
@@ -1001,7 +1018,7 @@ fn upload_form_markup(project: &str, bindings: &[BindingInfo], can_import: bool)
                         option value=(format!("{}@{}", binding.id, binding.version)) {
                             (binding.id.as_str()) "@" (binding.version.as_str())
                             @if binding.direction == Direction::ImportOnly {
-                                " (viewer)"
+                                " (viewer: reads, does not write back)"
                             }
                         }
                     }
@@ -1042,7 +1059,7 @@ fn import_form_markup(project: &str, bindings: &[BindingInfo], can_import: bool)
                         option value=(format!("{}@{}", binding.id, binding.version)) {
                             (binding.id.as_str()) "@" (binding.version.as_str())
                             @if binding.direction == Direction::ImportOnly {
-                                " (viewer)"
+                                " (viewer: reads, does not write back)"
                             }
                         }
                     }
@@ -1100,7 +1117,7 @@ fn blocking_page(
         }
         (retained_markup(artifact_hash, None))
         (loss_report_markup(loss_report))
-        (fidelity_note_markup())
+        (fidelity_note_markup(Some(loss_report.binding.direction)))
         h2 { "Accept the losses and import" }
         (accept_form_markup(project, artifact_hash, branch, message, holder, &blocking, unaccepted))
     };
@@ -1129,7 +1146,7 @@ fn committed_page(
         p { "Commit " code { (short_hash(&commit.hash)) } }
         (retained_markup(artifact_hash, Some(&commit.hash)))
         (loss_report_markup(loss_report))
-        (fidelity_note_markup())
+        (fidelity_note_markup(Some(loss_report.binding.direction)))
         p {
             a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/model?commit=" (crate::ui::urlencode(commit.hash.as_str())) } {
                 "View the imported model"
@@ -1284,6 +1301,9 @@ fn loss_report_markup(report: &LossReport) -> Markup {
             h2 { "Loss report" }
             p class="meta" {
                 "binding " (report.binding.id.as_str()) "@" (report.binding.version.as_str())
+                @if report.binding.direction == Direction::ImportOnly {
+                    " — viewer (import-only: reads, does not write back)"
+                }
             }
             @if blocking == 0 {
                 p { "This import is lossless: every mapping is exact." }

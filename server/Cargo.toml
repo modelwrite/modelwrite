@@ -37,6 +37,7 @@ mw-graph = { path = "../engine/graph", version = "0.2.0" }
 mw-gate = { path = "../engine/gate", version = "0.2.0" }
 mw-binding = { path = "../engine/binding", version = "0.2.0" }
 mw-binding-xmi = { path = "../engine/binding-xmi", version = "0.2.0" }
+mw-binding-sysmlv2 = { path = "../engine/binding-sysmlv2", version = "0.1.0" }
 mw-agent = { path = "../engine/agent", version = "0.2.0" }
 mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
 axum = { workspace = true, features = ["multipart"] }

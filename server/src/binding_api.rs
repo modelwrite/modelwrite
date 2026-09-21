@@ -85,6 +85,16 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, ApiError> {
     })
 }
 
+/// The engine's fidelity measurement as JSON. A read/write binding carries its round-trip
+/// diff; a viewer (ImportOnly) has nothing to measure, so its fidelity is null - never a
+/// fabricated diff and never a claim that a round trip happened.
+fn fidelity_value(fidelity: &Option<binding::FidelityOutcome>) -> Value {
+    fidelity
+        .as_ref()
+        .map(|f| serde_json::to_value(&f.diff).unwrap_or(Value::Null))
+        .unwrap_or(Value::Null)
+}
+
 /// What an import attempt produced, once permission, scope, the author and the branch name
 /// were resolved upstream. A refusal because blocking losses were not accepted is a RESULT
 /// here, not an error: it carries the unaccepted losses so the caller can render them and
@@ -97,7 +107,7 @@ pub enum ImportOutcome {
         binding_version: String,
         accepted_losses: Vec<String>,
         loss_report: binding::LossReport,
-        fidelity: binding::FidelityOutcome,
+        fidelity: Option<binding::FidelityOutcome>,
     },
     Blocking {
         artifact_hash: String,
@@ -105,7 +115,7 @@ pub enum ImportOutcome {
         binding_version: String,
         unaccepted: Vec<binding::Mapping>,
         loss_report: binding::LossReport,
-        fidelity: binding::FidelityOutcome,
+        fidelity: Option<binding::FidelityOutcome>,
     },
 }
 
@@ -222,24 +232,38 @@ pub fn import_core(
         )
     })?;
 
-    // Rule 3: the ONE thing the engine can measure is the binding's own OKF->XMI->OKF round
-    // trip. The imported document is exported by the binding and imported back, and the
-    // engine's own diff of that journey must agree nothing was lost. The native XMI->OKF read
-    // that produced this document is the binding's word (the loss report), not something the
-    // engine independently measured.
-    let import_bytes = serde_json::to_vec(&root).map_err(|e| {
-        eprintln!("imported model could not be serialised: {}", e);
-        ApiError::internal("the imported model could not be prepared")
-    })?;
-    let fidelity = binding::round_trip(binding.as_ref(), &import_bytes).map_err(|e| {
-        eprintln!("fidelity harness failed: {}", e);
-        ApiError::internal("the fidelity harness could not measure the import")
-    })?;
+    // Rule 3: the ONE thing the engine can measure is a read/write binding's own
+    // OKF->source->OKF round trip. The imported document is exported by the binding and
+    // imported back, and the engine's own diff of that journey must agree nothing was lost.
+    // The native source->OKF read that produced this document is the binding's word (the loss
+    // report), not something the engine independently measured.
+    //
+    // A VIEWER (Direction::ImportOnly) cannot export, so there is no round trip to measure.
+    // Its fidelity is None - recorded as null, never a fabricated diff - and the honesty of
+    // its read rests entirely on the self-reported loss report.
+    let fidelity: Option<binding::FidelityOutcome> = match binding.info().direction {
+        binding::Direction::ImportOnly => None,
+        binding::Direction::ImportAndExport => {
+            let import_bytes = serde_json::to_vec(&root).map_err(|e| {
+                eprintln!("imported model could not be serialised: {}", e);
+                ApiError::internal("the imported model could not be prepared")
+            })?;
+            let measured = binding::round_trip(binding.as_ref(), &import_bytes).map_err(|e| {
+                eprintln!("fidelity harness failed: {}", e);
+                ApiError::internal("the fidelity harness could not measure the import")
+            })?;
+            Some(measured)
+        }
+    };
 
     // Record the report and the measurement keyed by the retained artifact, so a refusal
     // still has a retrievable report and the caller can read exactly which losses to accept.
+    // A viewer's fidelity is recorded as JSON null: "no round trip was measured".
     let loss_report_json = to_json_string(&loss_report)?;
-    let fidelity_json = to_json_string(&fidelity.diff)?;
+    let fidelity_json = match &fidelity {
+        Some(fidelity) => to_json_string(&fidelity.diff)?,
+        None => "null".to_string(),
+    };
     store
         .record_import(
             project,
@@ -251,25 +275,28 @@ pub fn import_core(
         )
         .map_err(map_store_error)?;
 
-    // A binding whose own round trip is not lossless is refused: the engine disagrees with
-    // the binding, and that is exactly the failure the harness exists to catch.
-    if !fidelity.diff.equal {
-        if let Err(e) = record_refusal(
-            store,
-            project,
-            input.actor,
-            input.mechanism,
-            input.authorizer,
-            IMPORT_REFUSED,
-            &artifact_hash,
-            "the binding could not round-trip the imported model",
-        ) {
-            eprintln!("could not record the import refusal: {:?}", e);
+    // A read/write binding whose own round trip is not lossless is refused: the engine
+    // disagrees with the binding, and that is exactly the failure the harness exists to
+    // catch. A viewer is not measured this way and is never refused here.
+    if let Some(fidelity) = &fidelity {
+        if !fidelity.diff.equal {
+            if let Err(e) = record_refusal(
+                store,
+                project,
+                input.actor,
+                input.mechanism,
+                input.authorizer,
+                IMPORT_REFUSED,
+                &artifact_hash,
+                "the binding could not round-trip the imported model",
+            ) {
+                eprintln!("could not record the import refusal: {:?}", e);
+            }
+            return Err(ApiError::unprocessable(
+                "the binding could not round-trip the imported model; the import is refused",
+                fidelity.diff.missing_elements.clone(),
+            ));
         }
-        return Err(ApiError::unprocessable(
-            "the binding could not round-trip the imported model; the import is refused",
-            fidelity.diff.missing_elements.clone(),
-        ));
     }
 
     // Rule 2: every blocking loss must be accepted by name. An acceptance names a loss by
@@ -366,9 +393,10 @@ pub fn import_core(
 
     // I3: the document that was measured IS the document that is committed. The XMI binding
     // emits the empty state machine itself (OKF requires the section even when the model has
-    // no state machine) and derives its own summary, so import_bytes - the bytes the round
-    // trip above measured - equal the canonical bytes the commit core stores. Nothing is
-    // mutated after measurement except the summary, which is re-derived in canonical form
+    // no state machine) and derives its own summary, so the round-trip bytes above equal the
+    // canonical bytes the commit core stores; a viewer (ImportOnly) is committed with no
+    // round trip at all, and its loss report is the only account of its native read. Nothing
+    // is mutated after the read except the summary, which is re-derived in canonical form
     // rather than trusted.
     //
     // The import commit is a commit like any other: it goes through the shared commit core,
@@ -551,7 +579,7 @@ pub async fn import_artifact(
             Json(json!({
                 "commit": commit_json(&commit),
                 "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
-                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+                "fidelity": fidelity_value(&fidelity)
             })),
         )
             .into_response()),
@@ -813,7 +841,7 @@ pub async fn import_artifact_stream(
                 "commit": commit_json(&commit),
                 "artifactHash": artifact_hash,
                 "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
-                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+                "fidelity": fidelity_value(&fidelity)
             })),
         )
             .into_response()),
@@ -912,7 +940,7 @@ pub async fn accept_import_artifact(
                 "commit": commit_json(&commit),
                 "artifactHash": artifact_hash,
                 "lossReport": serde_json::to_value(&loss_report).unwrap_or(Value::Null),
-                "fidelity": serde_json::to_value(&fidelity.diff).unwrap_or(Value::Null)
+                "fidelity": fidelity_value(&fidelity)
             })),
         )
             .into_response()),

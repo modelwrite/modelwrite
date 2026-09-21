@@ -14,3 +14,16 @@ generation, so the suite is deterministic and works in an air-gapped checkout.
 Because the private keys are published in this repository, they provide no security at
 all: never sign a production token with them, and never reuse them in a real identity
 provider.
+
+## SysML v2 fixture
+
+`Drone_BaseArchitecture.sysml` is a REAL community model, copied byte-for-byte from
+`sample/examples/sysml-v2/gfse-models/models/SE_Models/Drone_BaseArchitecture.sysml`,
+committed here so the server's SysML v2 import test does not depend on the whole bundled
+corpus.
+
+Licence: BSD 3-Clause, Copyright (c) 2024, Gesellschaft für Systems Engineering e.V.
+The full text is at `sample/examples/sysml-v2/gfse-models/LICENSE`. Redistribution
+with the copyright notice, the conditions and the disclaimer retained is permitted
+without additional approval; committing the model here (with the notice recorded) is
+the redistribution the licence permits.

@@ -1632,6 +1632,7 @@ dependencies = [
  "mw-agent",
  "mw-analytics",
  "mw-binding",
+ "mw-binding-sysmlv2",
  "mw-binding-xmi",
  "mw-gate",
  "mw-graph",
