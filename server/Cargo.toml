@@ -18,7 +18,7 @@ name = "mw-server"
 path = "src/main.rs"
 
 [features]
-default = ["postgres"]
+default = ["postgres", "smtp"]
 # The PostgreSQL backend is compiled by default so its tests compile and skip cleanly
 # when MW_TEST_DATABASE_URL is unset. Build with --no-default-features to omit it and
 # every dependency it pulls (including the rustls TLS stack).
@@ -30,6 +30,10 @@ postgres = [
     "dep:rustls",
     "dep:rustls-native-certs",
 ]
+# The SMTP transport needs a TLS client for STARTTLS. rustls and the system trust store are
+# already in the tree for the PostgreSQL backend, so the mailer reuses them rather than
+# adding a dependency: MW_MAILER=smtp is the same binary dialling a real provider.
+smtp = ["dep:rustls", "dep:rustls-native-certs"]
 
 [dependencies]
 mw-okf = { path = "../engine/okf", version = "0.2.0" }

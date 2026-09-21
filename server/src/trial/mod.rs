@@ -8,9 +8,11 @@ pub mod mailer;
 
 pub use identity::{Account, IdentityStore, SessionRow, TrialRow};
 pub use lifecycle::{phase, Phase};
+#[cfg(feature = "smtp")]
+pub use mailer::SmtpTransport;
 pub use mailer::{
-    login_code_email, mailer_from_env, sender_from_env, ConsoleTransport, FileTransport, Mailer,
-    OutboundEmail,
+    login_code_email, mailer_from_env, sender_from_env, smtp_config_from, ConsoleTransport,
+    FailingTransport, FileTransport, Mailer, OutboundEmail, SmtpConfig,
 };
 
 use std::path::PathBuf;
