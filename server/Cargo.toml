@@ -41,6 +41,12 @@ mw-binding-sysmlv2 = { path = "../engine/binding-sysmlv2", version = "0.1.0" }
 mw-agent = { path = "../engine/agent", version = "0.2.0" }
 mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
 axum = { workspace = true, features = ["multipart"] }
+# futures-util feeds axum::body::Body::from_stream: the analytics table endpoint streams
+# large tables (the TMT import_losses table is ~50k rows) one row at a time through a
+# TryStream instead of buffering the whole table. It is already in the workspace's
+# dependency tree (axum-core depends on it); default-features are off so only the std
+# stream combinators (iter, once, chain, map) are added, not the async-await macros.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio.workspace = true
 rusqlite = { workspace = true, features = ["blob"] }
 serde.workspace = true

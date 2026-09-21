@@ -1,0 +1,536 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "modelwrite REST API",
+    "version": "0.2.0",
+    "description": "The modelwrite model service (mw-server): repository, version control, gate, merge and lock enforcement over OKF, with the read-only mw-analytics-schema@1 analytics surface. Authentication is opt-in: with no configuration every request is an anonymous admin (open mode); with MW_AUTH_TOKEN (or MW_AUTH_JWKS) a bearer token is required. Read routes demand the viewer (Read) permission; writes demand author/admin. A project outside the caller's scope is REFUSED (403), never silently empty."
+  },
+  "servers": [{ "url": "http://localhost:8080" }],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "health", "description": "Liveness and build information (public)." },
+    { "name": "projects", "description": "Projects and their commits, branches, references and checks." },
+    { "name": "import", "description": "Migration through a binding, with a retained artifact and a loss report." },
+    { "name": "gate", "description": "The provable round-trip fidelity gate." },
+    { "name": "proposals", "description": "Agent proposals and their human decisions." },
+    { "name": "locks", "description": "Live element leases." },
+    { "name": "audit", "description": "The append-only audit log." },
+    { "name": "analytics", "description": "The read-only mw-analytics-schema@1 tables and measures." },
+    { "name": "metrics", "description": "The operator-gated OpenMetrics exposition endpoint." }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The service status and the authentication mode.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "version",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Build information.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Version" } } }
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "tags": ["projects"],
+        "operationId": "listProjects",
+        "responses": {
+          "200": {
+            "description": "The projects the caller may reach (filtered to scope, never refused).",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["projects"],
+        "operationId": "createProject",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } }
+        }
+      }
+    },
+    "/projects/{project}/commits": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "listCommits",
+        "parameters": [{ "name": "branch", "in": "query", "schema": { "type": "string", "default": "main" } }],
+        "responses": {
+          "200": { "description": "The commits of the branch.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Commit" } } } } }
+        }
+      },
+      "post": {
+        "tags": ["projects"],
+        "operationId": "createCommit",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["branch", "message", "okf"], "properties": { "branch": { "type": "string" }, "author": { "type": "string" }, "message": { "type": "string" }, "okf": { "type": "object" }, "holder": { "type": "string" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Committed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Commit" } } } }
+        }
+      }
+    },
+    "/projects/{project}/commits/{hash}": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/Hash" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "getCommit",
+        "responses": {
+          "200": { "description": "The OKF document behind the commit." }
+        }
+      }
+    },
+    "/projects/{project}/commits/{hash}/record": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/Hash" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "getCommitRecord",
+        "responses": {
+          "200": { "description": "The commit record (with provenance).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Commit" } } } }
+        }
+      }
+    },
+    "/projects/{project}/commits/{hash}/references": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/Hash" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "listReferences",
+        "responses": { "200": { "description": "The subsystem references the model declares." } }
+      }
+    },
+    "/projects/{project}/commits/{hash}/references/resolve": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/Hash" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "resolveReferences",
+        "responses": { "200": { "description": "Whether every subsystem reference resolves." } }
+      }
+    },
+    "/projects/{project}/commits/{hash}/checks": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/Hash" }],
+      "get": {
+        "tags": ["gate"],
+        "operationId": "commitChecks",
+        "responses": { "200": { "description": "The gate runs that checked this commit." } }
+      }
+    },
+    "/projects/{project}/branches": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["projects"],
+        "operationId": "listBranches",
+        "responses": { "200": { "description": "The branches and their tips.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Branch" } } } } } }
+      },
+      "post": {
+        "tags": ["projects"],
+        "operationId": "createBranch",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name", "from"], "properties": { "name": { "type": "string" }, "from": { "type": "string" } } } } }
+        },
+        "responses": { "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Branch" } } } } }
+      }
+    },
+    "/projects/{project}/branches/{name}": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/BranchName" }],
+      "delete": {
+        "tags": ["projects"],
+        "operationId": "deleteBranch",
+        "responses": { "204": { "description": "Deleted (the commits remain reachable)." } }
+      }
+    },
+    "/projects/{project}/branches/{name}/reset": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/BranchName" }],
+      "post": {
+        "tags": ["projects"],
+        "operationId": "resetBranch",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["to", "message"], "properties": { "to": { "type": "string" }, "author": { "type": "string" }, "message": { "type": "string" }, "holder": { "type": "string" } } } } }
+        },
+        "responses": { "201": { "description": "The revert commit.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Commit" } } } } }
+      }
+    },
+    "/projects/{project}/gate": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["gate"],
+        "operationId": "runGate",
+        "responses": { "200": { "description": "The gate outcome and its evidence." } }
+      }
+    },
+    "/projects/{project}/gate-runs": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["gate"],
+        "operationId": "listGateRuns",
+        "responses": { "200": { "description": "Recorded gate runs." } }
+      }
+    },
+    "/projects/{project}/import": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["import"],
+        "operationId": "importArtifact",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["binding", "branch", "message", "artifact"], "properties": { "binding": { "type": "string", "example": "sysml-v1-xmi@2.4" }, "branch": { "type": "string" }, "author": { "type": "string" }, "message": { "type": "string" }, "artifact": { "type": "string", "description": "base64 or raw UTF-8 source bytes." }, "acceptLosses": { "type": "array", "items": { "type": "string" } }, "holder": { "type": "string" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Committed import." },
+          "422": { "description": "Blocking losses not accepted, or the binding could not read the artifact." }
+        }
+      }
+    },
+    "/projects/{project}/import/stream": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["import"],
+        "operationId": "importArtifactStream",
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "type": "object" } } } },
+        "responses": {
+          "201": { "description": "Committed import (the artifact was streamed, never buffered)." },
+          "413": { "description": "The body exceeds MW_MAX_BODY_BYTES." },
+          "422": { "description": "Blocking losses not accepted." }
+        }
+      }
+    },
+    "/projects/{project}/import/{artifactHash}/accept": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/ArtifactHash" }],
+      "post": {
+        "tags": ["import"],
+        "operationId": "acceptImport",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["acceptLosses"], "properties": { "acceptLosses": { "type": "array", "items": { "type": "string" } }, "branch": { "type": "string" }, "author": { "type": "string" }, "message": { "type": "string" }, "holder": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Accepted import committed." } }
+      }
+    },
+    "/projects/{project}/import/{artifactHash}/report": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/ArtifactHash" }],
+      "get": {
+        "tags": ["import"],
+        "operationId": "importReport",
+        "responses": { "200": { "description": "The loss report and round-trip fidelity for the retained artifact." } }
+      }
+    },
+    "/projects/{project}/import/{artifactHash}/artifact": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "$ref": "#/components/parameters/ArtifactHash" }],
+      "get": {
+        "tags": ["import"],
+        "operationId": "getArtifact",
+        "responses": { "200": { "description": "The retained source artifact, byte for byte.", "content": { "application/octet-stream": {} } } }
+      }
+    },
+    "/projects/{project}/assist": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["projects"],
+        "operationId": "assist",
+        "responses": { "200": { "description": "The live-assist answer." } }
+      }
+    },
+    "/projects/{project}/proposals": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["proposals"],
+        "operationId": "listProposals",
+        "responses": { "200": { "description": "The proposals with their decisions." } }
+      },
+      "post": {
+        "tags": ["proposals"],
+        "operationId": "recordProposal",
+        "responses": { "201": { "description": "Recorded." } }
+      }
+    },
+    "/projects/{project}/proposals/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": {
+        "tags": ["proposals"],
+        "operationId": "getProposal",
+        "responses": { "200": { "description": "One proposal record." } }
+      }
+    },
+    "/projects/{project}/proposals/{id}/accept": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "post": {
+        "tags": ["proposals"],
+        "operationId": "acceptProposal",
+        "responses": { "200": { "description": "Accepted." } }
+      }
+    },
+    "/projects/{project}/proposals/{id}/refuse": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }, { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "post": {
+        "tags": ["proposals"],
+        "operationId": "refuseProposal",
+        "responses": { "200": { "description": "Refused." } }
+      }
+    },
+    "/projects/{project}/merge": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["projects"],
+        "operationId": "mergeBranches",
+        "responses": { "201": { "description": "The merge commit." } }
+      }
+    },
+    "/projects/{project}/audit": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["audit"],
+        "operationId": "listAudit",
+        "responses": { "200": { "description": "The append-only audit log." } }
+      }
+    },
+    "/projects/{project}/analytics": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["analytics"],
+        "operationId": "projectAnalytics",
+        "description": "The portfolio-compliance report for a caller-supplied specification and the cost state of the model's own requirements.",
+        "parameters": [
+          { "name": "requirements", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Comma-separated requirement ids." },
+          { "name": "commit", "in": "query", "schema": { "type": "string" } },
+          { "name": "branch", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "The compliance and cost answer." } }
+      }
+    },
+    "/projects/{project}/locks": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["locks"],
+        "operationId": "listLocks",
+        "responses": { "200": { "description": "Live leases." } }
+      },
+      "post": {
+        "tags": ["locks"],
+        "operationId": "acquireLocks",
+        "responses": { "201": { "description": "Acquired." } }
+      },
+      "delete": {
+        "tags": ["locks"],
+        "operationId": "releaseLocks",
+        "responses": { "200": { "description": "Released." } }
+      }
+    },
+    "/projects/{project}/locks/release": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "post": {
+        "tags": ["locks"],
+        "operationId": "releaseLocksPost",
+        "responses": { "200": { "description": "Released." } }
+      }
+    },
+    "/analytics/schema": {
+      "get": {
+        "tags": ["analytics"],
+        "operationId": "analyticsSchema",
+        "summary": "The mw-analytics-schema@1 schema document and its version.",
+        "responses": {
+          "200": { "description": "The nine tables and the generated metric definitions.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SchemaDocument" } } } }
+        }
+      }
+    },
+    "/analytics/{project}/tables/{table}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/Project" },
+        { "name": "table", "in": "path", "required": true, "schema": { "type": "string", "enum": ["projects", "commits", "elements", "relationships", "requirements", "trace_links", "metrics", "metric_definitions", "import_losses"] } }
+      ],
+      "get": {
+        "tags": ["analytics"],
+        "operationId": "analyticsTable",
+        "summary": "A table for one commit (or branch head), streamed, with paging and equality filters.",
+        "parameters": [
+          { "name": "commit", "in": "query", "schema": { "type": "string" }, "description": "The commit hash. Wins over branch." },
+          { "name": "branch", "in": "query", "schema": { "type": "string", "default": "main" }, "description": "Resolved to its tip when commit is absent." },
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["json", "csv", "ndjson"] }, "description": "Overrides Accept." },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100, "maximum": 1000 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "The nextCursor from a previous page." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page. JSON carries the envelope; CSV/NDJSON carry total and nextCursor in the X-MW-Total and X-MW-Next-Cursor headers.",
+            "headers": {
+              "X-MW-Schema-Version": { "schema": { "type": "string" } },
+              "X-MW-Total": { "schema": { "type": "integer" } },
+              "X-MW-Next-Cursor": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TablePage" } },
+              "text/csv": { "schema": { "type": "string" } },
+              "application/x-ndjson": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/{project}/metrics": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["analytics"],
+        "operationId": "analyticsMetrics",
+        "summary": "The metrics table for a commit or branch head, every row with its basis.",
+        "parameters": [
+          { "name": "commit", "in": "query", "schema": { "type": "string" } },
+          { "name": "branch", "in": "query", "schema": { "type": "string", "default": "main" } }
+        ],
+        "responses": {
+          "200": { "description": "25 metric rows, each carrying its basis as data.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MetricsEnvelope" } } } }
+        }
+      }
+    },
+    "/analytics/{project}/trend": {
+      "parameters": [{ "$ref": "#/components/parameters/Project" }],
+      "get": {
+        "tags": ["analytics"],
+        "operationId": "analyticsTrend",
+        "summary": "One metric across the commits of a branch, in commit order, each row with its basis.",
+        "parameters": [
+          { "name": "metric", "in": "query", "required": true, "schema": { "type": "string" }, "description": "A metric id from the metric definitions." },
+          { "name": "branch", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string" }, "description": "Inclusive start commit hash." },
+          { "name": "to", "in": "query", "schema": { "type": "string" }, "description": "Inclusive end commit hash." }
+        ],
+        "responses": {
+          "200": { "description": "The metric across the branch's commits.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TrendEnvelope" } } } }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["metrics"],
+        "operationId": "openMetrics",
+        "summary": "OpenMetrics gauges per project and branch head. OFF unless MW_ENABLE_OPENMETRICS is set.",
+        "responses": {
+          "200": { "description": "The gauge samples.", "content": { "text/plain; version=0.0.4": { "schema": { "type": "string" } } } },
+          "503": { "description": "The endpoint is disabled; set MW_ENABLE_OPENMETRICS=1." }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "token or JWT" }
+    },
+    "parameters": {
+      "Project": { "name": "project", "in": "path", "required": true, "schema": { "type": "string" } },
+      "Hash": { "name": "hash", "in": "path", "required": true, "schema": { "type": "string" } },
+      "BranchName": { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+      "ArtifactHash": { "name": "artifactHash", "in": "path", "required": true, "schema": { "type": "string" } }
+    },
+    "schemas": {
+      "Health": { "type": "object", "properties": { "status": { "type": "string" }, "authMode": { "type": "string" } } },
+      "Version": { "type": "object", "properties": { "server": { "type": "string" }, "service": { "type": "string" } } },
+      "Project": { "type": "object", "properties": { "name": { "type": "string" }, "createdAt": { "type": "string" } } },
+      "Branch": { "type": "object", "properties": { "name": { "type": "string" }, "tip": { "type": "string" } } },
+      "Commit": {
+        "type": "object",
+        "properties": {
+          "hash": { "type": "string" },
+          "project": { "type": "string" },
+          "branch": { "type": "string" },
+          "parents": { "type": "array", "items": { "type": "string" } },
+          "okfHash": { "type": "string" },
+          "author": { "type": "string" },
+          "message": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "provenance": { "type": "object" }
+        }
+      },
+      "SchemaDocument": {
+        "type": "object",
+        "required": ["schemaVersion", "tables", "metricDefinitions"],
+        "properties": {
+          "schemaVersion": { "type": "string", "enum": ["mw-analytics-schema@1"] },
+          "tables": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "columns": { "type": "array", "items": { "type": "string" } } } } },
+          "metricDefinitions": { "type": "array", "items": { "$ref": "#/components/schemas/MetricDefinitionAtRest" } }
+        }
+      },
+      "MetricDefinitionAtRest": {
+        "type": "object",
+        "description": "A metric definition in the at-rest snake_case (the schema artefact).",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": "string" }
+        }
+      },
+      "TablePage": {
+        "type": "object",
+        "required": ["schemaVersion", "project", "commit", "table", "total", "rows"],
+        "properties": {
+          "schemaVersion": { "type": "string", "enum": ["mw-analytics-schema@1"] },
+          "project": { "type": "string" },
+          "commit": { "type": "string" },
+          "table": { "type": "string" },
+          "total": { "type": "integer" },
+          "nextCursor": { "type": "string", "description": "Present only when another page follows." },
+          "rows": { "type": "array", "items": { "type": "object" }, "description": "Rows in the camelCase wire naming." }
+        }
+      },
+      "Metric": {
+        "type": "object",
+        "description": "A metrics row on the JSON wire (camelCase). Every metric carries its basis as data.",
+        "required": ["project", "commit", "metricId", "value", "valueState", "unit", "trust", "basisElementCount", "basisRelationshipCount", "constructsNotCarried", "basisNote", "engineVersion", "evidenceHash"],
+        "properties": {
+          "project": { "type": "string" },
+          "commit": { "type": "string" },
+          "metricId": { "type": "string" },
+          "value": { "type": ["number", "null"] },
+          "valueState": { "type": "string", "enum": ["present", "unknown", "uncosted"] },
+          "unit": { "type": "string" },
+          "trust": { "type": "string", "enum": ["measured", "reported", "estimated"] },
+          "basisElementCount": { "type": "integer" },
+          "basisRelationshipCount": { "type": "integer" },
+          "constructsNotCarried": { "type": "integer" },
+          "basisNote": { "type": "string" },
+          "engineVersion": { "type": "string" },
+          "evidenceHash": { "type": "string" }
+        }
+      },
+      "MetricsEnvelope": {
+        "type": "object",
+        "required": ["schemaVersion", "project", "commit", "metrics"],
+        "properties": {
+          "schemaVersion": { "type": "string" },
+          "project": { "type": "string" },
+          "commit": { "type": "string" },
+          "metrics": { "type": "array", "items": { "$ref": "#/components/schemas/Metric" } }
+        }
+      },
+      "TrendEnvelope": {
+        "type": "object",
+        "required": ["schemaVersion", "project", "branch", "metric", "metrics"],
+        "properties": {
+          "schemaVersion": { "type": "string" },
+          "project": { "type": "string" },
+          "branch": { "type": "string" },
+          "metric": { "type": "string" },
+          "metrics": { "type": "array", "items": { "$ref": "#/components/schemas/Metric" } }
+        }
+      }
+    }
+  }
+}

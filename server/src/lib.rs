@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+pub mod analytics;
 pub mod analytics_api;
 pub mod api;
 pub mod assist;
@@ -292,6 +293,14 @@ pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) ->
             "/projects/:project/analytics",
             get(analytics_api::project_analytics),
         )
+        // The Package 3 analytics surface: the mw-analytics-schema@1 tables and measures,
+        // read-only, at the Read permission. Every route resolves an identity and enforces
+        // scope before touching the store, exactly like the other read routes.
+        .route("/analytics/schema", get(analytics::schema))
+        .route("/analytics/:project/tables/:table", get(analytics::table))
+        .route("/analytics/:project/metrics", get(analytics::metrics))
+        .route("/analytics/:project/trend", get(analytics::trend))
+        .route("/metrics", get(analytics::openmetrics))
         .route(
             "/projects/:project/locks",
             post(locks_api::acquire_locks)
