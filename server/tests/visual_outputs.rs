@@ -499,3 +499,55 @@ async fn the_process_view_exports_with_its_own_provenance() {
         "the process view is a different drawing from the structure view"
     );
 }
+
+#[tokio::test]
+async fn the_control_view_exports_with_its_own_provenance() {
+    // The control-structure view is the third diagram type. It must export with real control
+    // nodes, naming itself, just like the other two.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(
+        test_support::repo_root()
+            .join("sample/stpa")
+            .join("fire-suppression-correct.json"),
+    )
+    .expect("the STPA fixture must exist");
+    let model: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/fs/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "control", "okf": model }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+    let hash = json_body(committed).await["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let control = body_text(
+        router
+            .clone()
+            .oneshot(get(&format!(
+                "/ui/projects/fs/diagram.svg?commit={hash}&view=control"
+            )))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        control.contains("diagram=control"),
+        "the export must name the view it drew"
+    );
+    assert!(
+        control.contains("Fire Suppression Controller"),
+        "the control drawing must contain the controller"
+    );
+}
