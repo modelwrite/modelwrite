@@ -922,6 +922,12 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
                 "detail": "bindings/python types metrics.value as float64 (its Arrow mirror of the schema), so an integral metric value is delivered as 15.0 where the REST JSON delivers 15. The comparison normalises integral numbers; the underlying value is identical. This is the ONLY representation difference found; every other table compared byte-for-byte after key normalisation."
             }
         ],
+        "knownTestDefects": [
+            {
+                "component": "engine/mcp/tests/repository.rs",
+                "detail": "the MCP contract tests mock the wire with snake_case row fixtures (metric_id, basis_element_count, ...) while the live REST wire is camelCase, and assert that snake_case. The mock never meets the real server, so the assertions pass against a shape no transport produces. This record does NOT use that mock: it drives the live repo.table path over HTTP (Repository::configured), so its MCP rows are the real camelCase wire, normalised explicitly. The stale fixture is a defect in the MCP test suite, reported here rather than relied on or fixed (engine/ is outside this slice)."
+            }
+        ],
         "pagination": format!("REST limit={PAGE} and MCP limit={PAGE}, each followed on nextCursor to completion; the Python client pages internally at its own 1000-row ceiling. The page size is small on purpose so the cursor path is exercised on every table."),
         "transports": {
             "rest": { "implementation": "server/src/analytics (Rust projection), HTTP JSON", "independentProjection": true },

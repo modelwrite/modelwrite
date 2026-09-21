@@ -679,6 +679,12 @@
   },
   "generator": "server/tests/equivalence.rs (analytics interfaces brief, package 7)",
   "independence": "Only REST and CLI --db are independent implementations; MCP and Python both read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying four independent implementations.",
+  "knownTestDefects": [
+    {
+      "component": "engine/mcp/tests/repository.rs",
+      "detail": "the MCP contract tests mock the wire with snake_case row fixtures (metric_id, basis_element_count, ...) while the live REST wire is camelCase, and assert that snake_case. The mock never meets the real server, so the assertions pass against a shape no transport produces. This record does NOT use that mock: it drives the live repo.table path over HTTP (Repository::configured), so its MCP rows are the real camelCase wire, normalised explicitly. The stale fixture is a defect in the MCP test suite, reported here rather than relied on or fixed (engine/ is outside this slice)."
+    }
+  ],
   "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI --db NDJSON export are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
   "notRun": [
     {
