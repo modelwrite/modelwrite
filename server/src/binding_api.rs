@@ -366,8 +366,10 @@ pub fn import_core(
 
     // I3: the document that was measured IS the document that is committed. The XMI binding
     // emits the empty state machine itself (OKF requires the section even when the model has
-    // no state machine), so import_bytes - the bytes the round trip above measured - are the
-    // exact bytes committed. Nothing is mutated after measurement.
+    // no state machine) and derives its own summary, so import_bytes - the bytes the round
+    // trip above measured - equal the canonical bytes the commit core stores. Nothing is
+    // mutated after measurement except the summary, which is re-derived in canonical form
+    // rather than trusted.
     //
     // The import commit is a commit like any other: it goes through the shared commit core,
     // so validation, the lock guard and the commit.create audit entry behave exactly as they
@@ -401,7 +403,6 @@ pub fn import_core(
             mechanism: input.mechanism,
             authorizer: input.authorizer,
             candidate: &root,
-            bytes: &import_bytes,
             import: Some(&provenance),
             acceptance: None,
             holder: input.holder.unwrap_or(""),

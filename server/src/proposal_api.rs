@@ -438,10 +438,6 @@ fn accept_model_change_core(
         accepted_items.to_vec()
     };
 
-    let bytes = serde_json::to_vec(&candidate).map_err(|e| {
-        eprintln!("candidate model could not be serialised: {}", e);
-        ApiError::internal("the candidate model could not be prepared")
-    })?;
     let now = now_seconds();
     let tip = store
         .branch_tip(project, branch)
@@ -465,7 +461,6 @@ fn accept_model_change_core(
             mechanism,
             authorizer,
             candidate: &candidate,
-            bytes: &bytes,
             import: None,
             acceptance: Some(&provenance),
             holder: holder.unwrap_or(""),

@@ -272,10 +272,10 @@ pub fn merge_core(
         }
     }
 
-    let bytes = serde_json::to_vec(&merged).map_err(|e| {
-        eprintln!("merged model could not be serialised: {}", e);
-        StoreError::Backend("the merged model could not be stored".to_string())
-    })?;
+    // The merged document is stored in the one canonical form (summary re-derived, field
+    // order fixed), so a merge's content address is a function of content alone, exactly as a
+    // plain commit's is.
+    let bytes = okf::hash::canonical_bytes(&merged);
     let okf_hash = store.put_blob(&bytes)?;
     // A merge is a write path like any other: it refuses to change an element another
     // holder has locked. The touched set is the difference between OUR tip model and the

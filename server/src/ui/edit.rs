@@ -382,44 +382,35 @@ fn perform_edit(
     // commit, while a plain commit has no such lease and guards only inside the transaction.
     // The held lease is passed as the guard's holder, which the core accepts as an input.
     let author = identity.subject.clone();
-    let commit_result: Result<Commit, StoreError> = (|| {
-        let bytes = serde_json::to_vec(&candidate).map_err(|error| {
-            eprintln!("edited model could not be serialised: {}", error);
-            StoreError::Backend("the edited model could not be stored".to_string())
-        })?;
-        commit_core(
-            state.store_for(identity).as_ref(),
-            &CommitCore {
-                project,
-                branch: &input.branch,
-                author: &author,
-                message: &input.message,
-                actor: &identity.subject,
-                mechanism: state.auth.mechanism(),
-                authorizer: state.auth.authorizer().unwrap_or(""),
-                candidate: &candidate,
-                bytes: &bytes,
-                import: None,
-                acceptance: None,
-                holder,
-                now,
-                tip: Some(&tip),
-                reference: Some(&root),
-            },
-        )
-        .map_err(|failure| match failure {
-            // Unreachable: the candidate passed the same validation above, before the lease
-            // was taken. Kept as a defensive mapping so a disagreement between the two checks
-            // is a 500 rather than a silently different refusal.
-            CommitFailure::Invalid { errors } => {
-                eprintln!("edited model re-validation failed: {:?}", errors);
-                StoreError::Backend(
-                    "the edited model failed validation and was not stored".to_string(),
-                )
-            }
-            CommitFailure::Store(error) => error,
-        })
-    })();
+    let commit_result: Result<Commit, StoreError> = commit_core(
+        state.store_for(identity).as_ref(),
+        &CommitCore {
+            project,
+            branch: &input.branch,
+            author: &author,
+            message: &input.message,
+            actor: &identity.subject,
+            mechanism: state.auth.mechanism(),
+            authorizer: state.auth.authorizer().unwrap_or(""),
+            candidate: &candidate,
+            import: None,
+            acceptance: None,
+            holder,
+            now,
+            tip: Some(&tip),
+            reference: Some(&root),
+        },
+    )
+    .map_err(|failure| match failure {
+        // Unreachable: the candidate passed the same validation above, before the lease
+        // was taken. Kept as a defensive mapping so a disagreement between the two checks
+        // is a 500 rather than a silently different refusal.
+        CommitFailure::Invalid { errors } => {
+            eprintln!("edited model re-validation failed: {:?}", errors);
+            StoreError::Backend("the edited model failed validation and was not stored".to_string())
+        }
+        CommitFailure::Store(error) => error,
+    });
 
     // The lease was for the duration of the request. Release it whatever the commit did, so
     // the element is never left locked after the request finishes.

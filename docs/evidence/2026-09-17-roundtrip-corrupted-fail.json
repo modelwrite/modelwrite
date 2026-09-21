@@ -1,5 +1,5 @@
 {
-  "candidateHash": "9c9bbac605691b059627c9b6309763328878f9dc174d11adf85dc3df8cc305c2",
+  "candidateHash": "352ffaed1c6a7b5aa6e1be379ae69355c135fb1afe76195ffdabb61b755a7479",
   "coverage": {
     "allocated": 0,
     "covered": 13,
@@ -26,7 +26,7 @@
     "integration: 1 isolated nodes",
     "integration: 3 connected components"
   ],
-  "gateVersion": "0.1.0",
+  "gateVersion": "0.2.0",
   "integration": {
     "componentCount": 3,
     "componentSizes": [

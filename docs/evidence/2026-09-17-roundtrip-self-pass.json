@@ -21,7 +21,7 @@
     "verified": 1
   },
   "failures": [],
-  "gateVersion": "0.1.0",
+  "gateVersion": "0.2.0",
   "integration": {
     "componentCount": 1,
     "componentSizes": [

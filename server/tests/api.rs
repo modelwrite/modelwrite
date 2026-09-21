@@ -112,14 +112,15 @@ async fn a_commit_stores_the_model_and_moves_the_branch() {
         .await
         .unwrap();
     assert_eq!(fetched.status(), StatusCode::OK);
-    // Byte for byte, not structurally: comparing two parsed values would let a
-    // key-reordering or reformatting regression pass unnoticed.
-    let bytes = fetched.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(
-        bytes.as_ref(),
-        serde_json::to_vec(&tiny_okf()).unwrap().as_slice(),
-        "the stored model must come back byte for byte"
-    );
+    // The document is committed in its ONE canonical form (the summary re-derived and the
+    // field order fixed), so the fetched document equals the canonical serialisation of the
+    // posted document - never the caller's serialisation order. The canonical bytes are
+    // checked byte for byte in the cross-path test; here the GET route re-serialises the blob
+    // through a serde_json::Value, so the comparison is structural.
+    let root: okf::types::OkfRoot = serde_json::from_value(tiny_okf()).unwrap();
+    let canonical: serde_json::Value =
+        serde_json::from_slice(&okf::hash::canonical_bytes(&root)).unwrap();
+    assert_eq!(json_body(fetched).await, canonical);
 }
 
 #[tokio::test]
@@ -514,7 +515,10 @@ async fn a_reset_appends_a_commit_and_keeps_the_old_tip_reachable() {
         )
         .await
         .unwrap();
-    assert_eq!(json_body(fetched).await, tiny_okf());
+    let root: okf::types::OkfRoot = serde_json::from_value(tiny_okf()).unwrap();
+    let canonical: serde_json::Value =
+        serde_json::from_slice(&okf::hash::canonical_bytes(&root)).unwrap();
+    assert_eq!(json_body(fetched).await, canonical);
 
     let superseded = router
         .oneshot(

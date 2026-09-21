@@ -426,17 +426,19 @@ pub fn commit_hash(
     blob_hash(&bytes)
 }
 
-/// The OKF summary is DERIVED from the document's own sections, so a write path must never
-/// trust a client-supplied count. Every commit, acceptance and merge lands here - the store's
-/// commit path - so the derivation lives HERE, not in any endpoint or CLI: a caller stores
-/// the document bytes and then commits them by content address, and the store re-derives the
-/// summary from the stored bytes, re-storing the corrected bytes (under their own content
-/// address) when the supplied summary was false. A commit made through any path therefore
-/// carries a true summary.
+/// The OKF summary is DERIVED and the serialization is CANONICAL: a write path must never
+/// trust a client-supplied count or a caller's serialisation order. Every commit, acceptance
+/// and merge lands here - the store's commit path - so the canonicalisation lives HERE, not in
+/// any endpoint or CLI: a caller stores the document bytes and then commits them by content
+/// address, and the store re-derives the summary and re-serialises the document in the one
+/// canonical form ([okf::hash::canonical_bytes]), re-storing the canonical bytes (under their
+/// own content address) whenever the stored bytes differ. A commit made through any path
+/// therefore carries a true summary AND a content address that is a function of content alone,
+/// never of which code path serialised the document.
 ///
 /// A blob that is not an OKF document - a test fake, or a dangling reference a broken caller
-/// already produced - has no summary to derive and is returned unchanged; the store never
-/// guesses what a non-model blob's summary "should" be.
+/// already produced - has no summary to derive and no canonical form, and is returned
+/// unchanged; the store never guesses what a non-model blob's summary "should" be.
 pub fn derived_okf_hash(
     read_blob: impl Fn(&str) -> Result<Option<Vec<u8>>, StoreError>,
     put_blob: impl Fn(&[u8]) -> Result<String, StoreError>,
@@ -445,17 +447,14 @@ pub fn derived_okf_hash(
     let Some(bytes) = read_blob(okf_hash)? else {
         return Ok(okf_hash.to_string());
     };
-    let Ok(mut root) = serde_json::from_slice::<okf::types::OkfRoot>(&bytes) else {
+    let Ok(root) = serde_json::from_slice::<okf::types::OkfRoot>(&bytes) else {
         return Ok(okf_hash.to_string());
     };
-    let summary_before = root.summary.clone();
-    okf::summary::recompute(&mut root);
-    if root.summary == summary_before {
+    let canonical = okf::hash::canonical_bytes(&root);
+    if blob_hash(&canonical) == okf_hash {
         return Ok(okf_hash.to_string());
     }
-    let corrected = serde_json::to_vec(&root)
-        .map_err(|e| StoreError::Backend(format!("the model could not be re-serialised: {}", e)))?;
-    put_blob(&corrected)
+    put_blob(&canonical)
 }
 
 /// Deterministic identifier for a lock row: the project, branch, element and holder

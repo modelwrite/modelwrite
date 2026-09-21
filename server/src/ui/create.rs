@@ -212,10 +212,6 @@ fn perform_create_model(
         )));
     }
     let author = identity.subject.clone();
-    let bytes = serde_json::to_vec(&root).map_err(|error| {
-        eprintln!("model could not be serialised: {}", error);
-        ApiError::internal("the model could not be stored")
-    })?;
     let now = now_seconds();
     let commit = match commit_core(
         state.store_for(identity).as_ref(),
@@ -228,7 +224,6 @@ fn perform_create_model(
             mechanism: state.auth.mechanism(),
             authorizer: state.auth.authorizer().unwrap_or(""),
             candidate: &root,
-            bytes: &bytes,
             import: None,
             acceptance: None,
             holder: "",
@@ -591,10 +586,6 @@ fn perform_create_element(
     }
 
     let author = identity.subject.clone();
-    let bytes = serde_json::to_vec(&candidate).map_err(|error| {
-        eprintln!("model could not be serialised: {}", error);
-        ApiError::internal("the model could not be stored")
-    })?;
     let now = now_seconds();
     let commit = match commit_core(
         state.store_for(identity).as_ref(),
@@ -607,7 +598,6 @@ fn perform_create_element(
             mechanism: state.auth.mechanism(),
             authorizer: state.auth.authorizer().unwrap_or(""),
             candidate: &candidate,
-            bytes: &bytes,
             import: None,
             acceptance: None,
             holder: "",

@@ -19,18 +19,17 @@ fn store() -> (SqliteStore, tempfile::TempDir) {
     (store, dir)
 }
 
-/// A valid OKF document and its exact bytes, the same shape the plain commit endpoint accepts.
-fn candidate() -> (OkfRoot, Vec<u8>) {
-    let root: OkfRoot = serde_json::from_value(serde_json::json!({
+/// A valid OKF document, the same shape the plain commit endpoint accepts. The commit core
+/// now serialises the document canonically itself, so callers no longer hand over bytes.
+fn candidate() -> OkfRoot {
+    serde_json::from_value(serde_json::json!({
         "project": "tiny",
         "exportedAt": "2026-09-17T00:00:00Z",
         "summary": {},
         "stateMachine": { "name": "tiny sm", "regions": [] },
         "graph": { "nodes": [{ "id": "b1", "kind": "block", "name": "B1" }], "edges": [] }
     }))
-    .unwrap();
-    let bytes = serde_json::to_vec(&root).unwrap();
-    (root, bytes)
+    .unwrap()
 }
 
 fn provenance(artifact_hash: &str, accepted_losses: Vec<String>) -> ImportProvenance {
@@ -93,7 +92,7 @@ fn an_imported_commit_whose_artifact_is_missing_is_refused_by_the_commit_path() 
         )
         .unwrap();
 
-    let (root, bytes) = candidate();
+    let root = candidate();
     let provenance = provenance("missing-artifact", vec![]);
     let result = commit_core(
         &store,
@@ -106,7 +105,6 @@ fn an_imported_commit_whose_artifact_is_missing_is_refused_by_the_commit_path() 
             mechanism: "open",
             authorizer: "",
             candidate: &root,
-            bytes: &bytes,
             import: Some(&provenance),
             acceptance: None,
             holder: "",
@@ -152,7 +150,7 @@ fn a_commit_with_unaccepted_losses_cannot_be_marked_imported_by_the_commit_path(
         )
         .unwrap();
 
-    let (root, bytes) = candidate();
+    let root = candidate();
     let provenance = provenance(&artifact_hash, vec![]);
     let result = commit_core(
         &store,
@@ -165,7 +163,6 @@ fn a_commit_with_unaccepted_losses_cannot_be_marked_imported_by_the_commit_path(
             mechanism: "open",
             authorizer: "",
             candidate: &root,
-            bytes: &bytes,
             import: Some(&provenance),
             acceptance: None,
             holder: "",
@@ -264,7 +261,7 @@ fn a_provenance_binding_that_disagrees_with_the_record_is_refused_by_the_commit_
     );
     provenance.binding_id = "some-other-binding".to_string();
 
-    let (root, bytes) = candidate();
+    let root = candidate();
     let result = commit_core(
         &store,
         &CommitCore {
@@ -276,7 +273,6 @@ fn a_provenance_binding_that_disagrees_with_the_record_is_refused_by_the_commit_
             mechanism: "open",
             authorizer: "",
             candidate: &root,
-            bytes: &bytes,
             import: Some(&provenance),
             acceptance: None,
             holder: "",
@@ -322,7 +318,7 @@ fn an_imported_commit_with_substantiated_provenance_lands_through_the_commit_pat
         )
         .unwrap();
 
-    let (root, bytes) = candidate();
+    let root = candidate();
     let provenance = provenance(
         &expected_artifact_hash,
         vec!["uml:Model model-grinder [lossy]".to_string()],
@@ -339,7 +335,6 @@ fn an_imported_commit_with_substantiated_provenance_lands_through_the_commit_pat
                 mechanism: "open",
                 authorizer: "",
                 candidate: &root,
-                bytes: &bytes,
                 import: Some(&provenance),
                 acceptance: None,
                 holder: "",
@@ -366,7 +361,7 @@ fn an_authored_commit_is_not_held_to_migration_rules() {
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
 
-    let (root, bytes) = candidate();
+    let root = candidate();
     let commit = landed(
         commit_core(
             &store,
@@ -379,7 +374,6 @@ fn an_authored_commit_is_not_held_to_migration_rules() {
                 mechanism: "open",
                 authorizer: "",
                 candidate: &root,
-                bytes: &bytes,
                 import: None,
                 acceptance: None,
                 holder: "",
@@ -404,8 +398,9 @@ fn the_store_derives_the_summary_so_every_commit_path_inherits_a_true_summary() 
     let (store, _dir) = store();
     store.create_project("coffee", None).unwrap();
 
-    let (_root, bytes) = candidate();
-    let stale_hash = store.put_blob(&bytes).unwrap();
+    let root = candidate();
+    let stale_bytes = serde_json::to_vec(&root).unwrap();
+    let stale_hash = store.put_blob(&stale_bytes).unwrap();
     let commit = store
         .commit_model(
             "coffee",

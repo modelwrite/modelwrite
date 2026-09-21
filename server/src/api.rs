@@ -431,11 +431,12 @@ pub enum CommitFailure {
 }
 
 /// Everything the commit core needs that the caller resolved upstream. `author` and
-/// `actor` are already resolved against the identity; `bytes` are the caller's serialisation
-/// of the candidate, stored verbatim (the store re-derives the summary from them on commit,
-/// see [super::store::derived_okf_hash]); `tip` and `reference` are the tip the candidate
-/// was computed against and that tip's model, both `None` for a first commit; `import` is
-/// the provenance an import commit carries, `None` for every other commit.
+/// `actor` are already resolved against the identity; the document is committed in its one
+/// canonical form (the summary re-derived and the field order fixed, see
+/// [okf::hash::canonical_bytes]), so no caller's serialisation order can influence the commit
+/// hash; `tip` and `reference` are the tip the candidate was computed against and that
+/// tip's model, both `None` for a first commit; `import` is the provenance an import
+/// commit carries, `None` for every other commit.
 pub struct CommitCore<'a> {
     pub project: &'a str,
     pub branch: &'a str,
@@ -445,7 +446,6 @@ pub struct CommitCore<'a> {
     pub mechanism: &'a str,
     pub authorizer: &'a str,
     pub candidate: &'a okf::types::OkfRoot,
-    pub bytes: &'a [u8],
     pub import: Option<&'a ImportProvenance>,
     /// Some when this commit is a human's acceptance of an agent's MODEL-CHANGE proposal.
     /// Mutually exclusive with `import`: a commit is either an import (with its retained
@@ -510,10 +510,14 @@ pub fn commit_core(store: &dyn Store, input: &CommitCore<'_>) -> Result<Commit, 
         expected_tip: input.tip,
     };
 
-    // The caller's bytes are stored verbatim; the store re-derives the summary from them on
-    // commit (see store::derived_okf_hash), re-storing corrected bytes when the supplied
-    // summary was false. A well-formed document's content address is therefore unchanged.
-    let okf_hash = store.put_blob(input.bytes).map_err(CommitFailure::Store)?;
+    // The document is stored in its ONE canonical form: the summary re-derived and the
+    // field order fixed by okf::hash::canonical_bytes. Whatever serialisation order the
+    // caller used to hand the document in, the bytes stored - and therefore the commit's
+    // okf_hash - are a function of content alone. The store re-checks this on commit (see
+    // store::derived_okf_hash) as the final convergence point.
+    let okf_hash = store
+        .put_blob(&okf::hash::canonical_bytes(input.candidate))
+        .map_err(CommitFailure::Store)?;
     let audit = AuditEntry {
         id: 0,
         project: input.project.to_string(),
@@ -693,9 +697,10 @@ pub async fn create_commit(
     validate_name("branch name", &body.branch)?;
 
     // The document must be a valid OKF model before it is stored: a repository that
-    // accepts invalid models cannot be gated meaningfully.
-    let bytes = serde_json::to_vec(&body.okf).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let root: okf::types::OkfRoot = serde_json::from_slice(&bytes)
+    // accepts invalid models cannot be gated meaningfully. The JSON is parsed directly into
+    // the typed document; the commit core then serialises it canonically, so the key order
+    // of the request body cannot influence the content address.
+    let root: okf::types::OkfRoot = serde_json::from_value(body.okf)
         .map_err(|e| ApiError::bad_request(format!("not an OKF document: {}", e)))?;
     let report = okf::validate::validate(&root);
     if !report.valid {
@@ -756,7 +761,6 @@ pub async fn create_commit(
             mechanism: state.auth.mechanism(),
             authorizer: state.auth.authorizer().unwrap_or(""),
             candidate: &root,
-            bytes: &bytes,
             import: None,
             acceptance: None,
             holder: body.holder.as_deref().unwrap_or(""),

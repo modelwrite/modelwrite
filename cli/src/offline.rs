@@ -84,7 +84,12 @@ pub fn run(db: &Path, command: Command) -> Result<Value, String> {
                     ));
                 }
             }
-            let okf_hash = store.put_blob(&bytes).map_err(map)?;
+            // Store the document in its one canonical form (summary re-derived, field order
+            // fixed), so the offline commit's content address is a function of content alone -
+            // the same address the store, the HTTP path and the binding path produce.
+            let okf_hash = store
+                .put_blob(&okf::hash::canonical_bytes(&root))
+                .map_err(map)?;
             let audit = audit_entry(&project, "commit.create", &branch, &message);
             let commit = commit_refusal_guard(
                 &store,
@@ -442,8 +447,9 @@ fn merge(
         }
     }
 
-    let bytes = serde_json::to_vec(&merged)
-        .map_err(|e| format!("the merged model could not be stored: {}", e))?;
+    // The merged document is stored in the one canonical form (summary re-derived, field
+    // order fixed), so an offline merge's content address matches every other path.
+    let bytes = okf::hash::canonical_bytes(&merged);
     let okf_hash = store.put_blob(&bytes).map_err(map)?;
     let touched = server::api::touched_elements(&ours, &merged);
     let parents = vec![ours_tip.clone(), theirs_tip.clone()];

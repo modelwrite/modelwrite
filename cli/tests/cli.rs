@@ -974,3 +974,228 @@ fn offline_lock_acquire_deduplicates_elements_and_requires_the_project() {
         "a repeated element must yield one lease"
     );
 }
+// ---------------------------------------------------------------------------
+// Cross-path content addressing: one document, one hash, every write path.
+// ---------------------------------------------------------------------------
+
+/// A small document the XMI binding round-trips losslessly (the exact shape its own
+/// round-trip harness proves) with a CORRECT derived summary, so the summary re-derivation
+/// is a no-op and what this test measures is the SERIALISATION ORDER of each path.
+fn cross_path_document() -> okf::types::OkfRoot {
+    use okf::types::{
+        Attribute, Element, Graph, GraphEdge, GraphNode, OkfRoot, StateMachine, Summary,
+    };
+    OkfRoot {
+        okf: "1.0".to_string(),
+        project: "Grinder".to_string(),
+        exported_at: String::new(),
+        summary: Summary {
+            blocks: 2,
+            requirements: 0,
+            interfaces: 0,
+            signals: 0,
+            activities: 0,
+            graph_nodes: 2,
+            graph_edges: 1,
+        },
+        structure: vec![
+            Element {
+                id: "block-grinder".to_string(),
+                name: "Grinder".to_string(),
+                kind: "block".to_string(),
+                stereotypes: vec!["Block".to_string()],
+                attributes: vec![
+                    Attribute {
+                        name: "motor".to_string(),
+                        attr_type: "Motor".to_string(),
+                        aggregation: "composite".to_string(),
+                        default: String::new(),
+                    },
+                    Attribute {
+                        name: "capacity".to_string(),
+                        attr_type: "Integer".to_string(),
+                        aggregation: "none".to_string(),
+                        default: "1".to_string(),
+                    },
+                ],
+                documentation: "Grinds coffee beans.".to_string(),
+            },
+            Element {
+                id: "block-motor".to_string(),
+                name: "Motor".to_string(),
+                kind: "block".to_string(),
+                stereotypes: vec!["Block".to_string()],
+                attributes: Vec::new(),
+                documentation: String::new(),
+            },
+        ],
+        interfaces: Vec::new(),
+        signals: Vec::new(),
+        requirements: Vec::new(),
+        state_machine: Some(StateMachine {
+            name: "stateMachine".to_string(),
+            regions: Vec::new(),
+        }),
+        activities: Vec::new(),
+        graph: Some(Graph {
+            nodes: vec![
+                GraphNode {
+                    id: "block-grinder".to_string(),
+                    kind: "block".to_string(),
+                    name: "Grinder".to_string(),
+                    stereotypes: vec!["Block".to_string()],
+                },
+                GraphNode {
+                    id: "block-motor".to_string(),
+                    kind: "block".to_string(),
+                    name: "Motor".to_string(),
+                    stereotypes: vec!["Block".to_string()],
+                },
+            ],
+            edges: vec![GraphEdge {
+                source: "block-grinder".to_string(),
+                target: "block-motor".to_string(),
+                kind: "dependency".to_string(),
+                label: "Satisfy".to_string(),
+            }],
+        }),
+        provenance: None,
+        references: Vec::new(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_same_document_commits_to_one_hash_through_every_path() {
+    let root = cross_path_document();
+    let expected = okf::hash::canonical_hash(&root);
+
+    // Path 1: the store commit — put_blob of struct-order bytes + commit_model.
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = server::store::sqlite::SqliteStore::open(&store_dir.path().join("mw.db")).unwrap();
+    store.create_project("cross-path", None).unwrap();
+    let store_hash = {
+        let bytes = serde_json::to_vec(&root).unwrap();
+        let okf_hash = store.put_blob(&bytes).unwrap();
+        store
+            .commit_model(
+                "cross-path",
+                "main",
+                &okf_hash,
+                "alex",
+                "store",
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .okf_hash
+    };
+
+    // Path 2: the capture/replay path — the HTTP JSON commit endpoint, which takes the
+    // document as a serde_json::Value and re-serialises it.
+    let http_dir = tempfile::tempdir().unwrap();
+    let router = server::app(server::AppState {
+        store: Arc::new(
+            server::store::sqlite::SqliteStore::open(&http_dir.path().join("mw.db")).unwrap(),
+        ),
+        evidence_dir: http_dir.path().to_path_buf(),
+        auth: server::auth::AuthConfig::Open,
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let url = format!("http://{}", addr);
+    let http_file = write_file(
+        http_dir.path(),
+        "http.json",
+        &serde_json::to_string(&root).unwrap(),
+    );
+    run_ok(&["--server", &url, "project", "create", "cross-path"]);
+    let http_commit = run_ok(&[
+        "--server",
+        &url,
+        "commit",
+        "cross-path",
+        "--branch",
+        "main",
+        "--message",
+        "http",
+        "--file",
+        http_file.to_str().unwrap(),
+    ]);
+    let http_hash = http_commit["okfHash"].as_str().unwrap().to_string();
+    serve.abort();
+    let _ = serve.await;
+
+    // Path 3: the offline CLI — commits the document read from a file.
+    let offline_dir = tempfile::tempdir().unwrap();
+    let offline_db = offline_dir.path().join("mw.db");
+    let offline_db = offline_db.to_str().unwrap();
+    let offline_file = write_file(
+        offline_dir.path(),
+        "offline.json",
+        &serde_json::to_string(&root).unwrap(),
+    );
+    run_ok(&["--db", offline_db, "project", "create", "cross-path"]);
+    let offline_commit = run_ok(&[
+        "--db",
+        offline_db,
+        "commit",
+        "cross-path",
+        "--branch",
+        "main",
+        "--message",
+        "offline",
+        "--file",
+        offline_file.to_str().unwrap(),
+    ]);
+    let offline_hash = offline_commit["okfHash"].as_str().unwrap().to_string();
+
+    // Path 4: a round trip through the binding — export to XMI and import back, then
+    // commit the re-imported document. The round trip is lossless, so the re-imported
+    // document is the same content and must hash identically.
+    let binding = server::binding_registry::resolve("sysml-v1-xmi", "2.4").unwrap();
+    let xmi = binding.export(&root).expect("the document must export");
+    let (round_tripped, _) = binding.import(&xmi).expect("the export must re-import");
+    assert!(
+        okf::diff::diff(&root, &round_tripped).equal,
+        "the binding must round-trip the document losslessly"
+    );
+    let binding_dir = tempfile::tempdir().unwrap();
+    let binding_store =
+        server::store::sqlite::SqliteStore::open(&binding_dir.path().join("mw.db")).unwrap();
+    binding_store.create_project("cross-path", None).unwrap();
+    let binding_hash = {
+        let bytes = serde_json::to_vec(&round_tripped).unwrap();
+        let okf_hash = binding_store.put_blob(&bytes).unwrap();
+        binding_store
+            .commit_model(
+                "cross-path",
+                "main",
+                &okf_hash,
+                "alex",
+                "binding",
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .okf_hash
+    };
+
+    assert_eq!(store_hash, expected, "the store commit drifted");
+    assert_eq!(
+        http_hash, expected,
+        "the capture/replay (HTTP) commit drifted"
+    );
+    assert_eq!(offline_hash, expected, "the offline CLI commit drifted");
+    assert_eq!(
+        binding_hash, expected,
+        "the binding round-trip commit drifted"
+    );
+    assert_eq!(http_hash, store_hash);
+    assert_eq!(offline_hash, store_hash);
+    assert_eq!(binding_hash, store_hash);
+}

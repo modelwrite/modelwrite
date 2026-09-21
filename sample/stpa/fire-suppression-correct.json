@@ -2,7 +2,15 @@
   "okf": "1.0",
   "project": "Fire Suppression Controller (correct)",
   "exportedAt": "2026-09-21T00:00:00Z",
-  "summary": {},
+  "summary": {
+    "blocks": 12,
+    "requirements": 1,
+    "interfaces": 0,
+    "signals": 2,
+    "activities": 0,
+    "graphNodes": 15,
+    "graphEdges": 14
+  },
   "structure": [
     {
       "id": "loss-1",
