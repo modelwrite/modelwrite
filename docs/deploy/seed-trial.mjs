@@ -1,10 +1,11 @@
 // Reproducible seed for the modelwrite trial baseline.
 //
-// Rebuilds the six seeded models (with cafe-stand's two branches and their
-// crossModelEdges) from a FRESH checkout of this repository, reading the model
-// sources directly from e2e/models/ and sample/corpus/. The commit hashes are
+// Rebuilds the seven seeded models (with cafe-stand's two branches and their
+// crossModelEdges, plus the defective fire-suppression STPA example) from a FRESH
+// checkout of this repository, reading the model sources directly from
+// e2e/models/, sample/corpus/ and sample/stpa/. The commit hashes are
 // content-addressed and deterministic, so this reproduces the exact baseline the
-// nightly reset restores - no captured snapshot needed.
+// hourly reset restores - no captured snapshot needed.
 //
 // Usage (against a running mw-server, e.g. a throwaway seed container):
 //   MW_BASE_URL=http://127.0.0.1:3199 MW_TOKEN=<token> node docs/deploy/seed-trial.mjs
@@ -34,6 +35,7 @@ const SOURCES = {
   'floor-robot': 'e2e/models/floor-robot.json',
   'microduck': 'e2e/models/microduck.json',
   'cafe-stand': 'e2e/models/cafe-stand.json',
+  'fire-suppression': 'sample/stpa/fire-suppression-defective.json',
 };
 
 async function post(url, body) {
@@ -45,7 +47,7 @@ async function post(url, body) {
 
 async function main() {
   const order = ['coffee-machine', 'sandwich-toaster', 'purchasing-terminal',
-                 'floor-robot', 'microduck', 'cafe-stand'];
+                 'floor-robot', 'microduck', 'fire-suppression', 'cafe-stand'];
   for (const p of order) {
     try { await post(BASE + '/projects', { name: p }); console.log('project', p); }
     catch (e) { if (!e.message.includes('409')) throw e; console.log('project exists', p); }
@@ -62,6 +64,7 @@ async function main() {
     'purchasing-terminal': await commit('purchasing-terminal', readModel(SOURCES['purchasing-terminal'])),
     'floor-robot': await commit('floor-robot', readModel(SOURCES['floor-robot'])),
     'microduck': await commit('microduck', readModel(SOURCES['microduck'])),
+    'fire-suppression': await commit('fire-suppression', readModel(SOURCES['fire-suppression'])),
   };
   console.log('hashes', JSON.stringify(hashes));
 

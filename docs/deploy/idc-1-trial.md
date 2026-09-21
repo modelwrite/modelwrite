@@ -21,11 +21,12 @@ intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 ## Source pinned
 
 - Repository: `https://github.com/modelwrite/modelwrite.git` (public)
-- Commit built from: `47efbf1035a8250e227c9cb2d703a14c1dddf730`
-  (`Workbench UX: health view, bulk-accept, branch fix, readable diagram, global search, accept-error`)
-- Image: `modelwrite/modelwrite:idc-1-trial` (id `50c8623ed6ac`, ~149 MB), built on the
+- Commit built from: `55f653ceaf2222c7314d818f2d72bbc27330bf72`
+  (`docs: STPA completeness is in progress, not deployed` on top of
+  `0b369b5 STPA/STAMP completeness check (T1-T3)`)
+- Image: `modelwrite/modelwrite:idc-1-trial` (id `d767a42f08f7`, ~149 MB), built on the
   host from the public repo — no registry pull, no registry credentials.
-- Previous (revert): image `73211ddac82b`, commit `195cbf84090a68d994900baa2b3acae7ba998479`.
+- Previous (revert): image `50c8623ed6ac`, commit `47efbf1035a8250e227c9cb2d703a14c1dddf730`.
 
 > **Why not the v0.2.0 tag.** The tag predates the S2 crossModelEdges feature
 > (`engine/okf/src/types.rs`, `server/src/composition.rs`). The trial's variant-impact
@@ -72,8 +73,9 @@ bounded by the hourly reset below, which is now load-bearing.
 
 ## Seeded content
 
-Six projects — `coffee-machine`, `sandwich-toaster`, `purchasing-terminal`,
-`floor-robot`, `microduck`, `cafe-stand`. `cafe-stand` has two branches:
+Seven projects — `coffee-machine`, `sandwich-toaster`, `purchasing-terminal`,
+`floor-robot`, `microduck`, `cafe-stand`, and `fire-suppression` (the defective
+STPA example). `cafe-stand` has two branches:
 
 - `main`: floor-care reference to `floor-robot`, `crossModelEdges`
   `[{"from":"req-floor-clear","relation":"satisfiedBy","to":"collector"}]`
@@ -82,6 +84,13 @@ Six projects — `coffee-machine`, `sandwich-toaster`, `purchasing-terminal`,
   `[{"from":"req-floor-clear","relation":"satisfiedBy","to":"gripper-arm"}]`
 
 All four platform references resolve at their pinned revisions.
+
+`fire-suppression` is the defective STPA/STAMP example
+(`sample/stpa/fire-suppression-defective.json`): one controller, one controlled
+process, one control action, no feedback — so the STPA completeness screen
+(`/ui/projects/fire-suppression/stpa`) reports five findings (1 unanalysed control
+action, 1 control loop with no feedback, 1 hazard with no constraint, 1 constraint
+reaching no element, 1 UCA with no loss scenario).
 
 ## Ingress (trial.modelwrite.org moved to idc-1)
 
@@ -99,7 +108,7 @@ The hostname was moved from a workstation cloudflared tunnel to idc-1's hatch tu
   `~/.cloudflared/modelwrite-trial.yml` no longer claims the hostname.
 
 Verified from the workstation: `https://trial.modelwrite.org/health` returns
-`{"authMode":"open","status":"ok"}` and `/projects` returns the six models with no token,
+`{"authMode":"open","status":"ok"}` and `/projects` returns the seven models with no token,
 proving it is idc-1 (the local 8080 trial was left unchanged).
 
 ## Hourly reset (sandbox)
@@ -122,7 +131,7 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
   1. builds a FRESH database off to the side by replaying `/opt/modelwrite/seed/manifest.json`
      into a throwaway seed container (`seed-from-manifest.py`), verifying every reproduced
      commit hash against the captured `expectedHash` - the live service keeps serving;
-  2. verifies the six models are present and that cafe-stand's four references resolve;
+  2. verifies the seven models are present and that cafe-stand's four references resolve;
   3. stops `modelwrite.service` only at the very end, backs up the outgoing DB to
      `/opt/modelwrite/backups/<date>T<time>.db` (keeps the last 48), swaps the fresh DB in,
      restarts, and logs. On any failure the service is restarted on the last good database
@@ -176,7 +185,7 @@ systemctl status modelwrite-trial-verify.service
   `capture-seed.py`; replay with `seed-from-manifest.py`.
 - Reproducible from this repository: `docs/deploy/seed-trial.mjs` reads
   `e2e/models/*.json` + the coffee-machine corpus straight from a checkout and rebuilds
-  the same six models with identical commit hashes (verified). The same logic also runs
+  the same seven models with identical commit hashes (verified). The same logic also runs
   on the host as `/opt/modelwrite/seed/seed.mjs` (with `models/` copies) - see
   `/opt/modelwrite/seed/README.md`.
 
@@ -204,4 +213,4 @@ different `PORT`, `DATA_DIR`, seed-container port and `SERVICE` name.
 The trial is intentionally OPEN (no token): a browser click on
 https://trial.modelwrite.org renders the workbench directly. This is by decision, and it
 is bounded by the hourly reset above, which is now load-bearing (the reset and its
-backup of the outgoing DB return the trial to the six seeded models).
+backup of the outgoing DB return the trial to the seven seeded models).
