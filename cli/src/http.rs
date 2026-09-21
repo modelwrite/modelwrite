@@ -4,17 +4,38 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use crate::analytics::TABLES;
 use crate::Command;
 
-/// One HTTP response: the status code and the raw body bytes.
+/// One HTTP response: the status code, the raw body bytes, and the response headers. The
+/// tables endpoint carries the row total and the page cursor in headers for the CSV and
+/// NDJSON formats, where the JSON envelope's fields have no place to live.
 struct Response {
     status: u16,
     body: Vec<u8>,
+    headers: Vec<(String, String)>,
+}
+
+impl Response {
+    /// A response header by its lower-cased wire name.
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// The identity and row total of one table for one commit or branch: what
+/// GET /analytics/{project}/tables/{table} reports in its JSON envelope.
+struct TableSummary {
+    commit: String,
+    total: usize,
 }
 
 /// A plain-HTTP client for one server, with an optional bearer token.
@@ -37,8 +58,8 @@ pub fn run(url: &str, token: Option<&str>, command: Command) -> Result<Value, St
     client.execute(command)
 }
 
-/// Build a planned Package 3 analytics URL with the optional commit/branch query selectors.
-fn analytics_path(base: &str, commit: Option<String>, branch: Option<String>) -> String {
+/// Build a Package 3 analytics URL with the optional commit/branch query selectors.
+fn analytics_path(base: &str, commit: Option<&str>, branch: Option<&str>) -> String {
     let mut params = Vec::new();
     if let Some(c) = commit {
         params.push(format!("commit={}", c));
@@ -51,6 +72,59 @@ fn analytics_path(base: &str, commit: Option<String>, branch: Option<String>) ->
     } else {
         format!("{}?{}", base, params.join("&"))
     }
+}
+
+/// The real Package 3 tables route: GET /analytics/{project}/tables/{table}. The table is a
+/// PATH segment, not a query parameter: the request this client used to build
+/// (/analytics/{project}/tables?commit=...) matched no route at all and was answered 404,
+/// so no table row could be fetched over --server.
+fn table_path(project: &str, table: &str, commit: Option<&str>, branch: Option<&str>) -> String {
+    analytics_path(
+        &format!("/analytics/{}/tables/{}", project, table),
+        commit,
+        branch,
+    )
+}
+
+/// Append one query parameter to a path that may already carry a query string.
+fn with_param(path: String, param: &str) -> String {
+    if path.contains('?') {
+        format!("{}&{}", path, param)
+    } else {
+        format!("{}?{}", path, param)
+    }
+}
+
+/// The error text of a non-success response: the server's own "error" field when it sent
+/// one, otherwise the status alone. Never echoes a token.
+fn failure_message(resp: &Response) -> String {
+    let message = match serde_json::from_slice::<Value>(&resp.body) {
+        Ok(value) => value
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| value.to_string()),
+        Err(_) => format!("the server answered status {}", resp.status),
+    };
+    format!("{} (status {})", message, resp.status)
+}
+
+/// The page size the --server export pages a table at: the server's own MAX_LIMIT, so a
+/// routine table is one request and only a genuinely large table walks the cursor.
+const EXPORT_PAGE: usize = 1000;
+
+/// The metrics and trend routes answer the JSON wire shape and nothing else: there is no CSV
+/// envelope on the wire, and building one here would be a second serialiser to keep in step
+/// with the server. Refuse a format the route cannot serve, naming the transport that can,
+/// rather than quietly answering JSON to a caller who asked for CSV.
+fn require_json_format(format: &str) -> Result<(), String> {
+    if format == "json" {
+        return Ok(());
+    }
+    Err(format!(
+        "analytics metrics and trend over --server serve the JSON wire shape only; --format {} is not available over --server - use --db <path> for csv, or drop --format for the JSON rows",
+        format
+    ))
 }
 
 impl Client {
@@ -231,9 +305,9 @@ impl Client {
                 let resp = self.request("GET", &path, None)?;
                 self.handle(resp, 200)
             }
-            // The analytics group over --server reaches the Package 3 REST surface. Those
-            // endpoints are not built yet, so these calls are stubs against the planned URL
-            // shape: they build the right request and will answer once the REST package lands.
+            // The analytics group over --server reaches the real Package 3 REST surface:
+            // GET /analytics/schema, GET /analytics/{project}/tables/{table} (the table is a
+            // path segment), GET /analytics/{project}/metrics and GET /analytics/{project}/trend.
             Command::AnalyticsSchema => {
                 let resp = self.request("GET", "/analytics/schema", None)?;
                 self.handle(resp, 200)
@@ -243,21 +317,48 @@ impl Client {
                 commit,
                 branch,
             } => {
-                let path = analytics_path(&format!("/analytics/{}/tables", project), commit, branch);
-                let resp = self.request("GET", &path, None)?;
-                self.handle(resp, 200)
+                // The route is PER TABLE, so the summary the --db path prints is assembled
+                // from one cheap page per table: the envelope's total is the row count the
+                // offline projection computes for the same commit, and its commit is the
+                // resolved tip, so both transports print identical bytes.
+                let commit = commit.as_deref();
+                let branch = branch.as_deref();
+                let mut resolved: Option<String> = None;
+                let mut tables = Vec::with_capacity(TABLES.len());
+                for &(name, _) in TABLES {
+                    let summary = self.table_summary(&project, name, commit, branch)?;
+                    if resolved.is_none() {
+                        resolved = Some(summary.commit);
+                    }
+                    tables.push(json!({ "name": name, "rowCount": summary.total }));
+                }
+                Ok(json!({
+                    "schemaVersion": crate::analytics::SCHEMA_VERSION,
+                    "project": project,
+                    "commit": resolved.unwrap_or_default(),
+                    "tables": tables,
+                }))
             }
-            Command::AnalyticsExport { .. } => Err(
-                "analytics export over --server is not implemented: the Package 3 REST endpoints do not exist yet; use --db <path> for a full export"
-                    .to_string(),
-            ),
+            Command::AnalyticsExport {
+                project,
+                commit,
+                branch,
+                all_commits,
+                format,
+                out,
+            } => self.export(project, commit, branch, all_commits, format, out),
             Command::AnalyticsMetrics {
                 project,
                 commit,
                 branch,
-                ..
+                format,
             } => {
-                let path = analytics_path(&format!("/analytics/{}/metrics", project), commit, branch);
+                require_json_format(&format)?;
+                let path = analytics_path(
+                    &format!("/analytics/{}/metrics", project),
+                    commit.as_deref(),
+                    branch.as_deref(),
+                );
                 let resp = self.request("GET", &path, None)?;
                 self.handle(resp, 200)
             }
@@ -267,8 +368,9 @@ impl Client {
                 branch,
                 from,
                 to,
-                ..
+                format,
             } => {
+                require_json_format(&format)?;
                 let mut params = vec![format!("metric={}", metric), format!("branch={}", branch)];
                 if let Some(f) = &from {
                     params.push(format!("from={}", f));
@@ -281,6 +383,189 @@ impl Client {
                 self.handle(resp, 200)
             }
         }
+    }
+
+    /// The identity and row total of one table, one page, capped at one row: the JSON
+    /// envelope reports the resolved commit and the total across every page.
+    fn table_summary(
+        &self,
+        project: &str,
+        table: &str,
+        commit: Option<&str>,
+        branch: Option<&str>,
+    ) -> Result<TableSummary, String> {
+        let path = with_param(table_path(project, table, commit, branch), "limit=1");
+        let resp = self.request("GET", &path, None)?;
+        let value = self.handle(resp, 200)?;
+        Ok(TableSummary {
+            commit: value
+                .get("commit")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            total: value.get("total").and_then(Value::as_u64).unwrap_or(0) as usize,
+        })
+    }
+
+    /// One NDJSON page of one table for one commit. The rows are the schema's at-rest
+    /// snake_case - exactly the shape the --db NDJSON export writes - and the cursor rides in
+    /// the X-MW-Next-Cursor header, because the NDJSON body carries no envelope to hold it.
+    fn table_ndjson_page(
+        &self,
+        project: &str,
+        table: &str,
+        commit: &str,
+        cursor: Option<&str>,
+    ) -> Result<(Vec<Value>, Option<String>), String> {
+        let mut path = with_param(
+            table_path(project, table, Some(commit), None),
+            &format!("format=ndjson&limit={}", EXPORT_PAGE),
+        );
+        if let Some(cursor) = cursor {
+            path = with_param(path, &format!("cursor={}", cursor));
+        }
+        let resp = self.request("GET", &path, None)?;
+        if resp.status != 200 {
+            return Err(failure_message(&resp));
+        }
+        let next = resp.header("x-mw-next-cursor").map(str::to_string);
+        let mut rows = Vec::new();
+        for line in resp.body.split(|b| *b == b'\n') {
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            rows.push(
+                serde_json::from_slice(line)
+                    .map_err(|e| format!("the server returned a row that is not JSON: {}", e))?,
+            );
+        }
+        Ok((rows, next))
+    }
+
+    /// Every row of one table for one commit, paging on the cursor to completion.
+    fn table_rows(&self, project: &str, table: &str, commit: &str) -> Result<Vec<Value>, String> {
+        let mut rows = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let (mut page, next) =
+                self.table_ndjson_page(project, table, commit, cursor.as_deref())?;
+            rows.append(&mut page);
+            match next {
+                Some(next) => cursor = Some(next),
+                None => return Ok(rows),
+            }
+        }
+    }
+
+    /// The CLI --server ROW-EXPORT path: read every table of every selected commit over the
+    /// real REST routes and write the same tree the --db path writes, through the same
+    /// serialisers, so the two exports are byte-identical files and a pipeline can switch
+    /// transports without changing anything else.
+    fn export(
+        &self,
+        project: String,
+        commit: Option<String>,
+        branch: Option<String>,
+        all_commits: bool,
+        format: String,
+        out: PathBuf,
+    ) -> Result<Value, String> {
+        if !matches!(format.as_str(), "csv" | "ndjson" | "parquet") {
+            return Err("analytics export --format must be csv, ndjson or parquet".to_string());
+        }
+        let commits =
+            self.resolve_commits(&project, commit.as_deref(), branch.as_deref(), all_commits)?;
+        if commits.is_empty() {
+            return Err(format!("no commits to export for project {}", project));
+        }
+
+        let mut per_commit: Vec<(String, Vec<crate::analytics::Table>)> = Vec::new();
+        for hash in &commits {
+            let mut tables = Vec::with_capacity(TABLES.len());
+            for &(name, columns) in TABLES {
+                tables.push(crate::analytics::Table {
+                    name,
+                    columns,
+                    rows: self.table_rows(&project, name, hash)?,
+                });
+            }
+            per_commit.push((hash.clone(), tables));
+        }
+
+        let files = crate::analytics::write_export(&format, &out, &project, &per_commit)?;
+        let tables: Vec<Value> = files
+            .iter()
+            .map(|(name, rows)| json!({ "name": name, "rowCount": rows }))
+            .collect();
+        Ok(json!({
+            "schemaVersion": crate::analytics::SCHEMA_VERSION,
+            "project": project,
+            "format": format,
+            "out": out,
+            "tables": tables,
+        }))
+    }
+
+    /// The commits an export covers, resolved exactly as the --db path resolves them: an
+    /// explicit commit is itself; --all-commits is every commit of every branch,
+    /// deduplicated and sorted by hash; otherwise every commit on the branch (default
+    /// "main"), in the order the server lists them (tip order).
+    fn resolve_commits(
+        &self,
+        project: &str,
+        commit: Option<&str>,
+        branch: Option<&str>,
+        all_commits: bool,
+    ) -> Result<Vec<String>, String> {
+        if let Some(hash) = commit {
+            return Ok(vec![hash.to_string()]);
+        }
+        if all_commits {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut out = Vec::new();
+            for name in self.branch_names(project)? {
+                for hash in self.commit_hashes(project, &name)? {
+                    if seen.insert(hash.clone()) {
+                        out.push(hash);
+                    }
+                }
+            }
+            out.sort();
+            return Ok(out);
+        }
+        self.commit_hashes(project, branch.unwrap_or("main"))
+    }
+
+    /// The branch names of one project.
+    fn branch_names(&self, project: &str) -> Result<Vec<String>, String> {
+        let path = format!("/projects/{}/branches", project);
+        let resp = self.request("GET", &path, None)?;
+        let value = self.handle(resp, 200)?;
+        Ok(value
+            .as_array()
+            .map(|branches| {
+                branches
+                    .iter()
+                    .filter_map(|b| b.get("name").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// The commit hashes on one branch, tip first, as the commits route returns them.
+    fn commit_hashes(&self, project: &str, branch: &str) -> Result<Vec<String>, String> {
+        let path = format!("/projects/{}/commits?branch={}", project, branch);
+        let resp = self.request("GET", &path, None)?;
+        let value = self.handle(resp, 200)?;
+        Ok(value
+            .as_array()
+            .map(|commits| {
+                commits
+                    .iter()
+                    .filter_map(|c| c.get("hash").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     fn request(&self, method: &str, path: &str, body: Option<Vec<u8>>) -> Result<Response, String> {
@@ -353,16 +638,7 @@ impl Client {
             return serde_json::from_slice(&resp.body)
                 .map_err(|_| "the server returned a non-JSON success response".to_string());
         }
-        // Never echo a token: the body comes from the server, which never returns one.
-        let message = match serde_json::from_slice::<Value>(&resp.body) {
-            Ok(value) => value
-                .get("error")
-                .and_then(|e| e.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| value.to_string()),
-            Err(_) => format!("the server answered status {}", resp.status),
-        };
-        Err(format!("{} (status {})", message, resp.status))
+        Err(failure_message(&resp))
     }
 }
 
@@ -392,6 +668,7 @@ fn parse_response(raw: &[u8]) -> Result<Response, String> {
 
     let mut content_length: Option<usize> = None;
     let mut chunked = false;
+    let mut headers: Vec<(String, String)> = Vec::new();
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
             let name = name.trim().to_ascii_lowercase();
@@ -401,6 +678,7 @@ fn parse_response(raw: &[u8]) -> Result<Response, String> {
                 "transfer-encoding" => chunked = value.to_ascii_lowercase().contains("chunked"),
                 _ => {}
             }
+            headers.push((name, value.to_string()));
         }
     }
 
@@ -411,7 +689,11 @@ fn parse_response(raw: &[u8]) -> Result<Response, String> {
     } else {
         rest.to_vec()
     };
-    Ok(Response { status, body })
+    Ok(Response {
+        status,
+        body,
+        headers,
+    })
 }
 
 fn parse_status(line: &str) -> Result<u16, String> {
@@ -481,6 +763,104 @@ mod tests {
             err.contains("did not answer"),
             "expected a clear timeout message, got: {}",
             err
+        );
+    }
+
+    #[test]
+    fn the_tables_url_carries_the_table_as_a_path_segment() {
+        assert_eq!(
+            table_path("coffee", "elements", Some("abc"), None),
+            "/analytics/coffee/tables/elements?commit=abc"
+        );
+        assert_eq!(
+            table_path("coffee", "import_losses", None, Some("main")),
+            "/analytics/coffee/tables/import_losses?branch=main"
+        );
+        assert_eq!(
+            table_path("coffee", "metrics", None, None),
+            "/analytics/coffee/tables/metrics"
+        );
+        // The defect this guards: the segment-less route matches nothing on the server.
+        assert!(!table_path("coffee", "metrics", Some("abc"), None)
+            .starts_with("/analytics/coffee/tables?"));
+        assert_eq!(
+            with_param(
+                table_path("coffee", "elements", Some("abc"), None),
+                "limit=1"
+            ),
+            "/analytics/coffee/tables/elements?commit=abc&limit=1"
+        );
+        assert_eq!(
+            with_param("/analytics/coffee/tables/elements".to_string(), "limit=1"),
+            "/analytics/coffee/tables/elements?limit=1"
+        );
+    }
+
+    /// The export pages a table on the X-MW-Next-Cursor header, because an NDJSON body has no
+    /// envelope to carry the cursor. A canned two-page server proves the client follows it to
+    /// completion and that the request is the real per-table route.
+    #[test]
+    fn a_cursored_ndjson_table_is_paged_to_completion() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let pages = [(Some("1"), "{\"n\":1}\n"), (None, "{\"n\":2}\n")];
+            let mut requests = Vec::new();
+            for (cursor, body) in pages {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut chunk = [0u8; 1024];
+                    let n = stream.read(&mut chunk).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..n]);
+                    if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                requests.push(String::from_utf8_lossy(&request).to_string());
+                let cursor_header = match cursor {
+                    Some(cursor) => format!("X-MW-Next-Cursor: {}\r\n", cursor),
+                    None => String::new(),
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{}",
+                    body.len(),
+                    cursor_header,
+                    body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+            requests
+        });
+
+        let client = Client {
+            host: "127.0.0.1".to_string(),
+            port: addr.port(),
+            token: None,
+            connect_timeout: Duration::from_secs(1),
+            io_timeout: Duration::from_secs(2),
+        };
+        let rows = client
+            .table_rows("coffee", "elements", "abc")
+            .expect("both pages must be read");
+        assert_eq!(rows, vec![json!({ "n": 1 }), json!({ "n": 2 })]);
+
+        let requests = server.join().unwrap();
+        let lines: Vec<&str> = requests
+            .iter()
+            .map(|r| r.lines().next().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "GET /analytics/coffee/tables/elements?commit=abc&format=ndjson&limit=1000 HTTP/1.1",
+                "GET /analytics/coffee/tables/elements?commit=abc&format=ndjson&limit=1000&cursor=1 HTTP/1.1",
+            ],
+            "the client must address the real per-table route and follow the cursor"
         );
     }
 }

@@ -1,6 +1,7 @@
 {
   "cases": [
     {
+      "cliServerExportFilesIdenticalToCliDb": true,
       "commit": "5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536",
       "everyTableIdentical": true,
       "name": "sample-corpus",
@@ -11,6 +12,11 @@
         "commits": {
           "byTransport": {
             "cliDb": {
+              "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "cliServer": {
               "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
               "identicalToRest": true,
               "rows": 1
@@ -35,6 +41,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -44,6 +51,11 @@
         "elements": {
           "byTransport": {
             "cliDb": {
+              "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+              "identicalToRest": true,
+              "rows": 58
+            },
+            "cliServer": {
               "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
               "identicalToRest": true,
               "rows": 58
@@ -68,6 +80,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -77,6 +90,11 @@
         "import_losses": {
           "byTransport": {
             "cliDb": {
+              "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identicalToRest": true,
+              "rows": 0
+            },
+            "cliServer": {
               "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
               "identicalToRest": true,
               "rows": 0
@@ -101,6 +119,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -110,6 +129,11 @@
         "metric_definitions": {
           "byTransport": {
             "cliDb": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
               "identicalToRest": true,
               "rows": 25
@@ -134,6 +158,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -143,6 +168,11 @@
         "metrics": {
           "byTransport": {
             "cliDb": {
+              "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
               "identicalToRest": true,
               "rows": 25
@@ -167,6 +197,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -176,6 +207,11 @@
         "projects": {
           "byTransport": {
             "cliDb": {
+              "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "cliServer": {
               "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
               "identicalToRest": true,
               "rows": 1
@@ -200,6 +236,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -209,6 +246,11 @@
         "relationships": {
           "byTransport": {
             "cliDb": {
+              "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+              "identicalToRest": true,
+              "rows": 165
+            },
+            "cliServer": {
               "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
               "identicalToRest": true,
               "rows": 165
@@ -233,6 +275,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -242,6 +285,11 @@
         "requirements": {
           "byTransport": {
             "cliDb": {
+              "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
               "identicalToRest": true,
               "rows": 25
@@ -266,6 +314,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -275,6 +324,11 @@
         "trace_links": {
           "byTransport": {
             "cliDb": {
+              "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "cliServer": {
               "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
               "identicalToRest": true,
               "rows": 24
@@ -299,6 +353,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -308,6 +363,7 @@
       }
     },
     {
+      "cliServerExportFilesIdenticalToCliDb": true,
       "commit": "4fae507737ff47d219b9b7c7d64cb39d6ca7ae0acff9f542be4540c03fb3b042",
       "everyTableIdentical": true,
       "name": "large-import",
@@ -318,6 +374,11 @@
         "commits": {
           "byTransport": {
             "cliDb": {
+              "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "cliServer": {
               "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
               "identicalToRest": true,
               "rows": 1
@@ -342,6 +403,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -351,6 +413,11 @@
         "elements": {
           "byTransport": {
             "cliDb": {
+              "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+              "identicalToRest": true,
+              "rows": 41
+            },
+            "cliServer": {
               "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
               "identicalToRest": true,
               "rows": 41
@@ -375,6 +442,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -384,6 +452,11 @@
         "import_losses": {
           "byTransport": {
             "cliDb": {
+              "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+              "identicalToRest": true,
+              "rows": 274
+            },
+            "cliServer": {
               "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
               "identicalToRest": true,
               "rows": 274
@@ -408,6 +481,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -417,6 +491,11 @@
         "metric_definitions": {
           "byTransport": {
             "cliDb": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
               "identicalToRest": true,
               "rows": 25
@@ -441,6 +520,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -450,6 +530,11 @@
         "metrics": {
           "byTransport": {
             "cliDb": {
+              "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
               "identicalToRest": true,
               "rows": 25
@@ -474,6 +559,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -483,6 +569,11 @@
         "projects": {
           "byTransport": {
             "cliDb": {
+              "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "cliServer": {
               "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
               "identicalToRest": true,
               "rows": 1
@@ -507,6 +598,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -516,6 +608,11 @@
         "relationships": {
           "byTransport": {
             "cliDb": {
+              "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+              "identicalToRest": true,
+              "rows": 95
+            },
+            "cliServer": {
               "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
               "identicalToRest": true,
               "rows": 95
@@ -540,6 +637,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -549,6 +647,11 @@
         "requirements": {
           "byTransport": {
             "cliDb": {
+              "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "cliServer": {
               "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
               "identicalToRest": true,
               "rows": 25
@@ -573,6 +676,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -582,6 +686,11 @@
         "trace_links": {
           "byTransport": {
             "cliDb": {
+              "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "cliServer": {
               "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
               "identicalToRest": true,
               "rows": 24
@@ -606,6 +715,7 @@
           "identical": true,
           "orderMatchesRest": {
             "cliDb": true,
+            "cliServer": true,
             "mcp": true,
             "python": true,
             "rest": true
@@ -616,7 +726,12 @@
     }
   ],
   "cliServer": {
-    "note": "The CLI in --server mode is a set of planned routes. schema/metrics/trend match the real REST routes and return rows; there is no working route for arbitrary table rows. This is recorded, not fixed.",
+    "metricsAndTrend": {
+      "csvOverServerRefused": true,
+      "csvOverServerStderr": "error: analytics metrics and trend over --server serve the JSON wire shape only; --format csv is not available over --server - use --db <path> for csv, or drop --format for the JSON rows",
+      "jsonWireShape": "the metrics and trend routes answer the REST wire rows (camelCase keys) and the CLI --server path passes them through; the CLI --db path renders the same rows in snake_case. The ROWS agree after key normalisation (rowsIdenticalToRestMetrics above); the key casing does not, and this record does not claim it does."
+    },
+    "note": "The CLI in --server mode addresses the real Package 3 REST routes: GET /analytics/schema, GET /analytics/{project}/tables/{table} (the table is a PATH segment), GET /analytics/{project}/metrics and GET /analytics/{project}/trend. It is a REST client, not an independent projection: its rows are REST rows. Its row transport is the cliServer entry in each case's tables above, read from mw --server analytics export, and its export files are byte-identical to the CLI --db files for the same commit.",
     "routes": [
       {
         "cliUrl": "/analytics/schema",
@@ -645,26 +760,37 @@
         "serverRoute": "GET /analytics/:project/trend"
       },
       {
-        "cliUrl": "/analytics/coffee-sample/tables?commit=5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536",
+        "cliUrl": "/analytics/coffee-sample/tables/{table}?commit=5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536 (the CLI asks once for each of the 9 schema tables and reads the envelope's total)",
         "command": "mw --server <url> analytics tables <project> --commit <hash>",
-        "divergence": "the CLI omits the /{table} segment (cli/src/http.rs:246), so the request is a 404 against the real route (server/src/lib.rs:310) and no table rows can be fetched in --server mode",
-        "exitCode": 1,
-        "matches": false,
-        "outcome": "error",
-        "serverRoute": "GET /analytics/:project/tables/:table",
-        "stderr": "error: the server answered status 404 (status 404)"
+        "exitCode": 0,
+        "identicalToDbSummary": true,
+        "matches": true,
+        "outcome": "summary",
+        "rowCountsAreTheRestTotals": true,
+        "serverRoute": "GET /analytics/:project/tables/:table"
       },
       {
-        "cliUrl": "(no request: refused before the network)",
+        "cliUrl": "/analytics/coffee-sample/tables/{table}?commit=5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536&format=ndjson&limit=<server maximum> (one request per table, followed on the X-MW-Next-Cursor header when a table exceeds one page)",
         "command": "mw --server <url> analytics export <project> --commit <hash> --format ndjson --out <dir>",
-        "divergence": "the CLI refuses analytics export over --server by construction (cli/src/http.rs:250-253); --db is the CLI row-export path",
-        "exitCode": 1,
-        "matches": false,
-        "outcome": "refused",
-        "serverRoute": "GET /analytics/:project/tables/:table (one per table)",
-        "stderr": "error: analytics export over --server is not implemented: the Package 3 REST endpoints do not exist yet; use --db <path> for a full export"
+        "exitCode": 0,
+        "filesByteIdenticalToCliDb": true,
+        "formats": [
+          "ndjson",
+          "csv",
+          "parquet"
+        ],
+        "matches": true,
+        "outcome": "files",
+        "serverRoute": "GET /analytics/:project/tables/:table"
       }
-    ]
+    ],
+    "rowTransport": {
+      "casesCompared": 2,
+      "everyTableIdenticalToRest": true,
+      "exportFilesByteIdenticalToCliDb": true,
+      "pagination": "no table of either fixture exceeds the CLI export page (the largest is the large import's import_losses at 274 rows), so no cursor was followed here; the page loop and the X-MW-Next-Cursor header are covered by the client's own test in cli/src/http.rs.",
+      "tablesPerCase": 9
+    }
   },
   "deliberateFailure": {
     "case": "sample-corpus",
@@ -678,22 +804,22 @@
     ]
   },
   "generator": "server/tests/equivalence.rs (analytics interfaces brief, package 7)",
-  "independence": "Only REST and CLI --db are independent implementations; MCP and Python both read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying four independent implementations.",
+  "independence": "Only REST and CLI --db are independent implementations; the CLI --server, MCP and Python all read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying that its five wire paths are five independent implementations.",
   "knownTestDefects": [
     {
       "component": "engine/mcp/tests/repository.rs",
       "detail": "the MCP contract tests mock the wire with snake_case row fixtures (metric_id, basis_element_count, ...) while the live REST wire is camelCase, and assert that snake_case. The mock never meets the real server, so the assertions pass against a shape no transport produces. This record does NOT use that mock: it drives the live repo.table path over HTTP (Repository::configured), so its MCP rows are the real camelCase wire, normalised explicitly. The stale fixture is a defect in the MCP test suite, reported here rather than relied on or fixed (engine/ is outside this slice)."
     }
   ],
-  "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI --db NDJSON export are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
+  "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI NDJSON exports (--db and --server) are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
   "notRun": [
     {
-      "item": "the 36 MB Open-MBEE TMT XMI through the four transports",
-      "reason": "It is ~190x larger than the fixtures used here, AND server/tests/analytics_tmt.rs already records that the imported model does not pass the commit validator (two requirements with an empty reqId), so it cannot be committed and therefore cannot be read through any committed-model transport."
+      "item": "the 36 MB Open-MBEE TMT XMI through every transport",
+      "reason": "IMPRACTICAL FOR THIS RECORD, and not for the reason an earlier record gave. It IS committable: server/tests/tmt_import.rs::the_36mb_tmt_model_commits_end_to_end_after_accepting_its_losses imports the artifact (36,158,244 bytes, retained under blob hash 76e5c008df30906edeb337348ac1afb84b1468e688689759d28ca1feeaba5a3e), is refused as Blocking on 48,553 losses, accepts them through the same acceptance core the accept endpoint calls, and commits a model of 362 elements / 633 relationships / 7 requirements with provenance naming the artifact hash and 47,728 accepted losses (commit b715131f737eb65ae20f70f0000eb8113acddd0083bc460ce5aff7190c7e0aef). The empty reqId that the old record cited is a named WARNING, not an error (engine/okf/src/validate.rs), so it never blocked the commit. What is impractical is doing that import, on a 36 MB fixture ~190x larger than the ones here, and then reading all nine tables through every transport: it is time, not impossibility."
     },
     {
-      "item": "CLI --server table rows",
-      "reason": "there is no working CLI --server route for arbitrary table rows: analytics tables is a 404 (missing /{table} segment) and analytics export refuses --server. The CLI row transport exercised here is --db. The route divergence is recorded under cliServer rather than papered over."
+      "item": "filters (equality column filters on the tables route)",
+      "reason": "the REST route supports non-reserved query parameters as equality filters on string columns, and the CLI --server row path does not expose a filter flag, so no filter was exercised through the CLI. This record does not claim otherwise."
     }
   ],
   "numberNormalisation": "Integral JSON numbers are collapsed to integers before comparison, so the Python bindings Arrow float64 representation of metrics.value (15.0) equals the REST integer (15). Non-integral numbers are compared as JSON numbers. The ROWS are otherwise compared in full, wall-clock columns included.",
@@ -713,6 +839,10 @@
     "cliDb": {
       "implementation": "cli/src/analytics.rs (a separate Rust projection that mirrors the server one), NDJSON export",
       "independentProjection": true
+    },
+    "cliServer": {
+      "implementation": "cli/src/http.rs over GET /analytics/{project}/tables/{table}, NDJSON and CSV - the CLI's other transport, a REST client",
+      "independentProjection": false
     },
     "mcp": {
       "implementation": "engine/mcp repo.table, a pass-through of the REST JSON over the real HTTP transport",

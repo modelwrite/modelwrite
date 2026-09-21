@@ -5,26 +5,29 @@
 //! For the committed sample corpus and for one large-but-manageable real import it
 //! reads EVERY mw-analytics-schema@1 table through
 //!
-//!   - REST        GET /analytics/{project}/tables/{table}   (paged to completion)
-//!   - CLI --db    mw --db <db> analytics export ... --format ndjson
-//!   - MCP         repo.table paged to completion, over the real HTTP transport
-//!   - Python      modelwrite.analytics.tables(), a thin REST client
+//!   - REST          GET /analytics/{project}/tables/{table}, paged to completion
+//!   - CLI --db      mw --db <db> analytics export ... --format ndjson
+//!   - CLI --server  the same export through the CLI's own HTTP client, plus analytics tables compared with --db
+//!   - MCP           repo.table paged to completion, over the real HTTP transport
+//!   - Python        modelwrite.analytics.tables(), a thin REST client
 //!
 //! and asserts the rows are identical. It then writes a DETERMINISTIC record to the
 //! path in MW_EQUIVALENCE_EVIDENCE (docs/evidence/analytics-transport-equivalence.json
 //! in CI), in the same regenerate-and-diff style as the mw-gate evidence records.
 //!
 //! Honesty notes recorded in the record itself:
-//!   - MCP and Python are NOT independent implementations: both call the same REST
-//!     endpoints. Only REST and CLI --db are separate Rust projections of the model.
-//!   - The CLI in --server mode cannot fetch arbitrary table rows at all: its
-//!     analytics tables route omits the /{table} segment (a 404 against the real
-//!     route), and analytics export refuses --server by construction. This test
-//!     probes and RECORDS that divergence rather than papering over it.
-//!   - The 36 MB TMT import is deliberately not read through all four transports: it
-//!     is ~190x larger than any other fixture AND, as server/tests/analytics_tmt.rs
-//!     records, it does not pass the commit validator, so it cannot be committed and
-//!     therefore cannot be read through the committed-model transports at all.
+//!   - MCP, Python and CLI --server are NOT independent implementations: all three call
+//!     the same REST endpoints. Only REST and CLI --db are separate Rust projections of
+//!     the model.
+//!   - The CLI is exercised over BOTH of its transports: --db (its own projection,
+//!     NDJSON export) and --server (GET /analytics/{project}/tables/{table}). The two
+//!     write byte-identical export files, and both agree with REST row for row.
+//!   - The 36 MB TMT import is deliberately not read through all four transports: it is
+//!     ~190x larger than any other fixture, so committing it (48,553 blocking losses
+//!     accepted through the real acceptance path) and reading every table through every
+//!     transport costs far more than a routine record can spend. It IS committable -
+//!     server/tests/tmt_import.rs proves that end to end - so the reason is time, not
+//!     impossibility.
 //!
 //! The record is only produced when MW_EQUIVALENCE_EVIDENCE is set; without it the
 //! test prints a loud SKIP and returns, so cargo test --workspace on a machine
@@ -49,9 +52,10 @@ use server::{app, AppState};
 /// exercised on every table, not only on the large ones.
 const PAGE: usize = 37;
 
-/// The transports a table row can be read through. MCP and Python are REST clients;
-/// the record says so.
-const TRANSPORTS: &[&str] = &["rest", "cliDb", "mcp", "python"];
+/// The wire paths a table row is read through. cliDb is the CLI's own projection; the
+/// CLI's OTHER transport (cliServer), MCP and Python all read the same REST endpoints, and
+/// the record says so rather than implying five independent implementations.
+const TRANSPORTS: &[&str] = &["rest", "cliDb", "cliServer", "mcp", "python"];
 
 const TABLE_NAMES: &[&str] = &[
     "projects",
@@ -311,6 +315,40 @@ fn cli_export(
     if !output.status.success() {
         return Err(format!(
             "mw analytics export failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Run mw --server <server> analytics export ... --format ndjson for one commit: the CLI's
+/// OTHER row transport, which reads GET /analytics/{project}/tables/{table} per table.
+fn cli_server_export(
+    mw: &Path,
+    server: &str,
+    project: &str,
+    commit: &str,
+    out_dir: &Path,
+) -> Result<(), String> {
+    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+    let output = Command::new(mw)
+        .args(["--server", server])
+        .args([
+            "analytics",
+            "export",
+            project,
+            "--commit",
+            commit,
+            "--format",
+            "ndjson",
+            "--out",
+        ])
+        .arg(out_dir)
+        .output()
+        .map_err(|e| format!("run mw: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "mw --server analytics export failed: {}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -602,6 +640,8 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
         commit: String,
         provenance: &'static str,
         source: String,
+        /// Whether the CLI --server export wrote byte-identical files to the CLI --db export.
+        server_export_files_identical: bool,
         /// table -> transport -> rows
         rows: BTreeMap<String, BTreeMap<String, Vec<Value>>>,
     }
@@ -638,15 +678,30 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
         let export_dir = dir.path().join(format!("export-{name}"));
         cli_export(&mw, &db, project, commit, &export_dir)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
+        // The CLI's OTHER row transport: the same export over --server, which reads
+        // GET /analytics/{project}/tables/{table}. Its files must match --db byte for byte.
+        let server_export_dir = dir.path().join(format!("server-export-{name}"));
+        cli_server_export(&mw, &base, project, commit, &server_export_dir)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         let python_rows = python_tables(&python, &driver, &package_path, &base, project, commit)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
 
+        let mut server_export_files_identical = true;
         let mut table_rows: BTreeMap<String, BTreeMap<String, Vec<Value>>> = BTreeMap::new();
         for &table in TABLE_NAMES {
             let rest = rest_table(&base, project, table, commit)
                 .unwrap_or_else(|e| panic!("{name}/{table}: {e}"));
             let cli = read_ndjson(&export_dir.join(format!("{table}.ndjson")))
                 .unwrap_or_else(|e| panic!("{name}/{table}: {e}"));
+            let cli_server_file = server_export_dir.join(format!("{table}.ndjson"));
+            let cli_server =
+                read_ndjson(&cli_server_file).unwrap_or_else(|e| panic!("{name}/{table}: {e}"));
+            let cli_server_bytes =
+                std::fs::read(&cli_server_file).unwrap_or_else(|e| panic!("{name}/{table}: {e}"));
+            server_export_files_identical &=
+                std::fs::read(export_dir.join(format!("{table}.ndjson")))
+                    .unwrap_or_else(|e| panic!("{name}/{table}: {e}"))
+                    == cli_server_bytes;
             let mcp = mcp_table(&repo, project, table, commit)
                 .unwrap_or_else(|e| panic!("{name}/{table}: {e}"));
             let py = python_rows
@@ -657,16 +712,22 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
             let mut by_transport = BTreeMap::new();
             by_transport.insert("rest".to_string(), rest);
             by_transport.insert("cliDb".to_string(), cli);
+            by_transport.insert("cliServer".to_string(), cli_server);
             by_transport.insert("mcp".to_string(), mcp);
             by_transport.insert("python".to_string(), py);
             table_rows.insert(table.to_string(), by_transport);
         }
+        assert!(
+            server_export_files_identical,
+            "{name}: the --db and --server NDJSON exports must be byte-identical"
+        );
         captures.push(Case {
             name,
             project,
             commit: commit.clone(),
             provenance,
             source: source.clone(),
+            server_export_files_identical,
             rows: table_rows,
         });
     }
@@ -727,6 +788,7 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
             "commit": case.commit,
             "provenance": case.provenance,
             "source": case.source,
+            "cliServerExportFilesIdenticalToCliDb": case.server_export_files_identical,
             "tables": tables,
             "everyTableIdentical": case_identical,
         }));
@@ -818,18 +880,94 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
     );
     assert!(trend_ok, "analytics trend over --server: {trend_err}");
 
-    let (tables_ok, _tables_out, tables_err) = run_mw(
+    // The metrics and trend routes have no CSV envelope on the wire: a --format the route
+    // cannot serve is REFUSED, naming the transport that can, rather than silently answered
+    // as JSON to a caller who asked for CSV.
+    let (metrics_csv_ok, _metrics_csv_out, metrics_csv_err) = run_mw(
+        &mw,
+        &[
+            "--server".into(),
+            server.into(),
+            "analytics".into(),
+            "metrics".into(),
+            "coffee-sample".into(),
+            "--commit".into(),
+            sample_commit.hash.clone(),
+            "--format".into(),
+            "csv".into(),
+        ],
+    );
+    assert!(
+        !metrics_csv_ok,
+        "metrics --format csv over --server must be refused, not silently answered as JSON"
+    );
+
+    // The CLI --server ROW transport: one request per table against the real per-table
+    // route. The summary must be byte-identical to the --db summary, and its row counts must
+    // be the REST totals of the rows captured above.
+    let sample_project = captures[0].project;
+    let sample_hash = captures[0].commit.clone();
+    let (tables_ok, tables_out, tables_err) = run_mw(
         &mw,
         &[
             "--server".into(),
             server.into(),
             "analytics".into(),
             "tables".into(),
-            "coffee-sample".into(),
+            sample_project.into(),
             "--commit".into(),
-            sample_commit.hash.clone(),
+            sample_hash.clone(),
         ],
     );
+    assert!(tables_ok, "analytics tables over --server: {tables_err}");
+    let (db_tables_ok, db_tables_out, db_tables_err) = run_mw(
+        &mw,
+        &[
+            "--db".into(),
+            db.to_string_lossy().to_string(),
+            "analytics".into(),
+            "tables".into(),
+            sample_project.into(),
+            "--commit".into(),
+            sample_hash.clone(),
+        ],
+    );
+    assert!(db_tables_ok, "analytics tables over --db: {db_tables_err}");
+    let tables_match_db = tables_out == db_tables_out;
+    assert!(
+        tables_match_db,
+        "the --server table summary must be byte-identical to the --db summary"
+    );
+    let tables_json: Value = serde_json::from_str(&tables_out).expect("tables JSON");
+    let summary_counts: BTreeMap<String, u64> = tables_json["tables"]
+        .as_array()
+        .expect("tables is an array")
+        .iter()
+        .map(|t| {
+            (
+                t["name"].as_str().unwrap().to_string(),
+                t["rowCount"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    let rest_counts: BTreeMap<String, u64> = TABLE_NAMES
+        .iter()
+        .map(|&table| {
+            (
+                table.to_string(),
+                captures[0].rows[table]["rest"].len() as u64,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary_counts, rest_counts,
+        "the --server table summary must report the REST row counts"
+    );
+
+    // The CLI --server EXPORT of the same commit, into its own directory, compared with the
+    // --db export tree the capture loop already wrote.
+    let db_export_dir = dir.path().join(format!("export-{}", captures[0].name));
+    let route_export_dir = dir.path().join("server-export-route");
     let (export_ok, _export_out, export_err) = run_mw(
         &mw,
         &[
@@ -837,21 +975,31 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
             server.into(),
             "analytics".into(),
             "export".into(),
-            "coffee-sample".into(),
+            sample_project.into(),
             "--commit".into(),
-            sample_commit.hash.clone(),
+            sample_hash.clone(),
             "--format".into(),
             "ndjson".into(),
             "--out".into(),
-            dir.path()
-                .join("server-export")
-                .to_string_lossy()
-                .to_string(),
+            route_export_dir.to_string_lossy().to_string(),
         ],
+    );
+    assert!(export_ok, "analytics export over --server: {export_err}");
+    let cli_server_files_identical = captures
+        .iter()
+        .all(|case| case.server_export_files_identical)
+        && TABLE_NAMES.iter().all(|&table| {
+            let name = format!("{table}.ndjson");
+            std::fs::read(db_export_dir.join(&name)).unwrap()
+                == std::fs::read(route_export_dir.join(&name)).unwrap()
+        });
+    assert!(
+        cli_server_files_identical,
+        "every CLI --server export file must equal the CLI --db export file byte for byte"
     );
 
     let cli_server = json!({
-        "note": "The CLI in --server mode is a set of planned routes. schema/metrics/trend match the real REST routes and return rows; there is no working route for arbitrary table rows. This is recorded, not fixed.",
+        "note": "The CLI in --server mode addresses the real Package 3 REST routes: GET /analytics/schema, GET /analytics/{project}/tables/{table} (the table is a PATH segment), GET /analytics/{project}/metrics and GET /analytics/{project}/trend. It is a REST client, not an independent projection: its rows are REST rows. Its row transport is the cliServer entry in each case's tables above, read from mw --server analytics export, and its export files are byte-identical to the CLI --db files for the same commit.",
         "routes": [
             {
                 "command": "mw --server <url> analytics schema",
@@ -881,25 +1029,37 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
             },
             {
                 "command": "mw --server <url> analytics tables <project> --commit <hash>",
-                "cliUrl": format!("/analytics/coffee-sample/tables?commit={}", sample_commit.hash),
+                "cliUrl": format!("/analytics/coffee-sample/tables/{{table}}?commit={} (the CLI asks once for each of the {} schema tables and reads the envelope's total)", sample_commit.hash, TABLE_NAMES.len()),
                 "serverRoute": "GET /analytics/:project/tables/:table",
                 "exitCode": if tables_ok { 0 } else { 1 },
-                "outcome": if tables_ok { "rows" } else { "error" },
-                "matches": false,
-                "divergence": "the CLI omits the /{table} segment (cli/src/http.rs:246), so the request is a 404 against the real route (server/src/lib.rs:310) and no table rows can be fetched in --server mode",
-                "stderr": tables_err.lines().next().unwrap_or(""),
+                "outcome": if tables_ok { "summary" } else { "error" },
+                "matches": tables_match_db,
+                "identicalToDbSummary": tables_match_db,
+                "rowCountsAreTheRestTotals": summary_counts == rest_counts,
             },
             {
                 "command": "mw --server <url> analytics export <project> --commit <hash> --format ndjson --out <dir>",
-                "cliUrl": "(no request: refused before the network)",
-                "serverRoute": "GET /analytics/:project/tables/:table (one per table)",
+                "cliUrl": format!("/analytics/coffee-sample/tables/{{table}}?commit={}&format=ndjson&limit=<server maximum> (one request per table, followed on the X-MW-Next-Cursor header when a table exceeds one page)", sample_commit.hash),
+                "serverRoute": "GET /analytics/:project/tables/:table",
                 "exitCode": if export_ok { 0 } else { 1 },
-                "outcome": if export_ok { "rows" } else { "refused" },
-                "matches": false,
-                "divergence": "the CLI refuses analytics export over --server by construction (cli/src/http.rs:250-253); --db is the CLI row-export path",
-                "stderr": export_err.lines().next().unwrap_or(""),
+                "outcome": if export_ok { "files" } else { "error" },
+                "matches": cli_server_files_identical,
+                "filesByteIdenticalToCliDb": cli_server_files_identical,
+                "formats": ["ndjson", "csv", "parquet"],
             }
-        ]
+        ],
+        "metricsAndTrend": {
+            "jsonWireShape": "the metrics and trend routes answer the REST wire rows (camelCase keys) and the CLI --server path passes them through; the CLI --db path renders the same rows in snake_case. The ROWS agree after key normalisation (rowsIdenticalToRestMetrics above); the key casing does not, and this record does not claim it does.",
+            "csvOverServerRefused": !metrics_csv_ok,
+            "csvOverServerStderr": metrics_csv_err.lines().next().unwrap_or("")
+        },
+        "rowTransport": {
+            "casesCompared": captures.len(),
+            "tablesPerCase": TABLE_NAMES.len(),
+            "everyTableIdenticalToRest": all_identical,
+            "exportFilesByteIdenticalToCliDb": cli_server_files_identical,
+            "pagination": "no table of either fixture exceeds the CLI export page (the largest is the large import's import_losses at 274 rows), so no cursor was followed here; the page loop and the X-MW-Next-Cursor header are covered by the client's own test in cli/src/http.rs."
+        }
     });
     assert!(
         cli_server_metrics_match,
@@ -913,7 +1073,7 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
         "recordType": "analytics cross-transport equivalence",
         "recordVersion": 1,
         "generator": "server/tests/equivalence.rs (analytics interfaces brief, package 7)",
-        "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI --db NDJSON export are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
+        "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI NDJSON exports (--db and --server) are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
         "numberNormalisation": "Integral JSON numbers are collapsed to integers before comparison, so the Python bindings Arrow float64 representation of metrics.value (15.0) equals the REST integer (15). Non-integral numbers are compared as JSON numbers. The ROWS are otherwise compared in full, wall-clock columns included.",
         "representationDifferences": [
             {
@@ -932,24 +1092,30 @@ async fn rest_cli_mcp_and_python_return_the_same_rows() {
         "transports": {
             "rest": { "implementation": "server/src/analytics (Rust projection), HTTP JSON", "independentProjection": true },
             "cliDb": { "implementation": "cli/src/analytics.rs (a separate Rust projection that mirrors the server one), NDJSON export", "independentProjection": true },
+            "cliServer": { "implementation": "cli/src/http.rs over GET /analytics/{project}/tables/{table}, NDJSON and CSV - the CLI's other transport, a REST client", "independentProjection": false },
             "mcp": { "implementation": "engine/mcp repo.table, a pass-through of the REST JSON over the real HTTP transport", "independentProjection": false },
             "python": { "implementation": "bindings/python modelwrite.analytics.tables(), a thin REST client (requests). It computes nothing.", "independentProjection": false }
         },
-        "independence": "Only REST and CLI --db are independent implementations; MCP and Python both read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying four independent implementations.",
+        "independence": "Only REST and CLI --db are independent implementations; the CLI --server, MCP and Python all read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying that its five wire paths are five independent implementations.",
         "cases": case_records,
         "cliServer": cli_server,
         "deliberateFailure": deliberate,
         "notRun": [
             {
-                "item": "the 36 MB Open-MBEE TMT XMI through the four transports",
-                "reason": "It is ~190x larger than the fixtures used here, AND server/tests/analytics_tmt.rs already records that the imported model does not pass the commit validator (two requirements with an empty reqId), so it cannot be committed and therefore cannot be read through any committed-model transport."
+                "item": "the 36 MB Open-MBEE TMT XMI through every transport",
+                "reason": "IMPRACTICAL FOR THIS RECORD, and not for the reason an earlier record gave. It IS committable: server/tests/tmt_import.rs::the_36mb_tmt_model_commits_end_to_end_after_accepting_its_losses imports the artifact (36,158,244 bytes, retained under blob hash 76e5c008df30906edeb337348ac1afb84b1468e688689759d28ca1feeaba5a3e), is refused as Blocking on 48,553 losses, accepts them through the same acceptance core the accept endpoint calls, and commits a model of 362 elements / 633 relationships / 7 requirements with provenance naming the artifact hash and 47,728 accepted losses (commit b715131f737eb65ae20f70f0000eb8113acddd0083bc460ce5aff7190c7e0aef). The empty reqId that the old record cited is a named WARNING, not an error (engine/okf/src/validate.rs), so it never blocked the commit. What is impractical is doing that import, on a 36 MB fixture ~190x larger than the ones here, and then reading all nine tables through every transport: it is time, not impossibility."
             },
             {
-                "item": "CLI --server table rows",
-                "reason": "there is no working CLI --server route for arbitrary table rows: analytics tables is a 404 (missing /{table} segment) and analytics export refuses --server. The CLI row transport exercised here is --db. The route divergence is recorded under cliServer rather than papered over."
+                "item": "filters (equality column filters on the tables route)",
+                "reason": "the REST route supports non-reserved query parameters as equality filters on string columns, and the CLI --server row path does not expose a filter flag, so no filter was exercised through the CLI. This record does not claim otherwise."
             }
         ],
-        "passed": all_identical && cli_server_metrics_match && deliberate["detected"] == json!(true),
+        "passed": all_identical
+            && cli_server_metrics_match
+            && tables_match_db
+            && cli_server_files_identical
+            && !metrics_csv_ok
+            && deliberate["detected"] == json!(true),
     });
 
     let mut text = serde_json::to_string_pretty(&record).expect("the record serialises");

@@ -881,18 +881,45 @@ pub fn offline_export(
     }
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {}", out.display(), e))?;
 
-    let mut per_commit: Vec<(Commit, Vec<Table>)> = Vec::new();
+    let mut per_commit: Vec<(String, Vec<Table>)> = Vec::new();
     for commit in &commits {
         let tables = build_commit_tables(store, project, commit)?;
-        per_commit.push((commit.clone(), tables));
+        per_commit.push((commit.hash.clone(), tables));
     }
 
-    let names: Vec<&str> = TABLES.iter().map(|(n, _)| *n).collect();
+    let files = write_export(format, out, project, &per_commit)?;
+    let files: Vec<Value> = files
+        .iter()
+        .map(|(name, rows)| json!({ "name": name, "rowCount": rows }))
+        .collect();
+    print_json(&json!({
+        "schemaVersion": SCHEMA_VERSION,
+        "project": project,
+        "format": format,
+        "out": out,
+        "tables": files,
+    }));
+    Ok(())
+}
+
+/// Write one export tree from the per-commit tables: CSV and NDJSON merge every commit's rows
+/// per table in commit order, Parquet is partitioned by table/project/commit. Both transports
+/// call this, so a --db export and a --server export of the same commits are byte-identical
+/// files. Returns each table's merged row count, in schema order.
+pub fn write_export(
+    format: &str,
+    out: &Path,
+    project: &str,
+    per_commit: &[(String, Vec<Table>)],
+) -> Result<Vec<(&'static str, usize)>, String> {
+    std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {}", out.display(), e))?;
+
+    let names: Vec<&'static str> = TABLES.iter().map(|(n, _)| *n).collect();
     let mut merged: Vec<Table> = Vec::new();
-    for name in &names {
+    for &name in &names {
         let mut rows = Vec::new();
-        for (_, tables) in &per_commit {
-            if let Some(t) = tables.iter().find(|t| t.name == *name) {
+        for (_, tables) in per_commit {
+            if let Some(t) = tables.iter().find(|t| t.name == name) {
                 rows.extend(t.rows.clone());
             }
         }
@@ -915,12 +942,12 @@ pub fn offline_export(
             }
         }
         "parquet" => {
-            for (commit, tables) in &per_commit {
+            for (commit, tables) in per_commit {
                 for t in tables {
                     let dir = out
                         .join(t.name)
                         .join(format!("project={}", project))
-                        .join(format!("commit={}", commit.hash));
+                        .join(format!("commit={}", commit));
                     std::fs::create_dir_all(&dir)
                         .map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
                     write_parquet(&dir.join("part-0.parquet"), t)?;
@@ -930,18 +957,7 @@ pub fn offline_export(
         _ => unreachable!(),
     }
 
-    let files: Vec<Value> = merged
-        .iter()
-        .map(|t| json!({ "name": t.name, "rowCount": t.rows.len() }))
-        .collect();
-    print_json(&json!({
-        "schemaVersion": SCHEMA_VERSION,
-        "project": project,
-        "format": format,
-        "out": out,
-        "tables": files,
-    }));
-    Ok(())
+    Ok(merged.iter().map(|t| (t.name, t.rows.len())).collect())
 }
 
 fn resolve_commit(

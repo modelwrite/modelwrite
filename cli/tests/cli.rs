@@ -1199,3 +1199,251 @@ async fn the_same_document_commits_to_one_hash_through_every_path() {
     assert_eq!(offline_hash, store_hash);
     assert_eq!(binding_hash, store_hash);
 }
+
+// ---------------------------------------------------------------------------
+// The CLI --server analytics ROW path: analytics tables and analytics export must
+// address the real per-table route (GET /analytics/{project}/tables/{table}) and
+// produce exactly what the --db path produces, so a pipeline can switch transports.
+// ---------------------------------------------------------------------------
+
+/// The nine schema tables, in schema order. The CLI's own list, restated here so the test
+/// fails if the CLI's output ever drops or reorders one.
+const ANALYTICS_TABLE_NAMES: &[&str] = &[
+    "projects",
+    "commits",
+    "elements",
+    "relationships",
+    "requirements",
+    "trace_links",
+    "metrics",
+    "metric_definitions",
+    "import_losses",
+];
+
+/// Commit the sample corpus on "main" into a scratch store, returning (db path, commit hash).
+fn analytics_store(dir: &Path) -> (PathBuf, String) {
+    let db = dir.join("mw.db");
+    let store = server::store::sqlite::SqliteStore::open(&db).unwrap();
+    store.create_project("coffee", None).unwrap();
+    let bytes = std::fs::read(test_support::okf_expected()).unwrap();
+    let okf_hash = store.put_blob(&bytes).unwrap();
+    store
+        .commit_model(
+            "coffee", "main", &okf_hash, "alex", "initial", None, None, None,
+        )
+        .unwrap();
+    let commit = store.branch_tip("coffee", "main").unwrap().unwrap();
+    (db, commit)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn analytics_over_server_reads_the_real_table_route_and_matches_the_db_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db_path, commit) = analytics_store(dir.path());
+    let db = db_path.to_str().unwrap().to_string();
+
+    // An in-process server over the SAME store file, so both transports read one commit.
+    let router = server::app(app_state(dir.path(), server::auth::AuthConfig::Open));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let url = format!("http://{}", addr);
+
+    // analytics tables over --server must print exactly what --db prints: the same nine
+    // tables in schema order, the same row counts, the same resolved commit. This is the
+    // check the old URL construction failed: /analytics/{project}/tables is not a route.
+    for selector in [vec!["--commit", commit.as_str()], vec!["--branch", "main"]] {
+        let mut db_args = vec!["--db", db.as_str(), "analytics", "tables", "coffee"];
+        db_args.extend(selector.iter().copied());
+        let db_run = run_mw(&db_args, &[]);
+        assert!(
+            db_run.status.success(),
+            "db analytics tables {:?}: {}",
+            selector,
+            stderr(&db_run)
+        );
+        let mut srv_args = vec!["--server", url.as_str(), "analytics", "tables", "coffee"];
+        srv_args.extend(selector.iter().copied());
+        let srv_run = run_mw(&srv_args, &[]);
+        assert!(
+            srv_run.status.success(),
+            "server analytics tables {:?}: {}",
+            selector,
+            stderr(&srv_run)
+        );
+        assert_eq!(
+            stdout(&srv_run),
+            stdout(&db_run),
+            "analytics tables {:?} must be byte-identical over --db and --server",
+            selector
+        );
+    }
+
+    let summary_run = run_mw(
+        &[
+            "--server",
+            url.as_str(),
+            "analytics",
+            "tables",
+            "coffee",
+            "--commit",
+            commit.as_str(),
+        ],
+        &[],
+    );
+    assert!(
+        summary_run.status.success(),
+        "server analytics tables: {}",
+        stderr(&summary_run)
+    );
+    let summary: Value = serde_json::from_str(&stdout(&summary_run)).unwrap();
+    let names: Vec<&str> = summary["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ANALYTICS_TABLE_NAMES);
+    assert_eq!(summary["commit"].as_str(), Some(commit.as_str()));
+    // Not a stub: the eight model tables carry rows and the authored corpus has no import,
+    // so import_losses is empty. The byte-for-byte comparison above pins the exact counts.
+    let counts: Vec<(&str, u64)> = summary["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| (t["name"].as_str().unwrap(), t["rowCount"].as_u64().unwrap()))
+        .collect();
+    assert!(
+        counts
+            .iter()
+            .all(|(name, rows)| *name == "import_losses" || *rows > 0),
+        "only import_losses may be empty for an authored corpus: {}",
+        summary
+    );
+    assert_eq!(
+        counts
+            .iter()
+            .find(|(name, _)| *name == "import_losses")
+            .map(|(_, rows)| *rows),
+        Some(0),
+        "the authored corpus has no import losses"
+    );
+
+    // analytics export over --server must write the same tree --db writes, byte for byte,
+    // for each format and through both selectors.
+    let selectors: [(&str, Vec<&str>); 3] = [
+        ("ndjson", vec!["--commit", commit.as_str()]),
+        ("csv", vec!["--branch", "main"]),
+        ("parquet", vec!["--commit", commit.as_str()]),
+    ];
+    for (format, selector) in selectors {
+        let db_out = dir.path().join(format!("db-{format}"));
+        let srv_out = dir.path().join(format!("srv-{format}"));
+
+        let mut db_args = vec!["--db", db.as_str(), "analytics", "export", "coffee"];
+        db_args.extend(selector.iter().copied());
+        db_args.extend(["--format", format, "--out", db_out.to_str().unwrap()]);
+        let db_run = run_mw(&db_args, &[]);
+        assert!(
+            db_run.status.success(),
+            "db export {format}: {}",
+            stderr(&db_run)
+        );
+
+        let mut srv_args = vec!["--server", url.as_str(), "analytics", "export", "coffee"];
+        srv_args.extend(selector.iter().copied());
+        srv_args.extend(["--format", format, "--out", srv_out.to_str().unwrap()]);
+        let srv_run = run_mw(&srv_args, &[]);
+        assert!(
+            srv_run.status.success(),
+            "server export {format}: {}",
+            stderr(&srv_run)
+        );
+
+        // The two summaries agree on everything except the output path each was given.
+        let db_summary: Value = serde_json::from_str(&stdout(&db_run)).unwrap();
+        let srv_summary: Value = serde_json::from_str(&stdout(&srv_run)).unwrap();
+        assert_eq!(
+            db_summary["tables"], srv_summary["tables"],
+            "{format}: the exported row counts differ"
+        );
+        assert_eq!(db_summary["format"], srv_summary["format"]);
+        assert_eq!(db_summary["schemaVersion"], srv_summary["schemaVersion"]);
+        assert_eq!(db_summary["project"], srv_summary["project"]);
+
+        for table in ANALYTICS_TABLE_NAMES {
+            let (db_file, srv_file) = if format == "parquet" {
+                let partition = Path::new(table)
+                    .join("project=coffee")
+                    .join(format!("commit={commit}"));
+                (
+                    db_out.join(&partition).join("part-0.parquet"),
+                    srv_out.join(&partition).join("part-0.parquet"),
+                )
+            } else {
+                (
+                    db_out.join(format!("{table}.{format}")),
+                    srv_out.join(format!("{table}.{format}")),
+                )
+            };
+            let a =
+                std::fs::read(&db_file).unwrap_or_else(|e| panic!("{}: {}", db_file.display(), e));
+            let b = std::fs::read(&srv_file)
+                .unwrap_or_else(|e| panic!("{}: {}", srv_file.display(), e));
+            assert_eq!(
+                a, b,
+                "{format} {table}: the --db and --server exports differ byte for byte"
+            );
+        }
+    }
+
+    // A format the REST metrics route cannot serve is refused with a clear message, never
+    // silently answered as JSON, and --db still serves it.
+    let csv_metrics = run_mw(
+        &[
+            "--server",
+            url.as_str(),
+            "analytics",
+            "metrics",
+            "coffee",
+            "--commit",
+            commit.as_str(),
+            "--format",
+            "csv",
+        ],
+        &[],
+    );
+    assert!(
+        !csv_metrics.status.success(),
+        "metrics --format csv over --server must be refused, not silently answered as JSON"
+    );
+    assert!(
+        stderr(&csv_metrics).contains("--db"),
+        "the refusal must name the transport that can serve it: {}",
+        stderr(&csv_metrics)
+    );
+    let db_csv = run_mw(
+        &[
+            "--db",
+            db.as_str(),
+            "analytics",
+            "metrics",
+            "coffee",
+            "--commit",
+            commit.as_str(),
+            "--format",
+            "csv",
+        ],
+        &[],
+    );
+    assert!(
+        db_csv.status.success(),
+        "--db metrics --format csv must still work: {}",
+        stderr(&db_csv)
+    );
+
+    serve.abort();
+    let _ = serve.await;
+}
