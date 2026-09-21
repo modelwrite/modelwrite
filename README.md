@@ -29,8 +29,11 @@ Two tiers, both live:
 - **The registered trial** — <https://app.modelwrite.org> — your own private
   workspace, entered with an emailed code (no password), in a rolling 14-day
   window (activity renews it; 14 days idle turns read-only; 21 days idle
-  archives). The service is up, but email delivery is still console-only pending
-  an SMTP credential, so the website door reads "live, email pending".
+  archives). The login code is emailed through Postmark: email delivery is
+  configured and proven on this deployment, and the website door reads "live". The
+  mailer needs its SMTP settings (`MW_MAILER=smtp` and the `MW_MAIL_SMTP_*`
+  variables); with any of them missing the send fails naming the missing variable
+  instead of logging the code.
 
 ## What is in this repository
 

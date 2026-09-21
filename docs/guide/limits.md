@@ -63,12 +63,16 @@ The showcase (trial.modelwrite.org) runs without authentication (anonymous admin
 to its six seeded models every hour. Consequence: do not put real work in the showcase; use
 it to read the six deployed models and follow the tour.
 
-## The registered trial cannot deliver its login code
+## The registered trial emails its login code, and needs SMTP settings to do it
 
-The registered trial (app.modelwrite.org) is live and session-authenticated, but its
-transactional login code is written to the operator log, not emailed - the mailer has no SMTP
-credential yet. Consequence: a visitor cannot complete registration today; real email
-delivery is one SMTP credential away.
+The registered trial (app.modelwrite.org) is live and session-authenticated, and its
+transactional login code is emailed through Postmark - delivery is configured and proven on
+that deployment. The mailer still depends on configuration: `MW_MAILER=smtp` with
+`MW_MAIL_SMTP_HOST`, `MW_MAIL_SMTP_USERNAME` or `MW_MAIL_SMTP_PASSWORD` unset makes
+the send FAIL and name the missing variable; it never falls back to logging the code.
+Consequence: registration completes only while those settings are present, and a
+misconfigured deployment refuses registration loudly rather than pretending an email was
+delivered.
 
 ## Also true today
 
