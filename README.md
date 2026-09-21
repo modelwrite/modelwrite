@@ -76,13 +76,13 @@ only as prose. See [docs/guide/mcp-agents.md](docs/guide/mcp-agents.md) and
 - **SysML v2 textual** — a stated-subset **viewer**: it imports and does not write
   back. Reproduce with `cargo test -p mw-binding-sysmlv2 --test real_examples`.
 
-## STPA/STAMP completeness — in progress, not shipped
+## STPA/STAMP completeness — in progress, not deployed
 
 The STPA/STAMP completeness checks (unanalysed control actions, control loops with
 no feedback, hazards and constraints that do not reach, UCAs with no loss scenario,
-and baseline trend) exist as uncommitted work in `engine/graph/src/stpa.rs` with
-fixtures in `sample/stpa/`. They are **not** committed, shipped or deployed, and
-no claim here or on the site should read them as such.
+and baseline trend) are being built in `engine/graph/src/stpa.rs` with fixtures in
+`sample/stpa/`. They are **not** deployed — the live trial runs an earlier commit —
+and no claim here or on the site should read them as shipped.
 
 ## Quickstart
 
