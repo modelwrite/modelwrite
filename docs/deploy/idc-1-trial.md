@@ -21,12 +21,20 @@ intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 ## Source pinned
 
 - Repository: `https://github.com/modelwrite/modelwrite.git` (public)
-- Commit built from: `2772b5f76a7e30aecd4497a373db4c72cc87cc9d`
-  (`feat(server): wire the SysML v2 reader into the workbench import surface` on top of
-  `6ea0913 fix(content-address): one canonical serialisation across every write path`)
-- Image: `modelwrite/modelwrite:idc-1-trial` (id `5167eca952df`, ~149 MB), built on the
-  host from the public repo — no registry pull, no registry credentials.
-- Previous (revert): image `d767a42f08f7`, commit `55f653ceaf2222c7314d818f2d72bbc27330bf72`
+- Commit built from: `e32fbd3734b18b21de1dd4c91da2eb0c354fdf59`
+  (`feat(brand): one identity for the site and the workbench` — the shared instrument palette
+  plus the V1 visual outputs: the standalone `diagram.svg` export and the chrome-free
+  `/present` page)
+- Image: `modelwrite/modelwrite:idc-1-trial` (id `f5e6b75f2426`), built on the host from the
+  public repo — no registry pull, no registry credentials.
+- Previous (revert): image `5167eca952df`, commit
+  `2772b5f76a7e30aecd4497a373db4c72cc87cc9d` (`feat(server): wire the SysML v2 reader into the
+  workbench import surface` on top of `6ea0913 fix(content-address): one canonical
+  serialisation across every write path`), still tagged on the host as
+  `modelwrite/modelwrite:idc-1-trial-pre-brand-2772b5f`. To revert:
+  `docker tag modelwrite/modelwrite:idc-1-trial-pre-brand-2772b5f modelwrite/modelwrite:idc-1-trial`
+  then `sudo systemctl restart modelwrite`.
+- Older revert: image `d767a42f08f7`, commit `55f653ceaf2222c7314d818f2d72bbc27330bf72`
   (still tagged on the host as `modelwrite/modelwrite:idc-1-trial-pre-canonical-55f653c`).
 
 > **Why not the v0.2.0 tag.** The tag predates the S2 crossModelEdges feature
@@ -43,6 +51,51 @@ docker build --cpuset-cpus=0-3 -f deploy/Dockerfile -t modelwrite/modelwrite:idc
 
 `--cpuset-cpus=0-3` bounds the cargo build to 4 CPUs. idc-1 runs the live vLLM fleet
 (two RTX 3090s at full utilisation); an unbounded build would starve it.
+
+## Rebrand redeploy (2026-09-21 22:45 UTC)
+
+The workbench rebrand (`e32fbd3`) and the V1 visual outputs were committed, but the running
+image predated them — `/ui` still served the old blue. Redeployed:
+
+- `/opt/modelwrite/src` fetched `slice-2-repository` and checked out
+  `e32fbd3734b18b21de1dd4c91da2eb0c354fdf59` (was `2772b5f`).
+- Rebuilt with the CPU-bounded `docker build` above (`--cpuset-cpus=0-3`), run detached so a
+  dropped session could not kill it. New image id `f5e6b75f2426`.
+- `sudo systemctl restart modelwrite.service` ONLY. `modelwrite-app.service` (3103),
+  cloudflared, cloudflared-hatch, haproxy and both timers were not touched — the registered
+  tier's `ActiveEnterTimestamp` was identical before and after.
+
+Verified from outside, with no token:
+
+- **Palette.** `https://trial.modelwrite.org/ui` no longer contains the old blue: `#2563eb`
+  occurs **0** times (it was 2 — `--accent` and `--kind-block`). The new tokens are present
+  verbatim: `--accent: #0b6e99;` (petrol), `--chrome: #101418;` (graphite instrument face),
+  `--kind-block: #0b6e99;`.
+- **New capability.** `/ui/projects/coffee-machine/diagram.svg` returns `image/svg+xml`; its
+  bytes carry
+  `<!-- modelwrite-provenance: project=coffee-machine commit=1ec97db8… branch=main diagram=structure renderer=mw-diagram-svg/0.2.0 -->`
+  and a matching `<metadata><mw:provenance …/></metadata>`.
+  `/ui/projects/coffee-machine/present` returns 200 with no workbench chrome (0
+  `site-header`, 0 `<nav`).
+- **The exported SVG really draws.** 2130×2114, `viewBox="0 0 2130 2114"`, 99 node rects, 99
+  name labels, 99 kind labels, 267 edge groups and 165 arrowhead polygons; a rendering was
+  inspected visually (boxes, arrowheads and labels all present).
+- **Unchanged surfaces.** `/ui/projects/fire-suppression/stpa` 200 (still "5 findings found"),
+  `/ui/projects/coffee-machine/health` 200, `/health` and `/version` 200.
+
+### Data safety: the seed hashes did NOT move
+
+The showcase DB is replayed hourly from `/opt/modelwrite/seed/manifest.json`, whose
+`expectedHash` values are canonical. Before the live restart the rebuilt image was run on a
+spare port against a throwaway database, and `seed-from-manifest.py` replayed the manifest
+into it: all **eight** commits reproduced their canonical `expectedHash` exactly. The rebrand
+therefore changed no content hash. The seed, the manifest and every hash are untouched, and
+nothing was re-captured.
+
+The hourly guard still skips: two consecutive `reset-trial.sh` runs (no `FORCE`) each logged
+`no changes since the last reset, skipping (service not restarted, no backup taken)`, and the
+backup count was unchanged (14 before and after) — evidence the running DB still equals the
+seed.
 
 ## Auth (intentionally OPEN)
 
