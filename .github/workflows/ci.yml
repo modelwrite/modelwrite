@@ -33,6 +33,24 @@ jobs:
           diff /tmp/corrupted-fail.json docs/evidence/2026-09-17-roundtrip-corrupted-fail.json
       - run: python -m unittest discover -s judge/tests -p "test_*.py" -v
 
+  docs:
+    # The generated documentation sections (crate licences, the binding list, the
+    # MCP tool list, the metric-definition count) must not drift from their
+    # sources of truth. The generator rewrites the marked <!-- generated:* -->
+    # sections in place; if a hand edit or a source change left one stale, the
+    # working tree differs and this job fails. A doc that cannot drift beats one
+    # that gets re-read.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: regenerate the generated docs sections
+        run: node website/generate-docs.mjs
+      - name: fail if a generated section drifted
+        run: git diff --exit-code -- README.md docs/guide/
+
   msrv:
     # Builds each crate with its DECLARED minimum toolchain, not with stable. A
     # manifest rust-version nobody tests is a claim that drifts: the server

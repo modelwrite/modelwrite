@@ -42,7 +42,7 @@ const STATE_DEFS = {
   refused: {
     label: 'Large &middot; refused pending acceptance',
     css: 'pill--warn',
-    note: 'XMI (the loadable format), but 36&nbsp;MB and its migration needs 48,553 losses accepted by hand before it loads.',
+    note: 'XMI (the loadable format), but 36&nbsp;MB and its migration needs 48,553 blocking losses (45,725 unmappable + 2,828 lossy) accepted by hand before it loads.',
   },
   'not-importable': {
     label: 'Not importable',

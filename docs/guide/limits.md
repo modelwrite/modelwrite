@@ -22,7 +22,8 @@ must be read as such, not as an engine proof. The import page states this on the
 ## No bundled open-source example is loadable today
 
 The Thirty Meter Telescope is the only bundled example in the loadable XMI format, and its
-36 MB import needs 48,553 losses accepted by hand before it loads. The Gaphor examples are
+36 MB import needs 48,553 blocking losses (45,725 unmappable + 2,828 lossy) accepted by hand
+before it loads. The Gaphor examples are
 Gaphor's own .gaphor format, not XMI, and no Gaphor binding exists. The SysML v2 examples
 read as viewers only. Consequence: the showcase's six seeded models are the only models the
 platform serves; every bundled open-source example is refused pending acceptance, not
@@ -32,8 +33,18 @@ importable, or read-only.
 
 The reader mw-binding-sysmlv2 exists and is Direction::ImportOnly: it imports a stated subset
 into OKF and names what it does not carry, but it cannot export, and the round-trip harness
-refuses it by design. It is not in the server's binding registry, so the workbench imports
-XMI only. Consequence: a SysML v2 model can be read and measured at the engine level, but it
+refuses it by design.
+
+<!-- generated:binding-list -->
+| Binding | id@version | Direction | Reads |
+|---|---|---|---|
+| SysML v1 (UML profile) XMI | `sysml-v1-xmi@2.4` | read/write | blocks, requirements, properties and Satisfy/Allocate traceability |
+| SysML v2 textual notation (.sysml) | `sysml-v2-textual@1.0` | viewer (ImportOnly) | part/attribute/item definitions, requirements, satisfy traceability and documentation |
+
+The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4`; `sysml-v2-textual@1.0` is not registered in the server, so the workbench does not offer it.
+<!-- /generated -->
+
+Consequence: a SysML v2 model can be read and measured at the engine level, but it
 cannot be written back, and it cannot be imported through the workbench.
 
 ## The global system-of-systems graph property is asserted, not computed

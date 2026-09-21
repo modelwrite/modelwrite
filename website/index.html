@@ -75,9 +75,10 @@
 <section class="section shell" id="try" aria-labelledby="try-h">
   <div class="section__head">
     <p class="eyebrow">Try it</p>
-    <h2 id="try-h">Two doors. One is open now, one is rolling out.</h2>
-    <p>The showcase is live and open. The registered trial is being built and is not serving yet;
-    its copy states what it will do when it is.</p>
+    <h2 id="try-h">Two doors, both live. One is one credential short of emailing your code.</h2>
+    <p>The showcase is live and open. The registered trial is live too &mdash; session-authenticated
+    and cross-trial isolated &mdash; but its login code cannot be emailed until an SMTP credential is
+    configured.</p>
   </div>
 
   <div class="doors">
@@ -97,7 +98,7 @@
 
     <article class="door">
       <div class="door__head">
-        <span class="door__status door__status--soon">Rolling out now</span>
+        <span class="door__status door__status--live">Live &middot; email pending</span>
         <h3>The registered trial</h3>
         <code class="door__host">app.modelwrite.org</code>
       </div>
@@ -107,9 +108,11 @@
       After 14 days idle it turns read-only for 7 days &mdash; reads work, writes are refused with a
       note naming the trial's end and how to start again &mdash; and after 21 days idle it is archived
       to a copy while your account is kept so the same email can start fresh. The login code is
-      transactional and arrives regardless; marketing updates only if you opt in.</p>
-      <p class="door__note">Not serving yet. There is no link to click until the registered trial is
-      deployed. This copy states what it will do when it is.</p>
+      transactional &mdash; no marketing consent required &mdash; and marketing updates only if you opt in.</p>
+      <p class="door__note">Live and session-authenticated, with cross-trial isolation proven. The one
+      thing still pending is the email itself: the mailer writes each login code to the operator log,
+      not an inbox, until an SMTP credential is configured &mdash; that credential is the only step
+      between the live trial and a code landing in your email.</p>
     </article>
   </div>
 </section>
@@ -570,7 +573,7 @@
         <h3>Real vendor migration is not complete.</h3>
         <p>On the MagicDraw coffee-machine corpus the reader reports 252 blocking losses. A
         36&nbsp;MB Cameo export, the Thirty Meter Telescope model, carries 362 blocks and 633 edges,
-        round-trips exactly, and reports 45,725 named losses for the constructs it does not carry.
+        round-trips exactly, and reports 48,553 blocking losses (45,725 unmappable + 2,828 lossy) for the constructs it does not carry.
         Named rather than dropped in silence. SysML v2 textual notation is carried as a viewer: it
         reads, it does not write back.</p>
         <p>Reproduce the two measurements:</p>

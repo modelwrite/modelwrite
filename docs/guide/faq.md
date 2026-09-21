@@ -4,13 +4,23 @@ Real questions, real answers. Nothing here is softened.
 
 ## Can it replace CATIA?
 
-Not yet. The only binding today is sysml-v1-xmi@2.4, which reads a stated subset: blocks,
-requirements, properties, and Satisfy/Allocate traceability. Requirement and traceability
-import works against the coffee-machine corpus, which is the proof fixture. A real,
-content-rich vendor model is not yet in the corpus, and anything outside the stated subset is
-reported unmappable: a named loss, never a silent drop. Modelwrite has no numeric or physical
-simulation, so it does not replace the simulation side of the CATIA portfolio either. Today it
-is a migration source and a coexistence partner, not a replacement.
+Not yet. Two bindings exist:
+
+<!-- generated:binding-list -->
+| Binding | id@version | Direction | Reads |
+|---|---|---|---|
+| SysML v1 (UML profile) XMI | `sysml-v1-xmi@2.4` | read/write | blocks, requirements, properties and Satisfy/Allocate traceability |
+| SysML v2 textual notation (.sysml) | `sysml-v2-textual@1.0` | viewer (ImportOnly) | part/attribute/item definitions, requirements, satisfy traceability and documentation |
+
+The workbench import surface (the server's binding registry) offers `sysml-v1-xmi@2.4`; `sysml-v2-textual@1.0` is not registered in the server, so the workbench does not offer it.
+<!-- /generated -->
+
+Requirement and traceability import works against the coffee-machine corpus, which is the
+proof fixture. A real, content-rich vendor model is not yet in the corpus, and anything
+outside a binding's stated subset is reported unmappable: a named loss, never a silent drop.
+Modelwrite has no numeric or physical simulation, so it does not replace the simulation side
+of the CATIA portfolio either. Today it is a migration source and a coexistence partner, not a
+replacement.
 
 ## Can it simulate?
 
