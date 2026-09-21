@@ -86,10 +86,11 @@
 <section class="section shell" id="try" aria-labelledby="try-h">
   <div class="section__head">
     <p class="eyebrow">Try it</p>
-    <h2 id="try-h">Two doors, both live. One cannot email its login code yet.</h2>
-    <p>The showcase is live and open. The registered trial is live too &mdash; session-authenticated
-    and cross-trial isolated &mdash; but its login code cannot be emailed until an SMTP credential is
-    configured.</p>
+    <h2 id="try-h">Two doors, both live.</h2>
+    <p>The showcase is open &mdash; no registration, six seeded models, and you can see what a
+    model&rsquo;s coverage, orphans and migration losses actually look like. The registered trial is
+    your own isolated workspace for fourteen days: bring your model, get its loss report, its
+    orphaned items and its coverage. You sign in with a code we email you.</p>
   </div>
 
   <div class="doors">
@@ -180,6 +181,81 @@
     <li><span class="gaps__mark" aria-hidden="true">2</span><div><p><strong>Isolated groups.</strong> More than one connected component. The model is split.</p></div></li>
     <li><span class="gaps__mark" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li>
   </ul>
+
+  <figure class="measure__graph">
+    <svg viewBox="0 0 940 390" role="img" aria-labelledby="gapgraph-t gapgraph-d" width="940" height="390">
+      <title id="gapgraph-t">The three graph gaps, drawn on a small model</title>
+      <desc id="gapgraph-d">A connected main body of four blocks. Off to one side, a dashed boundary encloses an isolated group of three blocks joined only to each other: Cafe Stand, Provisioning Bay and Service Window. Below, an orphaned node named menu-block has no edge at all. From the main body, one edge runs off and ends in an open circle, pointing at nothing: a dangling link. Numbered badges 1, 2 and 3 mark the orphan, the isolated group and the dangling link.</desc>
+      <style>
+        .g-edge { stroke: #49535c; stroke-width: 1.25; fill: none; }
+        .g-node { fill: #e6f2f7; stroke: #0b6e99; stroke-width: 1.25; rx: 2; }
+        .g-node--orphan { fill: #fbf1da; stroke: #7a5200; }
+        .g-lab { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #101418; }
+        .g-note { font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #5f6973; letter-spacing: .04em; }
+        .g-group { fill: none; stroke: #a3231c; stroke-width: 1.25; stroke-dasharray: 5 4; }
+        .g-divider { stroke: #b9c2ca; stroke-width: 1; stroke-dasharray: 2 4; }
+        .g-badge { fill: #101418; }
+        .g-badge-text { font: bold 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #ffffff; }
+        .g-dangle { stroke: #a3231c; stroke-width: 1.25; fill: none; stroke-dasharray: 4 3; }
+        .g-open { fill: #ffffff; stroke: #a3231c; stroke-width: 1.5; }
+      </style>
+
+      <text class="g-note" x="40" y="34">THE MAIN BODY - ONE CONNECTED WHOLE</text>
+
+      <!-- edges of the main body -->
+      <path class="g-edge" d="M160 136 H210"/>
+      <path class="g-edge" d="M160 136 L210 186"/>
+      <path class="g-edge" d="M320 76 L370 121"/>
+      <path class="g-edge" d="M320 186 L370 141"/>
+
+      <!-- main body nodes -->
+      <rect class="g-node" x="40" y="120" width="120" height="32"/>
+      <text class="g-lab" x="52" y="140">Coffee Machine</text>
+      <rect class="g-node" x="210" y="60" width="110" height="32"/>
+      <text class="g-lab" x="222" y="80">Brew Subsystem</text>
+      <rect class="g-node" x="210" y="170" width="110" height="32"/>
+      <text class="g-lab" x="222" y="190">Water Subsystem</text>
+      <rect class="g-node" x="370" y="115" width="110" height="32"/>
+      <text class="g-lab" x="382" y="135">Control Module</text>
+
+      <!-- the divider between components -->
+      <path class="g-divider" d="M560 40 V360"/>
+      <text class="g-note" x="568" y="372">A SECOND CONNECTED COMPONENT</text>
+
+      <!-- the isolated group -->
+      <rect class="g-group" x="580" y="48" width="320" height="196"/>
+      <circle class="g-badge" cx="600" cy="48" r="11"/>
+      <text class="g-badge-text" x="596" y="52">2</text>
+
+      <path class="g-edge" d="M710 102 V190"/>
+      <path class="g-edge" d="M710 222 L770 146"/>
+      <rect class="g-node" x="600" y="70" width="110" height="32"/>
+      <text class="g-lab" x="612" y="90">Cafe Stand</text>
+      <rect class="g-node" x="600" y="190" width="120" height="32"/>
+      <text class="g-lab" x="612" y="210">Provisioning Bay</text>
+      <rect class="g-node" x="770" y="130" width="120" height="32"/>
+      <text class="g-lab" x="782" y="150">Service Window</text>
+
+      <!-- the orphan -->
+      <circle class="g-badge" cx="600" cy="292" r="11"/>
+      <text class="g-badge-text" x="596" y="296">1</text>
+      <rect class="g-node g-node--orphan" x="620" y="276" width="104" height="32"/>
+      <text class="g-lab" x="632" y="296">menu-block</text>
+      <text class="g-note" x="736" y="296">NO EDGE AT ALL</text>
+
+      <!-- the dangling link -->
+      <path class="g-dangle" d="M425 147 V330 H500"/>
+      <circle class="g-open" cx="512" cy="330" r="6"/>
+      <circle class="g-badge" cx="548" cy="330" r="11"/>
+      <text class="g-badge-text" x="544" y="334">3</text>
+      <text class="g-note" x="425" y="354">DANGLING: ENDPOINT MISSING</text>
+    </svg>
+    <figcaption><b>The three gaps, on a model small enough to read.</b> The main body is one
+    connected whole. The isolated group is joined to itself and to nothing else &mdash; this is the
+    shape cafe-stand actually has. The orphan has no edge at all. The dangling link runs off the
+    model and stops at an endpoint that is not there. Every one of them is <i>named</i> by the
+    platform, not folded into a score.</figcaption>
+  </figure>
 
   <figure class="measure__shot">
     <img src="shots/model-health.png" alt="The model-health view for the cafe-stand platform model. It reports one isolated group of three nodes — Cafe Stand, Provisioning Bay and Service Window — cut off from the main body, with orphaned nodes, dangling links and uncovered requirements reported on the same screen." width="1440" height="900" loading="lazy">
