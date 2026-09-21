@@ -174,6 +174,39 @@
   </div>
 </section>
 
+<section class="section shell" id="screenshots" aria-labelledby="screenshots-h">
+  <div class="section__head">
+    <p class="eyebrow">Screenshots</p>
+    <h2 id="screenshots-h">What the product looks like.</h2>
+    <p>Three captures from the live showcase (<a href="https://trial.modelwrite.org">trial.modelwrite.org</a>),
+    each chosen for the claim it proves. They are screen captures of the running workbench, not mock-ups.</p>
+  </div>
+
+  <div class="figures">
+    <figure>
+      <img src="shots/model-health.png" alt="The model-health view for the cafe-stand platform model. It reports one isolated group of three nodes — Cafe Stand, Provisioning Bay and Service Window — cut off from the main body, with orphaned nodes, dangling links and uncovered requirements reported on the same screen." width="1440" height="960" loading="lazy">
+      <figcaption><b>Model health answers &ldquo;what is broken in my model&rdquo; on one screen.</b>
+      For cafe-stand it names the isolated group &mdash; Cafe Stand, Provisioning Bay and Service Window &mdash;
+      rather than summarising the model into a score.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="shots/variant-impact.png" alt="The variant impact panel comparing cafe-stand main against with-microduck. The floor-care reference is marked changed, and requirement CS-4 Floor Kept Clear is satisfied by Cup Collector (floor-robot) on main and Gripper Arm (microduck) on with-microduck, each resolution named." width="832" height="943" loading="lazy">
+      <figcaption><b>The variant impact panel proves the two-robot trade study.</b>
+      CS-4 &middot; Floor Kept Clear is satisfied by <b>Cup Collector</b> (floor-robot) on main and
+      <b>Gripper Arm</b> (microduck) on with-microduck &mdash; the changed floor-care choice is marked, and each
+      cross-model edge resolves to a named element at its pinned revision.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="shots/process-diagram.png" alt="The cafe-stand business process rendered as an orthogonally-routed diagram: axis-aligned edges, shared trunks for fan-out, a separate dashed lane for dependency edges, and jump arcs where edges cross." width="1216" height="705" loading="lazy">
+      <figcaption><b>The process diagram is the engineering-grade output.</b>
+      Edges are routed orthogonally &mdash; shared trunks for fan-out, a separate lane for Satisfy edges, and a
+      jump arc at every crossing so a crossing is never mistaken for a junction.</figcaption>
+    </figure>
+  </div>
+</section>
+
 <section class="section shell" id="ask" aria-labelledby="ask-h">
   <div class="section__head">
     <p class="eyebrow">03 / Ask it</p>
@@ -591,8 +624,9 @@ cargo test -p mw-binding-xmi --test real_tmt -- --nocapture</code></pre>
   <div class="section__head">
     <p class="eyebrow">08 / Install</p>
     <h2 id="install-h">Install and run it yourself</h2>
-    <p>The Rust crates are not published to crates.io; build from the repository. You need Rust
-    stable via rustup.</p>
+    <p>The engine crates, the server and the CLI are published on crates.io at 0.2.0
+    (<code>cargo install mw-cli</code> installs the CLI). To build from the repository you need
+    Rust stable via rustup.</p>
   </div>
 
   <div class="prose">
