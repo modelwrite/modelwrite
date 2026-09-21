@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelwrite"
+version = "0.1.0"
+description = "Thin read-only Python client for the modelwrite analytics REST surface (mw-analytics-schema@1)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "the modelwrite contributors" }]
+keywords = ["sysml", "mbse", "analytics", "okf", "modelwrite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "requests>=2.25",
+]
+
+[project.optional-dependencies]
+arrow = ["pyarrow>=10.0"]
+pandas = ["pandas>=1.5"]
+all = ["pyarrow>=10.0", "pandas>=1.5"]
+test = ["pytest>=7.0", "pyarrow>=10.0", "pandas>=1.5"]
+
+[project.urls]
+Homepage = "https://github.com/modelwrite/modelwrite"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modelwrite*"]
+
+# py.typed is a marker file, not a module: without this it is not shipped in the
+# wheel and type checkers stop seeing the package as typed.
+[tool.setuptools.package-data]
+modelwrite = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: integration test that runs against a live mw-server (set MW_TEST_BASE_URL)",
+]

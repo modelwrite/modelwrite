@@ -1,0 +1,2171 @@
+{
+  "_comment": "Recorded from a real mw-server by tests/record_fixture.py. Rows are the camelCase JSON wire exactly as the server sent them.",
+  "schemaVersion": "mw-analytics-schema@1",
+  "model": "purchasing-terminal",
+  "expected": {
+    "projects": 1,
+    "commits": 1,
+    "elements": 13,
+    "relationships": 16,
+    "requirements": 6,
+    "trace_links": 6,
+    "metrics": 25,
+    "metric_definitions": 25,
+    "import_losses": 0
+  },
+  "tables": {
+    "projects": {
+      "total": 1,
+      "nextCursor": null,
+      "rows": [
+        {
+          "createdAt": "1790028391",
+          "project": "purchasing-terminal-795e5541"
+        }
+      ]
+    },
+    "commits": {
+      "total": 1,
+      "nextCursor": null,
+      "rows": [
+        {
+          "author": "python-bindings-test",
+          "bindingId": null,
+          "bindingVersion": null,
+          "branch": "main",
+          "committedAt": "1790028392",
+          "hash": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "importArtifactHash": null,
+          "message": "seed purchasing-terminal-795e5541",
+          "okfHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "parents": [],
+          "project": "purchasing-terminal-795e5541",
+          "provenanceKind": "authored"
+        }
+      ]
+    },
+    "elements": {
+      "total": 13,
+      "nextCursor": null,
+      "rows": [
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Contactless, chip and magstripe card interface.",
+          "elementId": "card-reader",
+          "kind": "block",
+          "name": "Card Reader",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Carries acquirer traffic over the store network.",
+          "elementId": "comms-module",
+          "kind": "block",
+          "name": "Comms Module",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Customer-facing basket and payment prompts.",
+          "elementId": "display",
+          "kind": "block",
+          "name": "Display",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "cardReader",
+              "type": "Card Reader"
+            },
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "keypad",
+              "type": "Keypad"
+            },
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "comms",
+              "type": "Comms Module"
+            },
+            {
+              "aggregation": "none",
+              "default": "",
+              "name": "secureElement",
+              "type": "Secure Element"
+            }
+          ],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Payment device handling card presentment, PIN entry and acquirer messaging.",
+          "elementId": "eftpos",
+          "kind": "block",
+          "name": "EFTPOS Machine",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block",
+            "InterfaceBlock"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Payment network link.",
+          "elementId": "if-acquirer",
+          "kind": "interface",
+          "name": "Acquirer Link",
+          "project": "purchasing-terminal-795e5541",
+          "section": "interfaces",
+          "stereotypes": [
+            "InterfaceBlock"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Encrypted PIN entry keypad.",
+          "elementId": "keypad",
+          "kind": "block",
+          "name": "PIN Keypad",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Mains to low-voltage conversion for the terminal and the EFTPOS machine.",
+          "elementId": "power-supply",
+          "kind": "block",
+          "name": "Power Supply",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "eftpos",
+              "type": "EFTPOS Machine"
+            },
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "display",
+              "type": "Display"
+            },
+            {
+              "aggregation": "composite",
+              "default": "",
+              "name": "printer",
+              "type": "Receipt Printer"
+            },
+            {
+              "aggregation": "none",
+              "default": "",
+              "name": "mainsInlet",
+              "type": "Mains Inlet"
+            }
+          ],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "A self-service terminal that prices goods and takes payment through an attached EFTPOS machine.",
+          "elementId": "purchasing-terminal",
+          "kind": "block",
+          "name": "Purchasing Terminal",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Thermal printer producing the customer receipt.",
+          "elementId": "receipt-printer",
+          "kind": "block",
+          "name": "Receipt Printer",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "Tamper-responsive store for keys and the payment application.",
+          "elementId": "secure-element",
+          "kind": "block",
+          "name": "Secure Element",
+          "project": "purchasing-terminal-795e5541",
+          "section": "structure",
+          "stereotypes": [
+            "Block"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "",
+          "elementId": "sig-card-presented",
+          "kind": "signal",
+          "name": "CardPresented",
+          "project": "purchasing-terminal-795e5541",
+          "section": "signals",
+          "stereotypes": [
+            "Signal"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "",
+          "elementId": "sig-payment-approved",
+          "kind": "signal",
+          "name": "PaymentApproved",
+          "project": "purchasing-terminal-795e5541",
+          "section": "signals",
+          "stereotypes": [
+            "Signal"
+          ]
+        },
+        {
+          "attributes": [],
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "documentation": "",
+          "elementId": "sig-payment-declined",
+          "kind": "signal",
+          "name": "PaymentDeclined",
+          "project": "purchasing-terminal-795e5541",
+          "section": "signals",
+          "stereotypes": [
+            "Signal"
+          ]
+        }
+      ]
+    },
+    "relationships": {
+      "total": 16,
+      "nextCursor": null,
+      "rows": [
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "card-reader",
+          "target": "req-contactless-time"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "comms-module",
+          "target": "req-offline"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "cardReader",
+          "project": "purchasing-terminal-795e5541",
+          "source": "eftpos",
+          "target": "card-reader"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "comms",
+          "project": "purchasing-terminal-795e5541",
+          "source": "eftpos",
+          "target": "comms-module"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "keypad",
+          "project": "purchasing-terminal-795e5541",
+          "source": "eftpos",
+          "target": "keypad"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "association",
+          "label": "paysFor",
+          "project": "purchasing-terminal-795e5541",
+          "source": "eftpos",
+          "target": "purchasing-terminal"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "secureElement",
+          "project": "purchasing-terminal-795e5541",
+          "source": "eftpos",
+          "target": "secure-element"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "keypad",
+          "target": "req-pin-privacy"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "association",
+          "label": "pinPath",
+          "project": "purchasing-terminal-795e5541",
+          "source": "keypad",
+          "target": "secure-element"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "display",
+          "project": "purchasing-terminal-795e5541",
+          "source": "purchasing-terminal",
+          "target": "display"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "eftpos",
+          "project": "purchasing-terminal-795e5541",
+          "source": "purchasing-terminal",
+          "target": "eftpos"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "power",
+          "project": "purchasing-terminal-795e5541",
+          "source": "purchasing-terminal",
+          "target": "power-supply"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "part",
+          "label": "printer",
+          "project": "purchasing-terminal-795e5541",
+          "source": "purchasing-terminal",
+          "target": "receipt-printer"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "purchasing-terminal",
+          "target": "req-audit"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "receipt-printer",
+          "target": "req-receipt"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "kind": "dependency",
+          "label": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "source": "secure-element",
+          "target": "req-pci"
+        }
+      ]
+    },
+    "requirements": {
+      "total": 6,
+      "nextCursor": null,
+      "rows": [
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-audit",
+          "identifier": "PT-6",
+          "kind": "requirement",
+          "name": "Transaction Log",
+          "project": "purchasing-terminal-795e5541",
+          "text": "The terminal shall keep an append-only transaction log sufficient to reconcile a shift."
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-contactless-time",
+          "identifier": "PT-2",
+          "kind": "requirement",
+          "name": "Contactless Time",
+          "project": "purchasing-terminal-795e5541",
+          "text": "The terminal shall complete a contactless payment of 100 or less within 2 seconds of card presentation."
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-offline",
+          "identifier": "PT-4",
+          "kind": "requirement",
+          "name": "Offline Floor Limit",
+          "project": "purchasing-terminal-795e5541",
+          "text": "When the acquirer link is unavailable the terminal shall store transactions up to a configured floor limit and forward them when the link returns."
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-pci",
+          "identifier": "PT-1",
+          "kind": "requirement",
+          "name": "Card Data Protection",
+          "project": "purchasing-terminal-795e5541",
+          "text": "The terminal shall not store card primary account numbers outside the secure element, and shall render stored keys unusable on tamper detection."
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-pin-privacy",
+          "identifier": "PT-5",
+          "kind": "requirement",
+          "name": "PIN Privacy",
+          "project": "purchasing-terminal-795e5541",
+          "text": "The keypad shall encrypt the PIN within the secure element and never expose it to the terminal application."
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "covered": true,
+          "coveringLinkKinds": [
+            "Satisfy"
+          ],
+          "elementId": "req-receipt",
+          "identifier": "PT-3",
+          "kind": "requirement",
+          "name": "Receipt",
+          "project": "purchasing-terminal-795e5541",
+          "text": "The terminal shall print a receipt showing the basket, the amount tendered and the approval code for every approved payment."
+        }
+      ]
+    },
+    "trace_links": {
+      "total": 6,
+      "nextCursor": null,
+      "rows": [
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "purchasing-terminal",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-audit",
+          "sourceId": "purchasing-terminal",
+          "targetId": "req-audit"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "card-reader",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-contactless-time",
+          "sourceId": "card-reader",
+          "targetId": "req-contactless-time"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "comms-module",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-offline",
+          "sourceId": "comms-module",
+          "targetId": "req-offline"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "secure-element",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-pci",
+          "sourceId": "secure-element",
+          "targetId": "req-pci"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "keypad",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-pin-privacy",
+          "sourceId": "keypad",
+          "targetId": "req-pin-privacy"
+        },
+        {
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "elementId": "receipt-printer",
+          "linkKind": "Satisfy",
+          "project": "purchasing-terminal-795e5541",
+          "requirementId": "req-receipt",
+          "sourceId": "receipt-printer",
+          "targetId": "req-receipt"
+        }
+      ]
+    },
+    "metrics": {
+      "total": 25,
+      "nextCursor": null,
+      "rows": [
+        {
+          "basisElementCount": 6,
+          "basisNote": "self-specification: the model's own requirements",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "compliance.covered_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "self-specification: the model's own requirements",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "compliance.specification_size",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "self-specification: the model's own requirements",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "compliance.uncovered_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "self-specification: the model's own requirements",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "compliance.unknown_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "no cost dataset supplied; every requirement is uncosted",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "cost.costed_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "no cost dataset supplied; every requirement is uncosted",
+          "basisRelationshipCount": 0,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "cost.uncosted_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.allocated",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.covered",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.refined",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.satisfied",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.total",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 6,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.uncovered",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 6,
+          "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+          "basisRelationshipCount": 6,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "coverage.verified",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.passed",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "bool",
+          "value": 1,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.roundtrip.changed_attributes",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.roundtrip.extra_edges",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.roundtrip.extra_elements",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.roundtrip.missing_edges",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.roundtrip.missing_elements",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.validation_errors",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 13,
+          "basisNote": "self-gate (no reference): the model gated against itself",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "gate.validation_warnings",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 4,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 15,
+          "basisNote": "graph stats over 15 nodes and 16 edges",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "graph.component_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 1,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 15,
+          "basisNote": "graph stats over 15 nodes and 16 edges",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "graph.edge_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 16,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 15,
+          "basisNote": "graph stats over 15 nodes and 16 edges",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "graph.isolated_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 0,
+          "valueState": "present"
+        },
+        {
+          "basisElementCount": 15,
+          "basisNote": "graph stats over 15 nodes and 16 edges",
+          "basisRelationshipCount": 16,
+          "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+          "constructsNotCarried": 0,
+          "engineVersion": "0.2.0",
+          "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+          "metricId": "graph.node_count",
+          "project": "purchasing-terminal-795e5541",
+          "trust": "measured",
+          "unit": "count",
+          "value": 15,
+          "valueState": "present"
+        }
+      ]
+    },
+    "metric_definitions": {
+      "total": 25,
+      "nextCursor": null,
+      "rows": [
+        {
+          "dependsOn": [
+            "requirements",
+            "graph.edges"
+          ],
+          "description": "Requirements of the specification present and covered by the model.",
+          "id": "compliance.covered_count",
+          "name": "Specification covered",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements"
+          ],
+          "description": "Number of requirements in the caller's specification (the portfolio question).",
+          "id": "compliance.specification_size",
+          "name": "Specification size",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements",
+            "graph.edges"
+          ],
+          "description": "Requirements of the specification present in the model but uncovered.",
+          "id": "compliance.uncovered_count",
+          "name": "Specification uncovered",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements"
+          ],
+          "description": "Requirements of the specification absent from the model entirely. Never rendered as a blank.",
+          "id": "compliance.unknown_count",
+          "name": "Specification unknown",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements",
+            "dataset"
+          ],
+          "description": "Number of requirements with at least one cost record across the supplied datasets.",
+          "id": "cost.costed_count",
+          "name": "Costed requirements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements",
+            "dataset"
+          ],
+          "description": "Number of requirements with no cost record. Never rendered as zero.",
+          "id": "cost.uncosted_count",
+          "name": "Uncosted requirements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.edges"
+          ],
+          "description": "Number of dependency edges labelled Allocate with a requirement endpoint.",
+          "id": "coverage.allocated",
+          "name": "Allocated links",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements",
+            "graph.edges"
+          ],
+          "description": "Number of requirements covered by at least one Satisfy/Refine/Verify/Allocate edge.",
+          "id": "coverage.covered",
+          "name": "Covered requirements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.edges"
+          ],
+          "description": "Number of dependency edges labelled Refine that target a requirement.",
+          "id": "coverage.refined",
+          "name": "Refined links",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.edges"
+          ],
+          "description": "Number of dependency edges labelled Satisfy that target a requirement.",
+          "id": "coverage.satisfied",
+          "name": "Satisfied links",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements"
+          ],
+          "description": "Number of requirements in the model.",
+          "id": "coverage.total",
+          "name": "Requirements total",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "requirements",
+            "graph.edges"
+          ],
+          "description": "Number of requirements with no covering edge. Each is named in the coverage report's uncovered list.",
+          "id": "coverage.uncovered",
+          "name": "Uncovered requirements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.edges"
+          ],
+          "description": "Number of dependency edges labelled Verify that target a requirement.",
+          "id": "coverage.verified",
+          "name": "Verified links",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate"
+          ],
+          "description": "Whether the gate run passed (1) or failed (0) against its reference.",
+          "id": "gate.passed",
+          "name": "Gate passed",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "diff"
+          ],
+          "description": "Attributes whose value differs between reference and candidate after a round trip.",
+          "id": "gate.roundtrip.changed_attributes",
+          "name": "Changed attributes",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "diff"
+          ],
+          "description": "Edges present in the candidate but not the reference after a round trip.",
+          "id": "gate.roundtrip.extra_edges",
+          "name": "Extra edges",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "diff"
+          ],
+          "description": "Elements present in the candidate but not the reference after a round trip.",
+          "id": "gate.roundtrip.extra_elements",
+          "name": "Extra elements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "diff"
+          ],
+          "description": "Edges present in the reference but missing from the candidate after a round trip.",
+          "id": "gate.roundtrip.missing_edges",
+          "name": "Missing edges",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "diff"
+          ],
+          "description": "Elements present in the reference but missing from the candidate after a round trip.",
+          "id": "gate.roundtrip.missing_elements",
+          "name": "Missing elements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "validate"
+          ],
+          "description": "Number of validation errors the gate recorded for the candidate.",
+          "id": "gate.validation_errors",
+          "name": "Validation errors",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "gate",
+            "validate"
+          ],
+          "description": "Number of validation warnings the gate recorded, including dangling edge endpoints.",
+          "id": "gate.validation_warnings",
+          "name": "Validation warnings",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.nodes",
+            "graph.edges"
+          ],
+          "description": "Number of connected components in the graph. More than one means the model is split into isolated groups.",
+          "id": "graph.component_count",
+          "name": "Isolated groups",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.edges"
+          ],
+          "description": "Number of edges in the graph section (every relationship as an edge).",
+          "id": "graph.edge_count",
+          "name": "Graph edges",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.nodes",
+            "graph.edges"
+          ],
+          "description": "Number of graph nodes with no incident edge. The graph-gaps headline: every orphan is named in graph_stats.isolated.",
+          "id": "graph.isolated_count",
+          "name": "Orphaned elements",
+          "status": "active"
+        },
+        {
+          "dependsOn": [
+            "graph.nodes"
+          ],
+          "description": "Number of nodes in the graph section (every element as a node).",
+          "id": "graph.node_count",
+          "name": "Graph nodes",
+          "status": "active"
+        }
+      ]
+    },
+    "import_losses": {
+      "total": 0,
+      "nextCursor": null,
+      "rows": []
+    }
+  },
+  "metrics": {
+    "total": 25,
+    "rows": [
+      {
+        "basisElementCount": 6,
+        "basisNote": "self-specification: the model's own requirements",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "compliance.covered_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "self-specification: the model's own requirements",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "compliance.specification_size",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "self-specification: the model's own requirements",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "compliance.uncovered_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "self-specification: the model's own requirements",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "compliance.unknown_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "no cost dataset supplied; every requirement is uncosted",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "cost.costed_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "no cost dataset supplied; every requirement is uncosted",
+        "basisRelationshipCount": 0,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "cost.uncosted_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.allocated",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.covered",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.refined",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.satisfied",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.total",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 6,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.uncovered",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 6,
+        "basisNote": "requirement coverage over 6 requirements and 6 coverage edges",
+        "basisRelationshipCount": 6,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "coverage.verified",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.passed",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "bool",
+        "value": 1,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.roundtrip.changed_attributes",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.roundtrip.extra_edges",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.roundtrip.extra_elements",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.roundtrip.missing_edges",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.roundtrip.missing_elements",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.validation_errors",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 13,
+        "basisNote": "self-gate (no reference): the model gated against itself",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "gate.validation_warnings",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 4,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 15,
+        "basisNote": "graph stats over 15 nodes and 16 edges",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "graph.component_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 1,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 15,
+        "basisNote": "graph stats over 15 nodes and 16 edges",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "graph.edge_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 16,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 15,
+        "basisNote": "graph stats over 15 nodes and 16 edges",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "graph.isolated_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 0,
+        "valueState": "present"
+      },
+      {
+        "basisElementCount": 15,
+        "basisNote": "graph stats over 15 nodes and 16 edges",
+        "basisRelationshipCount": 16,
+        "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+        "constructsNotCarried": 0,
+        "engineVersion": "0.2.0",
+        "evidenceHash": "4d50b4f29ceb27f2c56612446e53e668798f1c5d1fd225a793048e37a44931b1",
+        "metricId": "graph.node_count",
+        "project": "purchasing-terminal-795e5541",
+        "trust": "measured",
+        "unit": "count",
+        "value": 15,
+        "valueState": "present"
+      }
+    ]
+  },
+  "paginated": {
+    "table": "elements",
+    "limit": 5,
+    "pages": [
+      {
+        "total": 13,
+        "nextCursor": "5",
+        "rows": [
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Contactless, chip and magstripe card interface.",
+            "elementId": "card-reader",
+            "kind": "block",
+            "name": "Card Reader",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Carries acquirer traffic over the store network.",
+            "elementId": "comms-module",
+            "kind": "block",
+            "name": "Comms Module",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Customer-facing basket and payment prompts.",
+            "elementId": "display",
+            "kind": "block",
+            "name": "Display",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "cardReader",
+                "type": "Card Reader"
+              },
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "keypad",
+                "type": "Keypad"
+              },
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "comms",
+                "type": "Comms Module"
+              },
+              {
+                "aggregation": "none",
+                "default": "",
+                "name": "secureElement",
+                "type": "Secure Element"
+              }
+            ],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Payment device handling card presentment, PIN entry and acquirer messaging.",
+            "elementId": "eftpos",
+            "kind": "block",
+            "name": "EFTPOS Machine",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block",
+              "InterfaceBlock"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Payment network link.",
+            "elementId": "if-acquirer",
+            "kind": "interface",
+            "name": "Acquirer Link",
+            "project": "purchasing-terminal-795e5541",
+            "section": "interfaces",
+            "stereotypes": [
+              "InterfaceBlock"
+            ]
+          }
+        ]
+      },
+      {
+        "total": 13,
+        "nextCursor": "10",
+        "rows": [
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Encrypted PIN entry keypad.",
+            "elementId": "keypad",
+            "kind": "block",
+            "name": "PIN Keypad",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Mains to low-voltage conversion for the terminal and the EFTPOS machine.",
+            "elementId": "power-supply",
+            "kind": "block",
+            "name": "Power Supply",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "eftpos",
+                "type": "EFTPOS Machine"
+              },
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "display",
+                "type": "Display"
+              },
+              {
+                "aggregation": "composite",
+                "default": "",
+                "name": "printer",
+                "type": "Receipt Printer"
+              },
+              {
+                "aggregation": "none",
+                "default": "",
+                "name": "mainsInlet",
+                "type": "Mains Inlet"
+              }
+            ],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "A self-service terminal that prices goods and takes payment through an attached EFTPOS machine.",
+            "elementId": "purchasing-terminal",
+            "kind": "block",
+            "name": "Purchasing Terminal",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Thermal printer producing the customer receipt.",
+            "elementId": "receipt-printer",
+            "kind": "block",
+            "name": "Receipt Printer",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "Tamper-responsive store for keys and the payment application.",
+            "elementId": "secure-element",
+            "kind": "block",
+            "name": "Secure Element",
+            "project": "purchasing-terminal-795e5541",
+            "section": "structure",
+            "stereotypes": [
+              "Block"
+            ]
+          }
+        ]
+      },
+      {
+        "total": 13,
+        "nextCursor": null,
+        "rows": [
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "",
+            "elementId": "sig-card-presented",
+            "kind": "signal",
+            "name": "CardPresented",
+            "project": "purchasing-terminal-795e5541",
+            "section": "signals",
+            "stereotypes": [
+              "Signal"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "",
+            "elementId": "sig-payment-approved",
+            "kind": "signal",
+            "name": "PaymentApproved",
+            "project": "purchasing-terminal-795e5541",
+            "section": "signals",
+            "stereotypes": [
+              "Signal"
+            ]
+          },
+          {
+            "attributes": [],
+            "commit": "7cd9b93eae65d1cb5db2c895099017864ad4d30b3650eb71bf8c1dcf4b425f80",
+            "documentation": "",
+            "elementId": "sig-payment-declined",
+            "kind": "signal",
+            "name": "PaymentDeclined",
+            "project": "purchasing-terminal-795e5541",
+            "section": "signals",
+            "stereotypes": [
+              "Signal"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "schema": {
+    "metricDefinitions": [
+      {
+        "depends_on": [
+          "graph.nodes"
+        ],
+        "description": "Number of nodes in the graph section (every element as a node).",
+        "id": "graph.node_count",
+        "name": "Graph nodes",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.edges"
+        ],
+        "description": "Number of edges in the graph section (every relationship as an edge).",
+        "id": "graph.edge_count",
+        "name": "Graph edges",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.nodes",
+          "graph.edges"
+        ],
+        "description": "Number of graph nodes with no incident edge. The graph-gaps headline: every orphan is named in graph_stats.isolated.",
+        "id": "graph.isolated_count",
+        "name": "Orphaned elements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.nodes",
+          "graph.edges"
+        ],
+        "description": "Number of connected components in the graph. More than one means the model is split into isolated groups.",
+        "id": "graph.component_count",
+        "name": "Isolated groups",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements"
+        ],
+        "description": "Number of requirements in the model.",
+        "id": "coverage.total",
+        "name": "Requirements total",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.edges"
+        ],
+        "description": "Number of dependency edges labelled Satisfy that target a requirement.",
+        "id": "coverage.satisfied",
+        "name": "Satisfied links",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.edges"
+        ],
+        "description": "Number of dependency edges labelled Refine that target a requirement.",
+        "id": "coverage.refined",
+        "name": "Refined links",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.edges"
+        ],
+        "description": "Number of dependency edges labelled Verify that target a requirement.",
+        "id": "coverage.verified",
+        "name": "Verified links",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "graph.edges"
+        ],
+        "description": "Number of dependency edges labelled Allocate with a requirement endpoint.",
+        "id": "coverage.allocated",
+        "name": "Allocated links",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "graph.edges"
+        ],
+        "description": "Number of requirements covered by at least one Satisfy/Refine/Verify/Allocate edge.",
+        "id": "coverage.covered",
+        "name": "Covered requirements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "graph.edges"
+        ],
+        "description": "Number of requirements with no covering edge. Each is named in the coverage report's uncovered list.",
+        "id": "coverage.uncovered",
+        "name": "Uncovered requirements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements"
+        ],
+        "description": "Number of requirements in the caller's specification (the portfolio question).",
+        "id": "compliance.specification_size",
+        "name": "Specification size",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "graph.edges"
+        ],
+        "description": "Requirements of the specification present and covered by the model.",
+        "id": "compliance.covered_count",
+        "name": "Specification covered",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "graph.edges"
+        ],
+        "description": "Requirements of the specification present in the model but uncovered.",
+        "id": "compliance.uncovered_count",
+        "name": "Specification uncovered",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements"
+        ],
+        "description": "Requirements of the specification absent from the model entirely. Never rendered as a blank.",
+        "id": "compliance.unknown_count",
+        "name": "Specification unknown",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "dataset"
+        ],
+        "description": "Number of requirements with at least one cost record across the supplied datasets.",
+        "id": "cost.costed_count",
+        "name": "Costed requirements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "requirements",
+          "dataset"
+        ],
+        "description": "Number of requirements with no cost record. Never rendered as zero.",
+        "id": "cost.uncosted_count",
+        "name": "Uncosted requirements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate"
+        ],
+        "description": "Whether the gate run passed (1) or failed (0) against its reference.",
+        "id": "gate.passed",
+        "name": "Gate passed",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "validate"
+        ],
+        "description": "Number of validation errors the gate recorded for the candidate.",
+        "id": "gate.validation_errors",
+        "name": "Validation errors",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "validate"
+        ],
+        "description": "Number of validation warnings the gate recorded, including dangling edge endpoints.",
+        "id": "gate.validation_warnings",
+        "name": "Validation warnings",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "diff"
+        ],
+        "description": "Elements present in the reference but missing from the candidate after a round trip.",
+        "id": "gate.roundtrip.missing_elements",
+        "name": "Missing elements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "diff"
+        ],
+        "description": "Elements present in the candidate but not the reference after a round trip.",
+        "id": "gate.roundtrip.extra_elements",
+        "name": "Extra elements",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "diff"
+        ],
+        "description": "Edges present in the reference but missing from the candidate after a round trip.",
+        "id": "gate.roundtrip.missing_edges",
+        "name": "Missing edges",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "diff"
+        ],
+        "description": "Edges present in the candidate but not the reference after a round trip.",
+        "id": "gate.roundtrip.extra_edges",
+        "name": "Extra edges",
+        "status": "active"
+      },
+      {
+        "depends_on": [
+          "gate",
+          "diff"
+        ],
+        "description": "Attributes whose value differs between reference and candidate after a round trip.",
+        "id": "gate.roundtrip.changed_attributes",
+        "name": "Changed attributes",
+        "status": "active"
+      }
+    ],
+    "schemaVersion": "mw-analytics-schema@1",
+    "tables": [
+      {
+        "columns": [
+          "project",
+          "created_at"
+        ],
+        "name": "projects"
+      },
+      {
+        "columns": [
+          "hash",
+          "project",
+          "branch",
+          "parents",
+          "author",
+          "message",
+          "committed_at",
+          "okf_hash",
+          "provenance_kind",
+          "import_artifact_hash",
+          "binding_id",
+          "binding_version"
+        ],
+        "name": "commits"
+      },
+      {
+        "columns": [
+          "project",
+          "commit",
+          "element_id",
+          "section",
+          "name",
+          "kind",
+          "stereotypes",
+          "attributes",
+          "documentation"
+        ],
+        "name": "elements"
+      },
+      {
+        "columns": [
+          "project",
+          "commit",
+          "source",
+          "target",
+          "kind",
+          "label"
+        ],
+        "name": "relationships"
+      },
+      {
+        "columns": [
+          "project",
+          "commit",
+          "element_id",
+          "identifier",
+          "text",
+          "name",
+          "kind",
+          "covered",
+          "covering_link_kinds"
+        ],
+        "name": "requirements"
+      },
+      {
+        "columns": [
+          "project",
+          "commit",
+          "requirement_id",
+          "element_id",
+          "link_kind",
+          "source_id",
+          "target_id"
+        ],
+        "name": "trace_links"
+      },
+      {
+        "columns": [
+          "project",
+          "commit",
+          "metric_id",
+          "value",
+          "value_state",
+          "unit",
+          "trust",
+          "basis_element_count",
+          "basis_relationship_count",
+          "constructs_not_carried",
+          "basis_note",
+          "engine_version",
+          "evidence_hash"
+        ],
+        "name": "metrics"
+      },
+      {
+        "columns": [
+          "id",
+          "name",
+          "description",
+          "depends_on",
+          "status"
+        ],
+        "name": "metric_definitions"
+      },
+      {
+        "columns": [
+          "import_artifact_hash",
+          "project",
+          "binding_id",
+          "binding_version",
+          "construct",
+          "subject",
+          "severity",
+          "note"
+        ],
+        "name": "import_losses"
+      }
+    ]
+  }
+}

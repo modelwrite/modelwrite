@@ -32,6 +32,22 @@ jobs:
           diff /tmp/self-pass.json docs/evidence/2026-09-17-roundtrip-self-pass.json
           diff /tmp/corrupted-fail.json docs/evidence/2026-09-17-roundtrip-corrupted-fail.json
       - run: python -m unittest discover -s judge/tests -p "test_*.py" -v
+      # The Python bindings are a thin client over the analytics REST surface.
+      # Their live tests start this job's own mw-server build on a scratch MW_DB,
+      # seed e2e/models/*.json, and assert the row counts against the source
+      # model, so the wire contract is exercised, not mocked.
+      - name: build mw-server for the Python bindings live tests
+        run: cargo build -p mw-server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python bindings tests against a locally started mw-server
+        env:
+          MW_SERVER_BIN: ${{ github.workspace }}/target/debug/mw-server
+        run: |
+          python -m pip install --quiet --no-deps -e bindings/python
+          python -m pip install --quiet pytest requests pyarrow pandas
+          python -m pytest bindings/python/tests -q
 
   docs:
     # The generated documentation sections (crate licences, the binding list, the
