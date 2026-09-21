@@ -263,8 +263,17 @@ ul.projects {
   background: var(--surface);
 }
 /* gap: 0 with a rule on two sides of every cell gives a true ruled grid and
-   leaves no filled empty cell at the end of an incomplete row. */
-ul.projects li { margin: 0; padding: 0; border: none; background: none; }
+   leaves no filled empty cell at the end of an incomplete row. The cell is the
+   ruled box and a column: the whole-card link is its body, and the health band
+   is its footer, so the readout sits at the bottom of every card in a row. */
+ul.projects li {
+  margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
 
 ul.branches li, ul.proposals li, ul.proposal-list li {
   border: 1px solid var(--border);
@@ -278,11 +287,9 @@ ul.proposals li h2, ul.proposal-list li h2 { margin-top: 0; }
 a.project-card {
   position: relative;
   display: flex; flex-direction: column; gap: 0.3rem;
-  height: 100%;
+  flex: 1 1 auto;
   padding: 0.8rem 0.9rem 0.8rem 1.05rem;
   border: none;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: var(--surface);
   color: var(--text);
@@ -323,6 +330,49 @@ a.project-card:hover .project-name { color: var(--accent-strong); }
   font-size: 11px; font-weight: 650; color: var(--accent);
   letter-spacing: 0.08em; text-transform: uppercase;
   display: inline-flex; align-items: center; gap: 0.3rem;
+}
+
+/* -- the per-card health readout ----------------------------------------- */
+/* The front door's answer to "is this model any good?": the NAMED gap counts the
+   health view computes, for this project's default branch head. There is no score
+   and no percentage here on purpose - this product names gaps, it never
+   summarises them into one number - so the band lists the named counts, with a
+   short label each, and links to the view that names every one of them.
+   A clean model is plainly clean: pass ink, the words "no gaps", no band.
+   A model with gaps wears the warn band, so twelve cards triage in one glance.
+   A model with nothing to measure says so and wears neither, because
+   "nothing to measure" is not "nothing wrong". No colour is introduced: this
+   block reuses the tokens above and nothing else. */
+.project-health {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem;
+  margin: 0;
+  padding: 0.45rem 0.9rem 0.45rem 1.05rem;
+  border-top: 1px solid var(--border-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.project-health .dot { color: inherit; opacity: 0.55; margin: 0; }
+.project-health .health-label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.project-health .health-link {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-weight: 650;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.project-health.is-clean { color: var(--pass); font-family: var(--font-ui); }
+.project-health.is-clean .health-verdict { font-weight: 650; }
+.project-health.is-unmeasured { color: var(--text-3); font-family: var(--font-ui); }
+.project-health.has-gaps {
+  background: var(--warn-bg);
+  border-top-color: var(--warn);
+  border-left: 3px solid var(--warn);
+  color: var(--warn);
+  font-weight: 600;
 }
 
 a.branch-name { font-weight: 600; color: var(--text); }

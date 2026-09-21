@@ -104,11 +104,57 @@ struct DanglingLink {
 }
 
 /// The four findings the health view reports, computed once from the document.
-struct HealthReport {
+pub(crate) struct HealthReport {
     orphaned: Vec<String>,
     isolated_groups: Vec<Vec<String>>,
     dangling: Vec<DanglingLink>,
     uncovered: Vec<String>,
+}
+
+/// The NAMED gap counts a compact summary publishes, and nothing else. This product's whole
+/// position is that gaps are named rather than summarised into one number, so there is no
+/// percentage here and no derived "health" figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HealthSummary {
+    pub(crate) orphaned: usize,
+    pub(crate) isolated_groups: usize,
+    pub(crate) isolated_group_nodes: usize,
+    pub(crate) dangling: usize,
+    pub(crate) uncovered: usize,
+}
+
+impl HealthSummary {
+    /// The counts of a report: one report, one arithmetic. The health page and every card
+    /// that quotes these numbers route through here, so the two can never disagree.
+    pub(crate) fn of(report: &HealthReport) -> HealthSummary {
+        HealthSummary {
+            orphaned: report.orphaned.len(),
+            isolated_groups: report.isolated_groups.len(),
+            isolated_group_nodes: report.isolated_groups.iter().map(Vec::len).sum(),
+            dangling: report.dangling.len(),
+            uncovered: report.uncovered.len(),
+        }
+    }
+
+    /// The number of named findings, each counted once. Not a score: it is the length of the
+    /// four lists the health page renders, which is exactly what "N issues found" says.
+    pub(crate) fn findings(&self) -> usize {
+        self.orphaned + self.isolated_groups + self.dangling + self.uncovered
+    }
+
+    pub(crate) fn is_clean(&self) -> bool {
+        self.findings() == 0
+    }
+}
+
+/// The compact summary of one document, computed by the SAME detector the health page
+/// renders - never a second implementation, so a card can never disagree with the page it
+/// links to. `None` when the document carries no graph at all: the graph analysis has no
+/// input, and "nothing to measure" is not "nothing wrong".
+pub(crate) fn health_summary(root: &OkfRoot) -> Option<HealthSummary> {
+    root.graph
+        .as_ref()
+        .map(|_| HealthSummary::of(&health_report(root)))
 }
 
 /// Compute the health report from the engine's graph analysis. The orphaned set and the
@@ -219,10 +265,8 @@ fn health_markup(
 ) -> Markup {
     let report = health_report(root);
     let names = name_index(root);
-    let issue_count = report.orphaned.len()
-        + report.isolated_groups.len()
-        + report.dangling.len()
-        + report.uncovered.len();
+    // The same arithmetic the project cards quote: one summary, two surfaces.
+    let issue_count = HealthSummary::of(&report).findings();
 
     let body = html! {
         h1 { "Model health" }

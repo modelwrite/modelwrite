@@ -237,9 +237,21 @@ pub(crate) fn view_branch(query: &ModelQuery, commit: &Commit) -> String {
     }
 }
 
-/// The branch a bare overview URL resolves to: the main line when it exists, otherwise the
-/// alphabetically-first branch (the store returns branches sorted by name). Returns None for a
-/// project with no branches at all.
+/// The branch a bare overview URL resolves to, AND the branch a project card measures: the
+/// main line when it exists, otherwise the alphabetically-first branch (the store returns
+/// branches sorted by name). `None` for a project with no branches at all. ONE rule, so the
+/// front door and the page it links to always describe the same version.
+pub(crate) fn default_branch_name(branches: &[(String, String)]) -> Option<String> {
+    if branches.is_empty() {
+        return None;
+    }
+    if branches.iter().any(|(name, _)| name == "main") {
+        return Some("main".to_string());
+    }
+    branches.first().map(|(name, _)| name.clone())
+}
+
+/// The default branch of a project, read from the store.
 fn default_branch(
     state: &ApiState,
     identity: &Identity,
@@ -249,13 +261,7 @@ fn default_branch(
         .store_for(identity)
         .list_branches(project)
         .map_err(map_store_error)?;
-    if branches.is_empty() {
-        return Ok(None);
-    }
-    if branches.iter().any(|(name, _)| name == "main") {
-        return Ok(Some("main".to_string()));
-    }
-    Ok(branches.first().map(|(name, _)| name.clone()))
+    Ok(default_branch_name(&branches))
 }
 
 /// Resolve the commit to render: an explicit commit hash, else the named branch's tip

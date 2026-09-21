@@ -3,6 +3,14 @@
 //! read-only view over the store, guarded by the SAME identity resolution, `Read`
 //! permission and project-scope checks as the JSON handlers, so the workbench can never
 //! be a second implementation with weaker rules.
+//!
+//! The project list is the FRONT DOOR, and it answers the question the front door is for:
+//! which of these models is broken? Every card carries the NAMED gap counts for its default
+//! branch head - orphaned nodes, isolated groups, dangling links and uncovered requirements -
+//! computed by the model-health view's own detector ([crate::ui::health::health_summary]),
+//! never a second one, and links straight to that view for the exact commit it measured. A
+//! project with no commits says "nothing to measure" rather than showing zeros, because
+//! "nothing to measure" is not "nothing wrong".
 
 use std::collections::HashMap;
 
@@ -19,15 +27,33 @@ use crate::binding_registry;
 use crate::error::ApiError;
 use crate::store::{Commit, Store};
 use crate::ui::dropzone;
+use crate::ui::health::{health_summary, HealthSummary};
 use crate::ui::layout;
+use crate::ui::model::default_branch_name;
 use crate::ui::review::merge_form_markup;
+
+/// What the front door can honestly say about a project's model health, for its default
+/// branch head. "Nothing to measure" and "nothing wrong" are different states, and the card
+/// must never let zeros for a project with no model read as a clean one.
+enum CardHealth {
+    /// The project has no commit on any branch: there is nothing to measure.
+    NoCommits,
+    /// A branch exists but no readable document could be loaded from its head, so the graph
+    /// analysis has no input. Unmeasured, not clean.
+    NotMeasurable,
+    /// The head commit's document, measured by the health view's own detector.
+    Measured(HealthSummary),
+}
 
 struct ProjectRow {
     name: String,
     branch_count: usize,
-    latest: Option<Commit>,
+    /// The default branch's head commit: the version the card describes, and the commit its
+    /// health summary and its health link both name.
+    head: Option<Commit>,
     blocks: Option<u64>,
     requirements: Option<u64>,
+    health: CardHealth,
 }
 
 struct BranchRow {
@@ -151,23 +177,45 @@ fn render_project_list(
         if !identity.may_reach(&project.name) {
             continue;
         }
-        let branch_count = state
+        let branches = state
             .store_for(identity)
             .list_branches(&project.name)
-            .map_err(map_store_error)?
-            .len();
-        let latest = latest_commit(state.store_for(identity).as_ref(), &project.name)?;
-        let (blocks, requirements) = model_size(
-            state.store_for(identity).as_ref(),
-            &project.name,
-            latest.as_ref(),
-        );
+            .map_err(map_store_error)?;
+        let branch_count = branches.len();
+        // The card describes the DEFAULT BRANCH head - the same commit a bare model or health
+        // URL resolves to - so the counts on the card and the page it links to are read from
+        // one version. The branch read is reused rather than repeated: this runs per project
+        // on every page load.
+        let head = default_head(state.store_for(identity).as_ref(), &project.name, &branches)?;
+        // No branches at all is "nothing to measure"; a branch whose head cannot be read is
+        // also unmeasured, never clean.
+        let mut health = if branches.is_empty() {
+            CardHealth::NoCommits
+        } else {
+            CardHealth::NotMeasurable
+        };
+        let (blocks, requirements) = match &head {
+            None => (None, None),
+            Some(commit) => match load_model(
+                state.store_for(identity).as_ref(),
+                &project.name,
+                &commit.hash,
+            ) {
+                Ok(root) => {
+                    health = health_summary(&root)
+                        .map_or(CardHealth::NotMeasurable, CardHealth::Measured);
+                    (Some(root.summary.blocks), Some(root.summary.requirements))
+                }
+                Err(_) => (None, None),
+            },
+        };
         rows.push(ProjectRow {
             name: project.name,
             branch_count,
-            latest,
+            head,
             blocks,
             requirements,
+            health,
         });
     }
     let nav = layout::Nav::load(state, identity, None)?;
@@ -220,12 +268,13 @@ fn project_list_page(
                                     (requirements) " requirements"
                                 }
                             }
-                            @if let Some(latest) = &row.latest {
-                                span class="project-message" { (latest.message.as_str()) }
-                                span class="project-author" { "by " (latest.author.as_str()) }
+                            @if let Some(head) = &row.head {
+                                span class="project-message" { (head.message.as_str()) }
+                                span class="project-author" { "by " (head.author.as_str()) }
                             }
                             span class="project-open" { "Open →" }
                         }
+                        (health_band(row))
                     }
                 }
             }
@@ -536,44 +585,130 @@ fn render_project_page_refused(
     }
 }
 
-/// The latest commit in a project: the most recently created commit among the branch
-/// tips. The store exposes commits by branch and by hash, so the newest tip is the newest
-/// commit the workbench can reach without adding a store method.
-fn latest_commit(store: &dyn Store, project: &str) -> Result<Option<Commit>, ApiError> {
-    let branches = store.list_branches(project).map_err(map_store_error)?;
-    let mut latest: Option<Commit> = None;
-    for (_name, tip) in branches {
-        if let Some(commit) = store.commit(project, &tip).map_err(map_store_error)? {
-            let is_newest = match &latest {
-                None => true,
-                Some(current) => created_at(&commit) > created_at(current),
-            };
-            if is_newest {
-                latest = Some(commit);
+/// The default branch's head commit: the branch [default_branch_name] picks, with its tip.
+/// `None` when the project has no branches at all; a branch that exists but whose tip the
+/// store cannot resolve is reported as unmeasured by the caller, never as clean.
+fn default_head(
+    store: &dyn Store,
+    project: &str,
+    branches: &[(String, String)],
+) -> Result<Option<Commit>, ApiError> {
+    let Some(branch) = default_branch_name(branches) else {
+        return Ok(None);
+    };
+    let Some(tip) = store
+        .branch_tip(project, &branch)
+        .map_err(map_store_error)?
+    else {
+        return Ok(None);
+    };
+    store.commit(project, &tip).map_err(map_store_error)
+}
+
+/// The per-card health summary: the NAMED counts the model-health view computes for the
+/// default branch head, on the card, so a person with twelve models can triage the list
+/// without opening twelve models. A clean model is plainly clean; a model with gaps wears the
+/// warn band and a link to the health view that names every one of them. There is no score
+/// and no percentage on purpose - this product names gaps, it does not summarise them.
+///
+/// The counts are also published as `data-mw-*` attributes on the band, so the numbers the
+/// card carries are machine-readable and the test that pins them to the health view's own
+/// output reads the same values a reviewer sees rather than a coincidence of proximity.
+fn health_band(row: &ProjectRow) -> Markup {
+    match &row.health {
+        CardHealth::NoCommits => html! {
+            p class="project-health is-unmeasured" {
+                "no commits yet — nothing to measure"
+            }
+        },
+        CardHealth::NotMeasurable => html! {
+            p class="project-health is-unmeasured" {
+                "no readable model — nothing to measure"
+            }
+        },
+        CardHealth::Measured(summary) if summary.is_clean() => html! {
+            p class="project-health is-clean"
+                data-mw-orphaned="0"
+                data-mw-isolated-groups="0"
+                data-mw-isolated-group-nodes="0"
+                data-mw-dangling="0"
+                data-mw-uncovered="0" {
+                span class="health-verdict" { "no gaps" }
+                (health_link(row))
+            }
+        },
+        CardHealth::Measured(summary) => {
+            // Only the gaps this model HAS are named, in the health view's own order. A zero
+            // on a card is noise; the point of the band is the finding, not the form.
+            let mut gaps: Vec<Markup> = Vec::new();
+            if summary.orphaned > 0 {
+                gaps.push(named_count(summary.orphaned, "orphan", "orphans"));
+            }
+            if summary.isolated_groups > 0 {
+                let nodes = if summary.isolated_group_nodes == 1 {
+                    "node"
+                } else {
+                    "nodes"
+                };
+                gaps.push(html! {
+                    (named_count(summary.isolated_groups, "isolated group", "isolated groups"))
+                    " (" (summary.isolated_group_nodes) " " (nodes) ")"
+                });
+            }
+            if summary.dangling > 0 {
+                gaps.push(named_count(
+                    summary.dangling,
+                    "dangling link",
+                    "dangling links",
+                ));
+            }
+            if summary.uncovered > 0 {
+                gaps.push(named_count(
+                    summary.uncovered,
+                    "uncovered requirement",
+                    "uncovered requirements",
+                ));
+            }
+            html! {
+                p class="project-health has-gaps"
+                    data-mw-orphaned=(summary.orphaned)
+                    data-mw-isolated-groups=(summary.isolated_groups)
+                    data-mw-isolated-group-nodes=(summary.isolated_group_nodes)
+                    data-mw-dangling=(summary.dangling)
+                    data-mw-uncovered=(summary.uncovered) {
+                    span class="health-label" { "gaps" }
+                    @for (index, gap) in gaps.iter().enumerate() {
+                        @if index > 0 { span class="dot" { "·" } }
+                        (gap)
+                    }
+                    (health_link(row))
+                }
             }
         }
     }
-    Ok(latest)
 }
 
-fn created_at(commit: &Commit) -> i64 {
-    commit.created_at.parse::<i64>().unwrap_or(0)
+/// The health view for this card, BY COMMIT HASH: commits are immutable, so the page the
+/// reviewer lands on is the page the counts were taken from, even if the branch moves on.
+/// A project with nothing measured has no health view to offer and gets no link.
+fn health_link(row: &ProjectRow) -> Markup {
+    match (&row.health, &row.head) {
+        (CardHealth::Measured(_), Some(head)) => html! {
+            a class="health-link" href={
+                "/ui/projects/" (crate::ui::urlencode(row.name.as_str()))
+                "/health?commit=" (head.hash.as_str())
+            } { "Health →" }
+        },
+        _ => Markup::default(),
+    }
 }
 
-/// The model's declared size at the latest commit: blocks and requirements, read from the
-/// model's own summary. It is computed from the branch tip on every request and cached
-/// nowhere; a missing or unreadable model reports no size rather than failing the list.
-fn model_size(
-    store: &dyn Store,
-    project: &str,
-    latest: Option<&Commit>,
-) -> (Option<u64>, Option<u64>) {
-    let Some(commit) = latest else {
-        return (None, None);
-    };
-    match load_model(store, project, &commit.hash) {
-        Ok(root) => (Some(root.summary.blocks), Some(root.summary.requirements)),
-        Err(_) => (None, None),
+/// A named count with the right plural: "1 orphan", "10 uncovered requirements". The gap is
+/// always NAMED, because a bare number is what this product refuses to show.
+fn named_count(count: usize, singular: &str, plural: &str) -> Markup {
+    html! {
+        (count) " "
+        @if count == 1 { (singular) } @else { (plural) }
     }
 }
 
