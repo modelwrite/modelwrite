@@ -320,21 +320,24 @@ async fn an_invalid_model_change_is_refused_with_the_validators_errors() {
     let (router, store, _dir) = app_with_auth(admin());
     seed_model(&router).await;
 
-    // Craft a proposal whose candidate document is invalid: a requirement with an empty reqId.
+    // Craft a proposal whose candidate document is invalid: a requirement with an empty
+    // element id. (An empty reqId is a fact about a model, not a structural error, so the
+    // validator warns rather than refuses; an empty element id is still refused, because the
+    // element id is the traceability key every graph and coverage answer depends on.)
     let tip = store.branch_tip("coffee", "main").unwrap().unwrap();
     let current = server::api::load_model(store.as_ref(), "coffee", &tip).unwrap();
     let change = ModelChange {
         action: ProposedAction::DraftText,
         element: None,
         requirement: Some(Requirement {
-            id: "req-bad".to_string(),
+            id: String::new(),
             name: "Bad requirement".to_string(),
             kind: "requirement".to_string(),
             stereotypes: Vec::new(),
             attributes: Vec::new(),
             documentation: String::new(),
-            req_id: String::new(),
-            req_text: "no reqId".to_string(),
+            req_id: "REQ-BAD".to_string(),
+            req_text: "no element id".to_string(),
         }),
         rationale: "deliberately invalid".to_string(),
         confidence: Confidence::High,
@@ -375,7 +378,7 @@ async fn an_invalid_model_change_is_refused_with_the_validators_errors() {
     let body = json_body(accepted).await;
     let error = body["error"].as_str().unwrap();
     assert!(
-        error.contains("empty reqId"),
+        error.contains("empty element id"),
         "the refusal must carry the validator's own error, got: {}",
         error
     );
