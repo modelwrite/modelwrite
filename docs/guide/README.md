@@ -25,9 +25,9 @@ click paths. Agents start at [mcp-agents](mcp-agents.md).
 ## What modelwrite does not do
 
 Modelwrite does not run numeric or physical simulation. It does not yet migrate a real,
-content-rich vendor model without named loss. It does not yet read SysML v2 textual
-notation. The full list, each with its consequence, is on [limits](limits.md). Read that
-page before you trust anything else in this guide.
+content-rich vendor model without named loss. It reads SysML v2 textual notation as a viewer
+only (import, no export). The full list, each with its consequence, is on
+[limits](limits.md). Read that page before you trust anything else in this guide.
 
 ## The four URLs
 

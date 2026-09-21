@@ -65,7 +65,7 @@
   <ul class="chips">
     <li>OKF 1.0</li>
     <li>AGPL-3.0-or-later engine</li>
-    <li>Apache-2.0 schema</li>
+    <li>Apache-2.0 analytics schema</li>
     <li>XMI + SysML v2 textual</li>
     <li>self-hosted, air-gapped</li>
     <li>SQLite or PostgreSQL</li>
@@ -613,8 +613,10 @@ cargo test -p mw-binding-xmi --test real_tmt -- --nocapture</code></pre>
     </li>
     <li>
       <h3>What does it cost, and what licence?</h3>
-      <p>The code is free and open source. The engine and server are AGPL-3.0-or-later. The
-      interchange format, the importers and the exporters are Apache-2.0. See the
+      <p>The code is free and open source. The engine, the server, the CLI and today's binding
+      crates (the importers and exporters) are AGPL-3.0-or-later. The analytics schema
+      (<code>spec/analytics/</code>) is Apache-2.0. Project policy designates importers and
+      exporters as Apache-2.0, but that licence is not yet applied to the crates. See the
       <a href="#licence">licence section</a>.</p>
     </li>
   </ul>
@@ -697,9 +699,10 @@ helm install modelwrite deploy/helm/modelwrite</code></pre>
     </div>
 
     <div class="layer">
-      <p class="layer__name">Interchange<span class="layer__note">Apache-2.0</span></p>
+      <p class="layer__name">Interchange</p>
       <ul class="layer__items">
-        <li>OKF 1.0 format and schema</li>
+        <li>OKF 1.0 format and schema &mdash; AGPL-3.0-or-later (repo default; the spec carries no standalone licence header)</li>
+        <li>Analytics schema (spec/analytics/) &mdash; Apache-2.0</li>
       </ul>
     </div>
 
@@ -748,10 +751,12 @@ helm install modelwrite deploy/helm/modelwrite</code></pre>
   </div>
 
   <div class="prose">
-    <p>The engine crates and the server are <strong>AGPL-3.0-or-later</strong>. The OKF interchange
-    format, the importers and the exporters are <strong>Apache-2.0</strong>. The split is project
-    policy, stated in <code>CONTRIBUTING.md</code>: importers and exporters ship under Apache-2.0 and
-    the engine stays AGPL-3.0-or-later. What you install is the thing you can read.</p>
+    <p>The implementation &mdash; the engine crates, the server, the CLI and the binding crates (the
+    importers and exporters) &mdash; is <strong>AGPL-3.0-or-later</strong> today. The analytics schema
+    (<code>spec/analytics/</code>) is <strong>Apache-2.0</strong>. Project policy, stated in
+    <code>CONTRIBUTING.md</code>, designates importers and exporters as Apache-2.0; that permissive
+    interchange licence is not yet applied to the crates, which still carry the workspace AGPL
+    licence. What you install is the thing you can read.</p>
   </div>
 </section>
 
@@ -774,8 +779,9 @@ cargo run -p mw-gate -- \
       <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/evidence/README.md">The evidence annex</a><br>
       <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/okf/okf-1.0-spec.md">The OKF 1.0 specification</a><br>
       <a href="https://github.com/modelwrite/modelwrite/blob/main/deploy/README.md">Deployment notes</a></p>
-      <p>Licence: AGPL-3.0-or-later for the engine and server, Apache-2.0 for the interchange format
-      and the importers and exporters.</p>
+      <p>Licence: AGPL-3.0-or-later for the implementation (engine crates, server, CLI and binding
+      crates); Apache-2.0 for the analytics schema (spec/analytics/). Importers and exporters are
+      designated Apache-2.0 by policy, not yet applied.</p>
       <p>Cameo, CATIA and MagicDraw are trademarks of Dassault Systèmes or its subsidiaries, used
       here descriptively to name the tools Modelwrite reads. SysML is a trademark of the Object
       Management Group.</p>

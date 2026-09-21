@@ -19,32 +19,45 @@ native XMI to OKF read of your artifact, which is the actual migration, is not m
 the engine. Consequence: the loss report is the binding's self-account of that read, and it
 must be read as such, not as an engine proof. The import page states this on the page.
 
-## A real content-rich vendor corpus is only now being added
+## No bundled open-source example is loadable today
 
-The proof fixture is the coffee-machine CATIA Magic model. The only real-world file in the
-interoperability corpus is a Papyrus project skeleton that contains zero model elements, and
-the corpus says so itself. Consequence: any claim that modelwrite can migrate a real,
-content-rich vendor model is unproven today, and the measurement will be published as the
-corpus grows.
+The Thirty Meter Telescope is the only bundled example in the loadable XMI format, and its
+36 MB import needs 48,553 losses accepted by hand before it loads. The Gaphor examples are
+Gaphor's own .gaphor format, not XMI, and no Gaphor binding exists. The SysML v2 examples
+read as viewers only. Consequence: the showcase's six seeded models are the only models the
+platform serves; every bundled open-source example is refused pending acceptance, not
+importable, or read-only.
 
-## SysML v2 textual notation has no reader yet
+## SysML v2 textual notation is a viewer, not a round-trip
 
-The only binding shipped is sysml-v1-xmi@2.4. SysML v2 is a roadmap binding, not code.
-Consequence: a SysML v2 textual model cannot be imported today, and no claim to the contrary
-should be read into the roadmap.
+The reader mw-binding-sysmlv2 exists and is Direction::ImportOnly: it imports a stated subset
+into OKF and names what it does not carry, but it cannot export, and the round-trip harness
+refuses it by design. It is not in the server's binding registry, so the workbench imports
+XMI only. Consequence: a SysML v2 model can be read and measured at the engine level, but it
+cannot be written back, and it cannot be imported through the workbench.
 
-## The activity-to-subsystem-element link is a role name, not a cross-model edge
+## The global system-of-systems graph property is asserted, not computed
 
-A platform activity's link to an element inside a subsystem is carried by the activity's
-allocatedTo attribute, which names a role. It is not a first-class edge from one model to
-another. Consequence: coverage inside a referenced subsystem is not computed, and the
-composition page labels as asserted what it cannot measure.
+The compositional gate proves each subsystem reference and each typed cross-model edge
+resolves at its pinned revision, and that each integrated revision was itself gated. The
+activity's allocatedTo attribute still names a role for the flow view. Consequence: coverage
+inside a referenced subsystem is proved per edge, but the whole-system graph property - that
+the union of the platform and every subsystem transitively is connected, coverage-complete
+and orphan-free - is a stated claim, and the composition page labels it asserted, not
+measured.
 
-## The trial is open-mode and ephemeral
+## The showcase is open-mode and ephemeral
 
-The trial runs without authentication (anonymous admin) and is tunnelled from a dev machine,
-and it can be reset. Consequence: do not put real work in the trial; use it to read the
-deployed models and follow the tour.
+The showcase (trial.modelwrite.org) runs without authentication (anonymous admin) and resets
+to its six seeded models every hour. Consequence: do not put real work in the showcase; use
+it to read the six deployed models and follow the tour.
+
+## The registered trial cannot deliver its login code
+
+The registered trial (app.modelwrite.org) is live and session-authenticated, but its
+transactional login code is written to the operator log, not emailed - the mailer has no SMTP
+credential yet. Consequence: a visitor cannot complete registration today; real email
+delivery is one SMTP credential away.
 
 ## Also true today
 
