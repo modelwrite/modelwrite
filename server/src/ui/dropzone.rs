@@ -260,6 +260,305 @@ fn zip_entries(bytes: &[u8]) -> Result<Vec<ZipEntry>, String> {
     Ok(entries)
 }
 
+// ---------------------------------------------------------------------------
+// DEFLATE (RFC 1951): unpacking what a real Cameo container holds.
+
+/// A reader of the DEFLATE bit stream. Bits arrive least-significant-bit first, which is the
+/// format's own convention and the opposite of how the bytes are written down.
+struct BitReader<'a> {
+    data: &'a [u8],
+    byte: usize,
+    bit: u32,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        BitReader {
+            data,
+            byte: 0,
+            bit: 0,
+        }
+    }
+
+    /// One bit, least-significant first.
+    fn bit(&mut self) -> Result<u32, String> {
+        if self.byte >= self.data.len() {
+            return Err("the deflate stream ended in the middle of a code".to_string());
+        }
+        let value = ((self.data[self.byte] >> self.bit) & 1) as u32;
+        self.bit += 1;
+        if self.bit == 8 {
+            self.bit = 0;
+            self.byte += 1;
+        }
+        Ok(value)
+    }
+
+    /// `count` bits, least-significant first, assembled into an integer.
+    fn bits(&mut self, count: u32) -> Result<u32, String> {
+        let mut value = 0u32;
+        for position in 0..count {
+            value |= self.bit()? << position;
+        }
+        Ok(value)
+    }
+
+    /// Skip to the next byte boundary, which a stored block requires.
+    fn align(&mut self) {
+        if self.bit != 0 {
+            self.bit = 0;
+            self.byte += 1;
+        }
+    }
+}
+
+/// A canonical Huffman decoding table: how many codes exist at each length, and the symbols in
+/// canonical order, exactly as RFC 1951 section 3.2.2 builds them.
+struct Huffman {
+    counts: [u32; 16],
+    symbols: Vec<u16>,
+}
+
+impl Huffman {
+    /// Build the table from a list of code lengths, one per symbol. A length of zero means the
+    /// symbol is not coded, which is normal and not an error.
+    fn new(lengths: &[u8]) -> Self {
+        let mut counts = [0u32; 16];
+        for &length in lengths {
+            counts[length as usize] += 1;
+        }
+        counts[0] = 0;
+        let mut offsets = [0u32; 16];
+        let mut total = 0u32;
+        for length in 1..16 {
+            offsets[length] = total;
+            total += counts[length];
+        }
+        let mut symbols = vec![0u16; total as usize];
+        for (symbol, &length) in lengths.iter().enumerate() {
+            if length != 0 {
+                symbols[offsets[length as usize] as usize] = symbol as u16;
+                offsets[length as usize] += 1;
+            }
+        }
+        Huffman { counts, symbols }
+    }
+
+    /// Decode one symbol, one bit at a time. This is the simple canonical decode of RFC 1951:
+    /// walk the lengths in order, and the first length whose code range contains the bits read
+    /// so far names the symbol.
+    fn decode(&self, reader: &mut BitReader<'_>) -> Result<u16, String> {
+        let mut code = 0u32;
+        let mut first = 0u32;
+        let mut index = 0u32;
+        for length in 1..16 {
+            code |= reader.bit()?;
+            let count = self.counts[length];
+            if code >= first && code - first < count {
+                return Ok(self.symbols[(index + (code - first)) as usize]);
+            }
+            index += count;
+            first = (first + count) << 1;
+            code <<= 1;
+        }
+        Err("the deflate stream carries a code outside its Huffman table".to_string())
+    }
+}
+
+/// The base length of each length code 257..=285.
+const LENGTH_BASE: [u16; 29] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
+];
+/// The extra bits each length code carries.
+const LENGTH_EXTRA: [u32; 29] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+/// The base distance of each distance code 0..=29.
+const DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+/// The extra bits each distance code carries.
+const DIST_EXTRA: [u32; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
+];
+
+/// The two tables a fixed-Huffman block uses (RFC 1951 section 3.2.6).
+fn fixed_tables() -> (Huffman, Huffman) {
+    let mut literal_lengths = vec![0u8; 288];
+    for (symbol, length) in literal_lengths.iter_mut().enumerate() {
+        *length = match symbol {
+            0..=143 => 8,
+            144..=255 => 9,
+            256..=279 => 7,
+            _ => 8,
+        };
+    }
+    let distance_lengths = vec![5u8; 30];
+    (
+        Huffman::new(&literal_lengths),
+        Huffman::new(&distance_lengths),
+    )
+}
+
+/// The two tables a dynamic-Huffman block declares in its own header.
+fn dynamic_tables(reader: &mut BitReader<'_>) -> Result<(Huffman, Huffman), String> {
+    // The order the code-length code lengths are written in (RFC 1951 section 3.2.7).
+    const ORDER: [usize; 19] = [
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
+    let literal_count = reader.bits(5)? as usize + 257;
+    let distance_count = reader.bits(5)? as usize + 1;
+    let code_length_count = reader.bits(4)? as usize + 4;
+    if literal_count > 286 || distance_count > 30 {
+        return Err("the deflate header declares more codes than the format allows".to_string());
+    }
+    let mut code_lengths = [0u8; 19];
+    for slot in 0..code_length_count {
+        code_lengths[ORDER[slot]] = reader.bits(3)? as u8;
+    }
+    let code_length_table = Huffman::new(&code_lengths);
+    let mut lengths = vec![0u8; literal_count + distance_count];
+    let mut index = 0usize;
+    while index < lengths.len() {
+        let symbol = code_length_table.decode(reader)?;
+        match symbol {
+            0..=15 => {
+                lengths[index] = symbol as u8;
+                index += 1;
+            }
+            16 => {
+                if index == 0 {
+                    return Err("a deflate repeat has no previous length to repeat".to_string());
+                }
+                let previous = lengths[index - 1];
+                let repeat = 3 + reader.bits(2)? as usize;
+                if index + repeat > lengths.len() {
+                    return Err("a deflate repeat runs past the code list".to_string());
+                }
+                for _ in 0..repeat {
+                    lengths[index] = previous;
+                    index += 1;
+                }
+            }
+            17 => {
+                let repeat = 3 + reader.bits(3)? as usize;
+                if index + repeat > lengths.len() {
+                    return Err("a deflate repeat runs past the code list".to_string());
+                }
+                index += repeat;
+            }
+            18 => {
+                let repeat = 11 + reader.bits(7)? as usize;
+                if index + repeat > lengths.len() {
+                    return Err("a deflate repeat runs past the code list".to_string());
+                }
+                index += repeat;
+            }
+            _ => return Err("the deflate stream uses an invalid code-length symbol".to_string()),
+        }
+    }
+    Ok((
+        Huffman::new(&lengths[..literal_count]),
+        Huffman::new(&lengths[literal_count..]),
+    ))
+}
+
+/// Decode one Huffman block's symbols into the output, resolving back-references.
+fn inflate_huffman_block(
+    reader: &mut BitReader<'_>,
+    literal: &Huffman,
+    distance: &Huffman,
+    out: &mut Vec<u8>,
+    limit: usize,
+) -> Result<(), String> {
+    loop {
+        let symbol = literal.decode(reader)?;
+        if symbol < 256 {
+            out.push(symbol as u8);
+        } else if symbol == 256 {
+            return Ok(());
+        } else {
+            let slot = symbol as usize - 257;
+            if slot >= LENGTH_BASE.len() {
+                return Err("the deflate stream uses an invalid length code".to_string());
+            }
+            let length = LENGTH_BASE[slot] as usize + reader.bits(LENGTH_EXTRA[slot])? as usize;
+            let distance_slot = distance.decode(reader)? as usize;
+            if distance_slot >= DIST_BASE.len() {
+                return Err("the deflate stream uses an invalid distance code".to_string());
+            }
+            let back = DIST_BASE[distance_slot] as usize
+                + reader.bits(DIST_EXTRA[distance_slot])? as usize;
+            if back > out.len() {
+                return Err("the deflate stream refers before the start of its output".to_string());
+            }
+            // A match may overlap the bytes it is producing (a run), so the copy is byte by
+            // byte from a moving start rather than a bulk copy.
+            let start = out.len() - back;
+            for offset in 0..length {
+                let byte = out[start + offset];
+                out.push(byte);
+            }
+        }
+        if out.len() > limit {
+            return Err(format!(
+                "the deflate stream expands past the {} bytes its container declares",
+                limit
+            ));
+        }
+    }
+}
+
+/// Unpack one raw DEFLATE stream (RFC 1951), expecting exactly `expected` bytes. The bound is
+/// enforced while decoding, not after, so a container that claims to be small cannot be used to
+/// make this server expand without limit.
+fn inflate(data: &[u8], expected: usize) -> Result<Vec<u8>, String> {
+    let mut reader = BitReader::new(data);
+    let mut out: Vec<u8> = Vec::with_capacity(expected);
+    loop {
+        let final_block = reader.bit()? == 1;
+        match reader.bits(2)? {
+            0 => {
+                reader.align();
+                let length = reader.bits(16)? as usize;
+                let complement = reader.bits(16)? as usize;
+                if length ^ 0xFFFF != complement {
+                    return Err("a stored deflate block declares a broken length".to_string());
+                }
+                for _ in 0..length {
+                    out.push(reader.bits(8)? as u8);
+                }
+            }
+            1 => {
+                let (literal, distance) = fixed_tables();
+                inflate_huffman_block(&mut reader, &literal, &distance, &mut out, expected)?;
+            }
+            2 => {
+                let (literal, distance) = dynamic_tables(&mut reader)?;
+                inflate_huffman_block(&mut reader, &literal, &distance, &mut out, expected)?;
+            }
+            _ => return Err("the deflate stream declares an invalid block type".to_string()),
+        }
+        if final_block {
+            break;
+        }
+        if out.len() > expected {
+            return Err("the deflate stream expands past what its container declares".to_string());
+        }
+    }
+    if out.len() != expected {
+        return Err(format!(
+            "the deflate stream expands to {} bytes and its container declares {}",
+            out.len(),
+            expected
+        ));
+    }
+    Ok(out)
+}
+
 /// Pull the XMI export out of a Cameo .mdzip container. A container that holds no XMI entry, or
 /// holds one this build cannot unpack, is refused with a sentence naming what was found rather
 /// than a generic error: the person is told what to do next.
@@ -292,11 +591,15 @@ pub fn extract_cameo(container: &[u8]) -> Result<Vec<u8>, String> {
             }
             Ok(stored.to_vec())
         }
-        8 => Err(format!(
-            "the .mdzip entry {} is deflated, and this build unpacks only stored entries. Open \
-             the .mdzip in the modelling tool and drop the .xmi it contains.",
-            xmi.name
-        )),
+        // Method 8 is DEFLATE, which is what a real Cameo container uses. Unpacking it here
+        // rather than taking a compression dependency keeps the container support in the layer
+        // that owns the drop, and the decoder is the standard RFC 1951 one.
+        8 => inflate(stored, xmi.uncompressed_size).map_err(|detail| {
+            format!(
+                "the .mdzip entry {} could not be unpacked: {}",
+                xmi.name, detail
+            )
+        }),
         method => Err(format!(
             "the .mdzip entry {} uses compression method {}, which this build cannot unpack",
             xmi.name, method
@@ -1705,6 +2008,109 @@ mod tests {
             derived_project_name(&format!("{}.xmi", "a".repeat(90))).len(),
             64
         );
+    }
+
+    /// A REAL DEFLATE stream and a REAL zip container, both produced by .NET's
+    /// System.IO.Compression and written down here verbatim. Unpacking is therefore checked
+    /// against streams this code did not produce.
+    const DEFLATE_FIXTURE: &str = "s6nIzbSK8PVUqMjNySu2AvJs1TNKSgqs9PXLy8v18nPT9fKL0vWLC1KT9YHK9I0MDI0NDQwM1aEaSnNzcGsI9fVBaLCzAaq18s1PSc1RyEvMTbVVT85PS0tN1c1NTM7IzEsFmZhplZliqx5vqK5PgmojklQbg1TrQ31tBwA=";
+    const ZIP_FIXTURE: &str = "UEsDBBQAAAAIADNJNl2pTzqNfQAAAP8AAAAJAAAAbW9kZWwueG1ps6nIzbSK8PVUqMjNySu2AvJs1TNKSgqs9PXLy8v18nPT9fKL0vWLC1KT9YHK9I0MDI0NDQwM1aEaSnNzcGsI9fVBaLCzAaq18s1PSc1RyEvMTbVVT85PS0tN1c1NTM7IzEsFmZhplZliqx5vqK5PgmojklQbg1TrQ31tBwBQSwECFAAUAAAACAAzSTZdqU86jX0AAAD/AAAACQAAAAAAAAAAAAAAAAAAAAAAbW9kZWwueG1pUEsFBgAAAAABAAEANwAAAKQAAAAAAA==";
+    const FIXTURE_TEXT: &str = "<xmi:XMI xmlns:xmi='http://www.omg.org/spec/XMI/20131001' xmlns:uml='http://www.omg.org/spec/UML/20131001'><uml:Model name='coffee-machine' xmi:id='_1'/><uml:Model name='coffee-machine' xmi:id='_2'/><uml:Model name='coffee-machine' xmi:id='_3'/></xmi:XMI>";
+
+    fn fixture(encoded: &str) -> Vec<u8> {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .expect("the fixture must be valid base64")
+    }
+
+    /// The smallest zip that STORES one entry without compressing it, written here so the
+    /// stored path is covered by a container this code built rather than by the reader under
+    /// test round-tripping its own writer.
+    fn stored_zip(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        let central = out.len();
+        out.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        let central_size = out.len() - central;
+        out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&(central_size as u32).to_le_bytes());
+        out.extend_from_slice(&(central as u32).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn a_real_deflate_stream_and_a_real_cameo_container_are_unpacked() {
+        let deflated = fixture(DEFLATE_FIXTURE);
+        assert_eq!(
+            inflate(&deflated, FIXTURE_TEXT.len()).unwrap(),
+            FIXTURE_TEXT.as_bytes(),
+            "the deflate decoder must reproduce what a real compressor wrote"
+        );
+
+        // The container is exactly what a modelling tool writes: a zip whose model entry is
+        // deflated. This is the path a dropped .mdzip takes.
+        let container = fixture(ZIP_FIXTURE);
+        assert!(is_zip(&container));
+        let extracted = extract_cameo(&container).unwrap();
+        assert_eq!(extracted, FIXTURE_TEXT.as_bytes());
+        // The extracted document is then detected as XMI, so the drop routes it to the reader.
+        assert_eq!(detect(&extracted, "model.xmi"), Format::Xmi);
+
+        // A stored container takes the other arm of the same function.
+        let stored = stored_zip("model.xmi", FIXTURE_TEXT.as_bytes());
+        assert_eq!(
+            extract_cameo(&stored).unwrap(),
+            FIXTURE_TEXT.as_bytes(),
+            "a stored entry is copied byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_damaged_deflate_stream_is_refused_rather_than_trusted() {
+        let deflated = fixture(DEFLATE_FIXTURE);
+        // A declared size the stream cannot produce is a refusal, not a short read.
+        assert!(inflate(&deflated, FIXTURE_TEXT.len() + 1).is_err());
+        assert!(inflate(&deflated, FIXTURE_TEXT.len() - 1).is_err());
+        // A truncated stream ends cleanly with an error.
+        assert!(inflate(&deflated[..deflated.len() / 2], FIXTURE_TEXT.len()).is_err());
+        // A container whose bytes are not a zip is refused with something to read.
+        let not_a_zip = b"PK\x03\x04garbage".to_vec();
+        assert!(extract_cameo(&not_a_zip).is_err());
     }
 
     #[test]

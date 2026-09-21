@@ -299,9 +299,16 @@ async fn a_hostile_project_name_is_escaped() {
         "the hostile name must appear escaped, got:\n{}",
         html
     );
-    assert!(
-        !html.contains("<script"),
-        "a raw script tag must never appear, got:\n{}",
+    // The projects page carries exactly ONE script: the drop zone's progressive-enhancement
+    // block, which this code writes. "The page contains no <script" stopped being the right
+    // proxy for "the hostile name cannot execute" the moment the front door gained that block,
+    // so the assertion is the precise form of the same invariant instead - the same idiom the
+    // model page uses for its own enhancement asset. A name that leaked a raw tag would push
+    // the count past the one block the page ships.
+    assert_eq!(
+        count(&html, "<script"),
+        1,
+        "only the drop zone's own enhancement may be a script tag, got:\n{}",
         html
     );
 }
