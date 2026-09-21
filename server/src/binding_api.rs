@@ -162,36 +162,46 @@ pub fn resolve_acceptances(
     accept_losses: &[String],
 ) -> Result<Vec<String>, ApiError> {
     let mut accepted: Vec<String> = Vec::new();
+
+    // Index the blocking entries once so resolution is linear in the loss set, not
+    // quadratic. A 48k-entry vendor export (the Open-MBEE TMT model names 48,553 blocking
+    // losses) made the previous scan-per-name path cost ~2.4 billion identity allocations
+    // before a single commit could land.
+    let mut identities: std::collections::HashSet<String> =
+        std::collections::HashSet::with_capacity(blocking.len());
+    let mut by_subject: std::collections::HashMap<&str, Vec<&binding::Mapping>> =
+        std::collections::HashMap::new();
+    for mapping in blocking.iter().copied() {
+        identities.insert(entry_identity(mapping));
+        by_subject
+            .entry(mapping.subject.as_str())
+            .or_default()
+            .push(mapping);
+    }
+
     for name in accept_losses {
-        if let Some(mapping) = blocking
-            .iter()
-            .copied()
-            .find(|m| entry_identity(m) == *name)
-        {
-            let identity = entry_identity(mapping);
-            if !accepted.contains(&identity) {
-                accepted.push(identity);
+        // An entry identity names exactly one loss; the raw-subject fallback below is reached
+        // only when the name is NOT an entry identity.
+        if identities.contains(name.as_str()) {
+            if !accepted.contains(name) {
+                accepted.push(name.clone());
             }
             continue;
         }
-        let matches: Vec<&binding::Mapping> = blocking
-            .iter()
-            .copied()
-            .filter(|m| m.subject == *name)
-            .collect();
-        match matches.len() {
-            0 => {}
-            1 => {
+        match by_subject.get(name.as_str()) {
+            None => {}
+            Some(matches) if matches.len() == 1 => {
                 let identity = entry_identity(matches[0]);
                 if !accepted.contains(&identity) {
                     accepted.push(identity);
                 }
             }
-            n => {
+            Some(matches) => {
                 return Err(ApiError::bad_request(format!(
                     "acceptLosses entry {:?} matches {} blocking entries; name each loss \
                      by its entry identity (subject [verdict])",
-                    name, n
+                    name,
+                    matches.len()
                 )));
             }
         }
@@ -307,13 +317,14 @@ pub fn import_core(
     // refuses the import and is returned so the caller can decide rather than lose it silently.
     let blocking = loss_report.blocking();
     let accepted_identities = resolve_acceptances(&blocking, input.accept_losses)?;
+    // Membership by identity is a set lookup, not a scan: re-deriving entry_identity(m) once
+    // per accepted identity per blocking entry would redo the O(n^2) work resolve_acceptances
+    // already avoided for a 48k-entry loss set.
+    let accepted_set: std::collections::HashSet<&str> =
+        accepted_identities.iter().map(String::as_str).collect();
     let unaccepted: Vec<binding::Mapping> = blocking
         .iter()
-        .filter(|m| {
-            !accepted_identities
-                .iter()
-                .any(|id| id == &entry_identity(m))
-        })
+        .filter(|m| !accepted_set.contains(entry_identity(m).as_str()))
         .map(|m| (**m).clone())
         .collect();
     if !unaccepted.is_empty() {
