@@ -1,0 +1,724 @@
+{
+  "cases": [
+    {
+      "commit": "5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536",
+      "everyTableIdentical": true,
+      "name": "sample-corpus",
+      "project": "coffee-sample",
+      "provenance": "authored",
+      "source": "sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json (64282 bytes)",
+      "tables": {
+        "commits": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "mcp": {
+              "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "python": {
+              "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "rest": {
+              "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+              "identicalToRest": true,
+              "rows": 1
+            }
+          },
+          "digest": "8dcfcde0c0c3f91db08603519d9b2a5239d523ba5aebfbf13f671ec4f349d917",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 1
+        },
+        "elements": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+              "identicalToRest": true,
+              "rows": 58
+            },
+            "mcp": {
+              "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+              "identicalToRest": true,
+              "rows": 58
+            },
+            "python": {
+              "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+              "identicalToRest": true,
+              "rows": 58
+            },
+            "rest": {
+              "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+              "identicalToRest": true,
+              "rows": 58
+            }
+          },
+          "digest": "90af7b3f922befe6649eec78ce0d55d1afe60cd0b3fcd9b13b7fa57c78d58947",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 58
+        },
+        "import_losses": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identicalToRest": true,
+              "rows": 0
+            },
+            "mcp": {
+              "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identicalToRest": true,
+              "rows": 0
+            },
+            "python": {
+              "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identicalToRest": true,
+              "rows": 0
+            },
+            "rest": {
+              "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "identicalToRest": true,
+              "rows": 0
+            }
+          },
+          "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 0
+        },
+        "metric_definitions": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "metrics": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "a362a2d9c04d7b6e513c1fbb9090999cceed1f408eaf9f9d7370bc4f1b81e5d4",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "projects": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "mcp": {
+              "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "python": {
+              "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "rest": {
+              "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+              "identicalToRest": true,
+              "rows": 1
+            }
+          },
+          "digest": "cb99b56d9f4f50d2f7c9e3bef74b75e8100ab50d169d3acfcc57ca53ef361e12",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 1
+        },
+        "relationships": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+              "identicalToRest": true,
+              "rows": 165
+            },
+            "mcp": {
+              "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+              "identicalToRest": true,
+              "rows": 165
+            },
+            "python": {
+              "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+              "identicalToRest": true,
+              "rows": 165
+            },
+            "rest": {
+              "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+              "identicalToRest": true,
+              "rows": 165
+            }
+          },
+          "digest": "c56f6ef00db44c9bf43629c691198170865a460930a402958e2a78af09fd4cc0",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 165
+        },
+        "requirements": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "9c036f6238a2a2ef584b91d27f1588289bd3a127a60f916d8bbf0a9f32b34dc0",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "trace_links": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "mcp": {
+              "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "python": {
+              "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "rest": {
+              "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+              "identicalToRest": true,
+              "rows": 24
+            }
+          },
+          "digest": "d75202c3cff169b1a2f879f24f035f022697361e5c95f8beb4f02788bbb95f79",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 24
+        }
+      }
+    },
+    {
+      "commit": "4fae507737ff47d219b9b7c7d64cb39d6ca7ae0acff9f542be4540c03fb3b042",
+      "everyTableIdentical": true,
+      "name": "large-import",
+      "project": "coffee-import",
+      "provenance": "imported(sysml-v1-xmi@2.4)",
+      "source": "real-world/mdzip/model.xmi (193076 bytes, 252 accepted losses)",
+      "tables": {
+        "commits": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "mcp": {
+              "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "python": {
+              "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "rest": {
+              "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+              "identicalToRest": true,
+              "rows": 1
+            }
+          },
+          "digest": "a6df15c3d7910630a178f4c1467cb70e680c0fa530b2008b9036a661fb56ebad",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 1
+        },
+        "elements": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+              "identicalToRest": true,
+              "rows": 41
+            },
+            "mcp": {
+              "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+              "identicalToRest": true,
+              "rows": 41
+            },
+            "python": {
+              "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+              "identicalToRest": true,
+              "rows": 41
+            },
+            "rest": {
+              "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+              "identicalToRest": true,
+              "rows": 41
+            }
+          },
+          "digest": "a065ad800f9636488030d4a48b7d9afea263b8015034f56a1a7e241dd71d18e0",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 41
+        },
+        "import_losses": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+              "identicalToRest": true,
+              "rows": 274
+            },
+            "mcp": {
+              "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+              "identicalToRest": true,
+              "rows": 274
+            },
+            "python": {
+              "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+              "identicalToRest": true,
+              "rows": 274
+            },
+            "rest": {
+              "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+              "identicalToRest": true,
+              "rows": 274
+            }
+          },
+          "digest": "b87b51814d4c85fb8880377ff33d3d547cf8cf3441068ad513bc7f4491e4974f",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 274
+        },
+        "metric_definitions": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "4bc8b967254bcb1ed84d4b38b074a7642d13167adbd738103a616d9a0636b1e1",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "metrics": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "2cd76a563a9e500da0ccddb2dfdd386c63e5786776f065e9fcd128663944369f",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "projects": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "mcp": {
+              "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "python": {
+              "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+              "identicalToRest": true,
+              "rows": 1
+            },
+            "rest": {
+              "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+              "identicalToRest": true,
+              "rows": 1
+            }
+          },
+          "digest": "6bb4bbe84c686de5065d9c7210877c0535472ad68eba5c63d2f9ca6153cbe8fb",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 1
+        },
+        "relationships": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+              "identicalToRest": true,
+              "rows": 95
+            },
+            "mcp": {
+              "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+              "identicalToRest": true,
+              "rows": 95
+            },
+            "python": {
+              "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+              "identicalToRest": true,
+              "rows": 95
+            },
+            "rest": {
+              "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+              "identicalToRest": true,
+              "rows": 95
+            }
+          },
+          "digest": "d73c15f40623c85ce7680a7a32f9a3f0df9fd5b20182b8d5bdab390f48354135",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 95
+        },
+        "requirements": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "mcp": {
+              "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "python": {
+              "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+              "identicalToRest": true,
+              "rows": 25
+            },
+            "rest": {
+              "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+              "identicalToRest": true,
+              "rows": 25
+            }
+          },
+          "digest": "cd45100949ba787da43cea56adb9831f70fa0570b4d74a0326f4fe9df223e243",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 25
+        },
+        "trace_links": {
+          "byTransport": {
+            "cliDb": {
+              "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "mcp": {
+              "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "python": {
+              "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+              "identicalToRest": true,
+              "rows": 24
+            },
+            "rest": {
+              "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+              "identicalToRest": true,
+              "rows": 24
+            }
+          },
+          "digest": "87f7de78c2db345968df8fa8e81996831d82c02987c84ae54dd518209917defd",
+          "identical": true,
+          "orderMatchesRest": {
+            "cliDb": true,
+            "mcp": true,
+            "python": true,
+            "rest": true
+          },
+          "rowCount": 24
+        }
+      }
+    }
+  ],
+  "cliServer": {
+    "note": "The CLI in --server mode is a set of planned routes. schema/metrics/trend match the real REST routes and return rows; there is no working route for arbitrary table rows. This is recorded, not fixed.",
+    "routes": [
+      {
+        "cliUrl": "/analytics/schema",
+        "command": "mw --server <url> analytics schema",
+        "exitCode": 0,
+        "matches": true,
+        "outcome": "rows",
+        "serverRoute": "GET /analytics/schema"
+      },
+      {
+        "cliUrl": "/analytics/coffee-sample/metrics?commit=5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536",
+        "command": "mw --server <url> analytics metrics <project> --commit <hash>",
+        "exitCode": 0,
+        "matches": true,
+        "outcome": "rows",
+        "rowsCompared": 25,
+        "rowsIdenticalToRestMetrics": true,
+        "serverRoute": "GET /analytics/:project/metrics"
+      },
+      {
+        "cliUrl": "/analytics/coffee-sample/trend?metric=coverage.covered&branch=main",
+        "command": "mw --server <url> analytics trend <project> --metric coverage.covered --branch main",
+        "exitCode": 0,
+        "matches": true,
+        "outcome": "rows",
+        "serverRoute": "GET /analytics/:project/trend"
+      },
+      {
+        "cliUrl": "/analytics/coffee-sample/tables?commit=5ad45e6faa100726078dc5385a28f86b8978bd85a20a999a43295a917d4a8536",
+        "command": "mw --server <url> analytics tables <project> --commit <hash>",
+        "divergence": "the CLI omits the /{table} segment (cli/src/http.rs:246), so the request is a 404 against the real route (server/src/lib.rs:310) and no table rows can be fetched in --server mode",
+        "exitCode": 1,
+        "matches": false,
+        "outcome": "error",
+        "serverRoute": "GET /analytics/:project/tables/:table",
+        "stderr": "error: the server answered status 404 (status 404)"
+      },
+      {
+        "cliUrl": "(no request: refused before the network)",
+        "command": "mw --server <url> analytics export <project> --commit <hash> --format ndjson --out <dir>",
+        "divergence": "the CLI refuses analytics export over --server by construction (cli/src/http.rs:250-253); --db is the CLI row-export path",
+        "exitCode": 1,
+        "matches": false,
+        "outcome": "refused",
+        "serverRoute": "GET /analytics/:project/tables/:table (one per table)",
+        "stderr": "error: analytics export over --server is not implemented: the Package 3 REST endpoints do not exist yet; use --db <path> for a full export"
+      }
+    ]
+  },
+  "deliberateFailure": {
+    "case": "sample-corpus",
+    "detected": true,
+    "method": "one elements row of the real cli-db capture had its name replaced with a sentinel before re-running the same comparator against rest",
+    "symmetricDifferenceRows": 2,
+    "table": "elements",
+    "transportsCompared": [
+      "rest",
+      "cliDb"
+    ]
+  },
+  "generator": "server/tests/equivalence.rs (analytics interfaces brief, package 7)",
+  "independence": "Only REST and CLI --db are independent implementations; MCP and Python both read the same REST endpoints, so their agreement is a weaker claim (transport and naming equivalence, not independent computation). This record states that rather than implying four independent implementations.",
+  "normalisation": "REST JSON and MCP wire rows are camelCase; the schema logical columns and the CLI --db NDJSON export are snake_case. Every transport rows are converted to snake_case with the exact inverse of the server analytics::format::camel_case (asserted against analytics::projection::TABLES) before comparison. Row order is compared both as a multiset and as the REST natural order.",
+  "notRun": [
+    {
+      "item": "the 36 MB Open-MBEE TMT XMI through the four transports",
+      "reason": "It is ~190x larger than the fixtures used here, AND server/tests/analytics_tmt.rs already records that the imported model does not pass the commit validator (two requirements with an empty reqId), so it cannot be committed and therefore cannot be read through any committed-model transport."
+    },
+    {
+      "item": "CLI --server table rows",
+      "reason": "there is no working CLI --server route for arbitrary table rows: analytics tables is a 404 (missing /{table} segment) and analytics export refuses --server. The CLI row transport exercised here is --db. The route divergence is recorded under cliServer rather than papered over."
+    }
+  ],
+  "numberNormalisation": "Integral JSON numbers are collapsed to integers before comparison, so the Python bindings Arrow float64 representation of metrics.value (15.0) equals the REST integer (15). Non-integral numbers are compared as JSON numbers. The ROWS are otherwise compared in full, wall-clock columns included.",
+  "pagination": "REST limit=37 and MCP limit=37, each followed on nextCursor to completion; the Python client pages internally at its own 1000-row ceiling. The page size is small on purpose so the cursor path is exercised on every table.",
+  "passed": true,
+  "recordType": "analytics cross-transport equivalence",
+  "recordVersion": 1,
+  "representationDifferences": [
+    {
+      "column": "metrics.value",
+      "detail": "bindings/python types metrics.value as float64 (its Arrow mirror of the schema), so an integral metric value is delivered as 15.0 where the REST JSON delivers 15. The comparison normalises integral numbers; the underlying value is identical. This is the ONLY representation difference found; every other table compared byte-for-byte after key normalisation.",
+      "transport": "python"
+    }
+  ],
+  "schemaVersion": "mw-analytics-schema@1",
+  "transports": {
+    "cliDb": {
+      "implementation": "cli/src/analytics.rs (a separate Rust projection that mirrors the server one), NDJSON export",
+      "independentProjection": true
+    },
+    "mcp": {
+      "implementation": "engine/mcp repo.table, a pass-through of the REST JSON over the real HTTP transport",
+      "independentProjection": false
+    },
+    "python": {
+      "implementation": "bindings/python modelwrite.analytics.tables(), a thin REST client (requests). It computes nothing.",
+      "independentProjection": false
+    },
+    "rest": {
+      "implementation": "server/src/analytics (Rust projection), HTTP JSON",
+      "independentProjection": true
+    }
+  }
+}

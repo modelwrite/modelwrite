@@ -49,6 +49,34 @@ jobs:
           python -m pip install --quiet pytest requests pyarrow pandas
           python -m pytest bindings/python/tests -q
 
+  equivalence:
+    # Package 7: the cross-transport equivalence evidence. REST, the CLI (--db and
+    # --server), MCP and Python must return identical rows for the sample corpus and
+    # one large-but-manageable real import, and the committed record must regenerate
+    # byte for byte. The test drives the real mw binary and the real Python client,
+    # so this job builds mw-cli and installs bindings/python. A divergence fails the
+    # test itself; a stale record fails the diff.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install the Python analytics client
+        run: |
+          python -m pip install --quiet --no-deps -e bindings/python
+          python -m pip install --quiet requests pyarrow
+      - name: build mw-server and the mw CLI the test drives
+        run: cargo build -p mw-cli
+      - name: the equivalence record must regenerate byte for byte
+        env:
+          MW_CLI_BIN: ${{ github.workspace }}/target/debug/mw
+          MW_EQUIVALENCE_EVIDENCE: /tmp/analytics-transport-equivalence.json
+        run: |
+          cargo test -p mw-server --test equivalence -- --nocapture
+          diff /tmp/analytics-transport-equivalence.json docs/evidence/analytics-transport-equivalence.json
+
   docs:
     # The generated documentation sections (crate licences, the binding list, the
     # MCP tool list, the metric-definition count) must not drift from their
