@@ -684,3 +684,137 @@ figcaption b { color: var(--ink-soft); }
   html { scroll-behavior: auto; }
   * { transition: none !important; animation: none !important; }
 }
+/* ----------------------------------------------------------- trial doors */
+.doors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: 1.25rem;
+}
+
+.door {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 1.25rem 1.35rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.door__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.door h3 { font-size: 1.05rem; margin: 0; }
+
+.door__host {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.door__status {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.door__status--live { color: var(--pass-ink); background: var(--pass-bg); border-color: var(--pass-line); }
+.door__status--soon { color: var(--warn); background: #fdf6e7; border-color: #ecd9a8; }
+
+.door__tagline { font-size: 1.0625rem; font-weight: 650; color: var(--ink); margin: 0.4rem 0 0.6rem; }
+.door p { color: var(--ink-soft); font-size: 0.9375rem; margin: 0 0 0.75rem; }
+.door .button { align-self: flex-start; margin-top: auto; }
+
+.door__note {
+  margin: 0.25rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------- metrics */
+.metrics {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+
+.metric {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 0.95rem 1.05rem 1.05rem;
+}
+
+.metric__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  margin-bottom: 0.45rem;
+}
+
+.metric h4 { font-size: 0.9375rem; margin: 0; font-weight: 650; }
+.metric__id { font-size: 0.75rem; color: var(--muted); }
+
+.metric__status {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--pass-ink);
+  white-space: nowrap;
+}
+
+.metric__desc { font-size: 0.875rem; color: var(--ink-soft); margin: 0 0 0.45rem; }
+
+.metric__deps { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); margin: 0; }
+.metric__deps span { text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.6875rem; margin-right: 0.35rem; }
+
+/* -------------------------------------------------------------- gap list */
+.gaps {
+  list-style: none;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  max-width: var(--prose);
+}
+.gaps > li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+}
+.gaps > li:last-child { border-bottom: 1px solid var(--line); }
+.gaps__mark { font-family: var(--mono); color: var(--accent); font-weight: 700; }
+.gaps p { margin: 0; color: var(--ink-soft); font-size: 0.9375rem; }
+.gaps strong { color: var(--ink); }
+
+/* ------------------------------------------------------------------ faq */
+.faq { list-style: none; margin: 0; padding: 0; max-width: var(--prose); }
+.faq > li { padding: 1.15rem 0; border-top: 1px solid var(--line); }
+.faq > li:last-child { border-bottom: 1px solid var(--line); }
+.faq h3 { margin: 0 0 0.35rem; font-size: 1rem; }
+.faq p { margin: 0; color: var(--ink-soft); font-size: 0.9375rem; }
+.faq p + p { margin-top: 0.6rem; }
+
+/* A reproduce block inside a limits item sits a little below the text. */
+.limits pre { margin-top: 0.5rem; }
+

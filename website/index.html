@@ -4,11 +4,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Modelwrite: the model you can prove</title>
-<meta name="description" content="Modelwrite is an open-source, self-hosted MBSE platform. A round-trip gate names every element and edge a migration lost, and writes a deterministic evidence record CI reproduces byte for byte.">
+<title>Modelwrite: open source analytics for your SysML models</title>
+<meta name="description" content="Modelwrite is the open source analytics platform for getting value from a SysML investment. It reads the models you already have, measures coverage, traceability and integration, and answers questions with the evidence attached.">
 <meta name="color-scheme" content="light">
-<meta property="og:title" content="Modelwrite: the model you can prove">
-<meta property="og:description" content="An open-source, self-hosted MBSE platform whose fidelity claims are records you can run yourself.">
+<meta property="og:title" content="Modelwrite: open source analytics for SysML">
+<meta property="og:description" content="Modelwrite is the open source analytics platform for getting value from a SysML investment. It reads the models you already have, measures coverage, traceability and integration, and answers questions with the evidence attached.">
 <meta property="og:type" content="website">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -20,13 +20,13 @@
     <a class="wordmark" href="#top"><span class="wordmark__glyph" aria-hidden="true">&#9655;</span> modelwrite</a>
     <nav aria-label="Sections">
       <ul>
-        <li><a href="#evidence">Evidence</a></li>
-        <li><a href="#measured">Measured</a></li>
-        <li><a href="#capabilities">Capabilities</a></li>
+        <li><a href="#see">See it</a></li>
+        <li><a href="#measure">Measure it</a></li>
+        <li><a href="#ask">Ask it</a></li>
+        <li><a href="#trust">Trust it</a></li>
+        <li><a href="#analytics">Analytics</a></li>
         <li><a href="#limits">Limits</a></li>
-        <li><a href="#workbench">Workbench</a></li>
-        <li><a href="#architecture">Architecture</a></li>
-        <li><a href="#install">Install</a></li>
+        <li><a href="#try">Try it</a></li>
       </ul>
     </nav>
     <a class="repo" href="https://github.com/modelwrite/modelwrite">github.com/modelwrite</a>
@@ -36,50 +36,155 @@
 <main id="main">
 
 <div class="hero shell" id="top">
-  <p class="hero__kicker">Open-source MBSE platform &middot; self-hosted &middot; air-gapped</p>
+  <p class="hero__kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
   <h1>Modelwrite</h1>
-  <p class="hero__tagline">The model you can prove.</p>
+  <p class="hero__tagline">The open source analytics platform for getting value from a SysML investment.</p>
 
   <div class="hero__lede">
-    <p>Most systems engineering teams accept a migration on the vendor&rsquo;s word. There is no
-    alternative on offer: a fidelity claim arrives in a slide deck, demonstrated on a model you did
-    not choose. <strong>But a fidelity claim cannot be checked before the migration</strong>, which
-    means the loss surfaces at acceptance testing, a year after signature, on the desk of the person
-    who signed it.</p>
-    <p>Modelwrite turns that claim into a record you can run yourself. The round-trip gate compares
-    two models, names every element and edge that did not survive, and writes the result to a
-    deterministic evidence file. A lossy migration is refused until a human accepts the specific
-    loss, by name.</p>
+    <p>Your organisation has spent years building SysML models. Modelwrite is the open source
+    analytics platform that shows what they are worth. It reads the models you already have,
+    measures coverage, traceability and integration, tracks them baseline by baseline, and answers
+    questions with the evidence attached. You keep your modelling tool.</p>
   </div>
 
   <p class="hero__actions">
-    <a class="button" href="#evidence">Read the evidence</a>
+    <a class="button" href="https://trial.modelwrite.org">Open the showcase</a>
+    <a class="button button--quiet" href="#try">Try your own model</a>
     <a class="button button--quiet" href="#install">Install it</a>
   </p>
 
   <p class="statusline">
-    <b>Proven today:</b> the round-trip gate, the model repository and the workbench, each with a
-    committed record. <b>Not proven:</b> a complete migration off MagicDraw. The measured losses are
-    on this page, not in a footnote.
+    <b>Proof is the differentiator, not the headline.</b> Every number on this page names the
+    command that produced it, and the limits sit at the same weight as the claims.
   </p>
 
   <ul class="chips">
     <li>OKF 1.0</li>
-    <li>gate 0.1.0</li>
-    <li>AGPL-3.0-or-later</li>
+    <li>AGPL-3.0-or-later engine</li>
+    <li>Apache-2.0 schema</li>
+    <li>XMI + SysML v2 textual</li>
+    <li>self-hosted, air-gapped</li>
     <li>SQLite or PostgreSQL</li>
-    <li>Docker, Compose, Helm</li>
-    <li>air-gapped</li>
   </ul>
 </div>
 
-<section class="section shell" id="evidence" aria-labelledby="evidence-h">
+<section class="section shell" id="try" aria-labelledby="try-h">
   <div class="section__head">
-    <p class="eyebrow">01 / Evidence</p>
-    <h2 id="evidence-h">The evidence, before the claims</h2>
-    <p>Two files are committed to this repository. CI regenerates both on every push and fails the
-    build if a single hash moves, so what follows is the output of the code in the same commit, not a
-    snapshot taken once and left there.</p>
+    <p class="eyebrow">Try it</p>
+    <h2 id="try-h">Two doors. One is open now, one is rolling out.</h2>
+    <p>The showcase is live and open. The registered trial is being built and is not serving yet;
+    its copy states what it will do when it is.</p>
+  </div>
+
+  <div class="doors">
+    <article class="door">
+      <div class="door__head">
+        <span class="door__status door__status--live">Live</span>
+        <h3>The showcase</h3>
+        <code class="door__host">trial.modelwrite.org</code>
+      </div>
+      <p class="door__tagline">Come and see what we can do.</p>
+      <p>Open, no registration. Six seeded models: coffee-machine, sandwich-toaster,
+      purchasing-terminal, floor-robot, microduck and cafe-stand. The cafe-stand project holds the
+      two-robot trade study, one branch with the floor-robot on floor care and one with microduck.
+      An hourly reset returns it to the seed, so nobody can break it.</p>
+      <a class="button" href="https://trial.modelwrite.org">Open the showcase</a>
+    </article>
+
+    <article class="door">
+      <div class="door__head">
+        <span class="door__status door__status--soon">Rolling out now</span>
+        <h3>The registered trial</h3>
+        <code class="door__host">app.modelwrite.org</code>
+      </div>
+      <p class="door__tagline">Load and analyse your own model.</p>
+      <p>Fourteen days, your own workspace, your own loss report, orphans and coverage. The trial
+      extends while you use it. We email your login code; marketing updates only if you opt in.</p>
+      <p class="door__note">Not serving yet. There is no link to click until the registered trial is
+      deployed. This copy states what it will do when it is.</p>
+    </article>
+  </div>
+</section>
+
+<section class="section shell" id="see" aria-labelledby="see-h">
+  <div class="section__head">
+    <p class="eyebrow">01 / See it</p>
+    <h2 id="see-h">Read the models you already have.</h2>
+    <p>Modelwrite reads the SysML you already have. XMI and Cameo import carry a loss report that
+    names what did not survive, so a loss is a decision you make rather than a surprise at
+    acceptance. SysML v2 textual notation reads as a viewer: it imports, it does not write back. You
+    keep your modelling tool.</p>
+  </div>
+
+  <div class="prose">
+    <h3>The loss report, on a real model</h3>
+    <p>Put a MagicDraw SysML export through the XMI reader and it reports what it carried and what
+    it did not. On the coffee-machine MagicDraw model the reader carries 41 structure elements (the
+    blocks), 25 requirements, and 66 graph nodes with 95 graph edges. It reports 252 blocking
+    losses in total: 124 unmappable content losses and 128 lossy drops, every one named.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="stat__num">41</span><span class="stat__label">structure elements carried</span></div>
+    <div class="stat"><span class="stat__num">25</span><span class="stat__label">requirements carried</span></div>
+    <div class="stat"><span class="stat__num">66 / 95</span><span class="stat__label">graph nodes / edges</span></div>
+    <div class="stat"><span class="stat__num stat__num--fail">252</span><span class="stat__label">blocking losses, every one named</span></div>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <p>Reproduce it:</p>
+  </div>
+<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code></pre>
+
+  <div class="prose">
+    <h3>SysML v2 textual, as a viewer</h3>
+    <p>The engine reads a stated subset of SysML v2 textual notation. It imports and does not
+    export, so a SysML v2 model cannot be written back. Reproduce it:</p>
+  </div>
+<pre><code>cargo test -p mw-binding-sysmlv2 --test real_examples -- --nocapture</code></pre>
+</section>
+
+<section class="section shell" id="measure" aria-labelledby="measure-h">
+  <div class="section__head">
+    <p class="eyebrow">02 / Measure it</p>
+    <h2 id="measure-h">Coverage, traceability, integration. The graph gaps lead.</h2>
+    <p>Coverage names which requirements are satisfied, refined, verified or allocated. Traceability
+    names the edges between them. Integration asks whether the model is one connected whole. The
+    graph gaps expose the model nobody can see at a glance.</p>
+  </div>
+
+  <ul class="gaps">
+    <li><span class="gaps__mark" aria-hidden="true">1</span><div><p><strong>Orphaned items.</strong> A node with no edge. It is present, but nothing connects to it.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">2</span><div><p><strong>Isolated groups.</strong> More than one connected component. The model is split.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li>
+  </ul>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p>Each gap is named, not summarised into a score, and trended baseline by baseline so drift is
+    visible when a baseline changes. These are the metrics in the analytics schema, listed in the
+    <a href="#analytics">analytics section</a>.</p>
+  </div>
+</section>
+
+<section class="section shell" id="ask" aria-labelledby="ask-h">
+  <div class="section__head">
+    <p class="eyebrow">03 / Ask it</p>
+    <h2 id="ask-h">Ask the model questions, with the evidence attached.</h2>
+    <p>Agents and the MCP surface ask questions of the model, and every answer carries its basis:
+    the element, the edge and the run that produced it. An agent reads and proposes. It cannot
+    write. Only a human with the write role accepts a proposal into a commit, and the commit records
+    both parties.</p>
+  </div>
+</section>
+
+<section class="section shell" id="trust" aria-labelledby="trust-h">
+  <div class="section__head">
+    <p class="eyebrow">04 / Trust it</p>
+    <h2 id="trust-h">Trust it, because you can run it.</h2>
+    <p>The round-trip gate compares two models and names every element and edge that did not
+    survive. It writes a deterministic evidence record with no timestamp, and CI reproduces both
+    committed records byte for byte on every push. The <a href="#limits">limits section</a> is the
+    reason the rest is believable.</p>
   </div>
 
   <div class="records">
@@ -153,127 +258,251 @@
   citable.</p>
 </section>
 
-<section class="section shell" id="measured" aria-labelledby="measured-h">
+<section class="section shell" id="analytics" aria-labelledby="analytics-h">
   <div class="section__head">
-    <p class="eyebrow">02 / Measured</p>
-    <h2 id="measured-h">Measured on a real vendor model, and the number is not flattering</h2>
-    <p>The first real vendor model put through the reader is a MagicDraw SysML model. Its
-    <code>com.nomagic.magicdraw.uml_model.model</code> entry holds a 193&nbsp;KB XMI document. This
-    is what came out.</p>
+    <p class="eyebrow">05 / Analytics</p>
+    <h2 id="analytics-h">Every metric, from the engine.</h2>
+    <p>This list is generated from <code>spec/analytics/metric_definitions.json</code>, the
+    authoritative schema produced by the engine. It is not maintained by hand. The schema is
+    Apache-2.0, so anyone can build a connector.</p>
   </div>
 
-  <div class="stats">
-    <div class="stat"><span class="stat__num">148</span><span class="stat__label"><code>packagedElement</code> read from the XMI</span></div>
-    <div class="stat"><span class="stat__num">57</span><span class="stat__label"><code>ownedAttribute</code> read from the XMI</span></div>
-    <div class="stat"><span class="stat__num">28</span><span class="stat__label">traceability links carried: 20 Satisfy, 3 Allocate, 4 Refine, 1 Verify</span></div>
-    <div class="stat"><span class="stat__num stat__num--fail">252</span><span class="stat__label">blocking content losses &mdash; 124 unmappable, 128 lossy, every one named</span></div>
-  </div>
-
-  <div class="prose" style="margin-top:1.75rem">
-    <p>Importing it produces 41 structure elements (the Blocks), 25 requirements, 66 graph nodes and
-    95 graph edges. It also produces 252 blocking content losses: 124 constructs that cannot be
-    mapped, and 128 values that would be dropped. Requirements and their traceability are carried,
-    where the first measurement carried none. Ports, Operations, Associations, visibility and other
-    attributes are still reported as unmappable: named, never dropped in silence, but not carried.</p>
-  </div>
-
-  <div class="callout">
-    <h3>Migrating a MagicDraw or CATIA Magic model without those 252 losses is not supported yet.</h3>
-    <p>Named is not the same as carried. An unmappable loss is reported so you can decide about it.
-    It is still a loss, and this page will not round it down.</p>
-  </div>
-
-  <div class="prose" style="margin-top:1.75rem">
-    <p>Reproduce the measurement. It prints the counts above, not a summary of them:</p>
-  </div>
-<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture</code></pre>
-</section>
-
-<section class="section shell" id="capabilities" aria-labelledby="capabilities-h">
-  <div class="section__head">
-    <p class="eyebrow">03 / Capabilities</p>
-    <h2 id="capabilities-h">What works today</h2>
-    <p>Every card carries its own status, and a number where a number exists. Nothing here is a
-    roadmap item dressed as a feature: what is not built is in the next section, at the same weight
-    as this one.</p>
-  </div>
-
-  <div class="cards">
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--works">Works</span>
-        <h3>Model repository</h3>
+  <!-- Generated from spec/analytics/metric_definitions.json by website/generate-analytics.mjs. Do not edit by hand. -->
+  <ul class="metrics">
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Graph nodes</h4>
+        <code class="metric__id">graph.node_count</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>Content-addressed blobs, a deterministic commit hash, section-scoped diffs, three-way merge
-      with a real least-common-ancestor, element locks as leases, an append-only audit log written
-      inside the mutation transaction, and identity with roles.</p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--works">Works</span>
-        <h3>Round-trip gate</h3>
+      <p class="metric__desc">Number of nodes in the graph section (every element as a node).</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.nodes</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Graph edges</h4>
+        <code class="metric__id">graph.edge_count</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>Zero element, edge, attribute or document-field loss. Graph integration, optional strict
-      coverage, and deterministic evidence records that regenerate byte for byte.</p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--works">Works</span>
-        <h3>Workbench</h3>
+      <p class="metric__desc">Number of edges in the graph section (every relationship as an edge).</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Orphaned elements</h4>
+        <code class="metric__id">graph.isolated_count</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>Server-rendered HTML and inline SVG, served by the same service that holds the model.
-      <span class="card__num">0 external requests</span></p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--partial">Partial</span>
-        <h3>Interoperability</h3>
+      <p class="metric__desc">Number of graph nodes with no incident edge. The graph-gaps headline: every orphan is named in graph_stats.isolated.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.nodes</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Isolated groups</h4>
+        <code class="metric__id">graph.component_count</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>A binding contract, a SysML v1 XMI reader, and migration as a gated operation: the source
-      artifact is retained content-addressed before anything else, fidelity is measured, and a lossy
-      migration is refused until the specific loss is accepted by name.</p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--partial">Partial</span>
-        <h3>Agent loop</h3>
+      <p class="metric__desc">Number of connected components in the graph. More than one means the model is split into isolated groups.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.nodes</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Requirements total</h4>
+        <code class="metric__id">coverage.total</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>A Reasoner trait, proposals a human reads, agent actions distinguishable in the audit log,
-      and an enforced rule that an agent cannot write. A human with the write role accepts a proposal
-      from the proposals page, and the commit records both parties.</p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--works">Works</span>
-        <h3>Governance</h3>
+      <p class="metric__desc">Number of requirements in the model.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Satisfied links</h4>
+        <code class="metric__id">coverage.satisfied</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>Commit provenance recorded as authored, imported or unknown. Migration rules enforced at the
-      commit path, and a check record written per commit.</p>
-    </article>
-
-    <article class="card">
-      <div class="card__head">
-        <span class="status status--works">Works</span>
-        <h3>Analytics</h3>
+      <p class="metric__desc">Number of dependency edges labelled Satisfy that target a requirement.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Refined links</h4>
+        <code class="metric__id">coverage.refined</code>
+        <span class="metric__status">active</span>
       </div>
-      <p>Portfolio compliance, cost joins with weakest-link confidence, and exact decimal money:
-      scaled integers, no floating point.</p>
-    </article>
-
-  </div>
+      <p class="metric__desc">Number of dependency edges labelled Refine that target a requirement.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Verified links</h4>
+        <code class="metric__id">coverage.verified</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of dependency edges labelled Verify that target a requirement.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Allocated links</h4>
+        <code class="metric__id">coverage.allocated</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of dependency edges labelled Allocate with a requirement endpoint.</p>
+      <p class="metric__deps"><span>depends on</span> <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Covered requirements</h4>
+        <code class="metric__id">coverage.covered</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of requirements covered by at least one Satisfy/Refine/Verify/Allocate edge.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Uncovered requirements</h4>
+        <code class="metric__id">coverage.uncovered</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of requirements with no covering edge. Each is named in the coverage report's uncovered list.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Specification size</h4>
+        <code class="metric__id">compliance.specification_size</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of requirements in the caller's specification (the portfolio question).</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Specification covered</h4>
+        <code class="metric__id">compliance.covered_count</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Requirements of the specification present and covered by the model.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Specification uncovered</h4>
+        <code class="metric__id">compliance.uncovered_count</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Requirements of the specification present in the model but uncovered.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>graph.edges</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Specification unknown</h4>
+        <code class="metric__id">compliance.unknown_count</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Requirements of the specification absent from the model entirely. Never rendered as a blank.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Costed requirements</h4>
+        <code class="metric__id">cost.costed_count</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of requirements with at least one cost record across the supplied datasets.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>dataset</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Uncosted requirements</h4>
+        <code class="metric__id">cost.uncosted_count</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of requirements with no cost record. Never rendered as zero.</p>
+      <p class="metric__deps"><span>depends on</span> <code>requirements</code>, <code>dataset</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Gate passed</h4>
+        <code class="metric__id">gate.passed</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Whether the gate run passed (1) or failed (0) against its reference.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Validation errors</h4>
+        <code class="metric__id">gate.validation_errors</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of validation errors the gate recorded for the candidate.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>validate</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Validation warnings</h4>
+        <code class="metric__id">gate.validation_warnings</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Number of validation warnings the gate recorded, including dangling edge endpoints.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>validate</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Missing elements</h4>
+        <code class="metric__id">gate.roundtrip.missing_elements</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Elements present in the reference but missing from the candidate after a round trip.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>diff</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Extra elements</h4>
+        <code class="metric__id">gate.roundtrip.extra_elements</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Elements present in the candidate but not the reference after a round trip.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>diff</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Missing edges</h4>
+        <code class="metric__id">gate.roundtrip.missing_edges</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Edges present in the reference but missing from the candidate after a round trip.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>diff</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Extra edges</h4>
+        <code class="metric__id">gate.roundtrip.extra_edges</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Edges present in the candidate but not the reference after a round trip.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>diff</code></p>
+    </li>
+    <li class="metric">
+      <div class="metric__head">
+        <h4>Changed attributes</h4>
+        <code class="metric__id">gate.roundtrip.changed_attributes</code>
+        <span class="metric__status">active</span>
+      </div>
+      <p class="metric__desc">Attributes whose value differs between reference and candidate after a round trip.</p>
+      <p class="metric__deps"><span>depends on</span> <code>gate</code>, <code>diff</code></p>
+    </li>
+  </ul>
 </section>
 
 <section class="section shell" id="limits" aria-labelledby="limits-h">
   <div class="section__head">
-    <p class="eyebrow">04 / Limits</p>
+    <p class="eyebrow">06 / Limits</p>
     <h2 id="limits-h">What it does not do</h2>
-    <p>Each of these is a limit of the current release, and each one is checkable from the repository.</p>
+    <p>Each of these is a limit of the current release, and each one is checkable from the repository.
+    This section is the reason the rest of the page is believable.</p>
   </div>
 
   <ul class="limits">
@@ -298,19 +527,22 @@
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
         <h3>Real vendor migration is not complete.</h3>
-        <p>A 36&nbsp;MB Cameo export &mdash; the Thirty Meter Telescope model, 362 blocks, 633 edges
-        &mdash; imports and round-trips exactly, and reports 45,725 named losses for the constructs it
-        does not carry. Named rather than dropped in silence. A model of that size is not yet fully
-        migrated, and SysML v2 textual notation is carried as a viewer: it reads, it does not write
-        back.</p>
+        <p>On the MagicDraw coffee-machine corpus the reader reports 252 blocking losses. A
+        36&nbsp;MB Cameo export, the Thirty Meter Telescope model, carries 362 blocks and 633 edges,
+        round-trips exactly, and reports 45,725 named losses for the constructs it does not carry.
+        Named rather than dropped in silence. SysML v2 textual notation is carried as a viewer: it
+        reads, it does not write back.</p>
+        <p>Reproduce the two measurements:</p>
+<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+cargo test -p mw-binding-xmi --test real_tmt -- --nocapture</code></pre>
       </div>
     </li>
     <li>
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
         <h3>The native XMI-to-OKF direction is not independently measured.</h3>
-        <p>The gate measures the binding&rsquo;s own OKF-to-XMI-to-OKF round trip. The read rests on
-        the binding&rsquo;s self-reported loss report, not on an independent golden corpus.</p>
+        <p>The gate measures the binding's own OKF-to-XMI-to-OKF round trip. The read rests on the
+        binding's self-reported loss report, not on an independent golden corpus.</p>
       </div>
     </li>
     <li>
@@ -324,37 +556,69 @@
   </ul>
 </section>
 
-<section class="section shell" id="workbench" aria-labelledby="workbench-h">
+<section class="section shell" id="faq" aria-labelledby="faq-h">
   <div class="section__head">
-    <p class="eyebrow">05 / The workbench</p>
-    <h2 id="workbench-h">The workbench</h2>
-    <p>Server-rendered HTML and inline SVG, served by <code>mw-server</code>. No framework, no build
-    step, nothing fetched from the network at page load. These are captures of the running
-    service.</p>
+    <p class="eyebrow">07 / FAQ</p>
+    <h2 id="faq-h">Does it replace my modelling tool?</h2>
+    <p>No. Modelwrite reads and does not write. It imports from your modelling tool, measures what
+    is there, and reports what it could not carry. You keep your modelling tool.</p>
   </div>
 
-  <div class="figures">
-    <figure>
-      <img src="workbench-overview.png" width="1440" height="900" loading="lazy"
-           alt="The modelwrite workbench showing the coffee-machine model: a model switcher and new model button, a left navigator listing models and sections, a structure tree of blocks and actors, and an overview panel with coverage reading 15 of 25, 49 elements and 25 requirements.">
-      <figcaption><b>Coverage at a glance.</b> 15 of 25 requirements covered, 10 uncovered and named,
-      49 elements, 25 requirements. The numbers on this screen come from the same engine the gate
-      uses.</figcaption>
-    </figure>
+  <ul class="faq">
+    <li>
+      <h3>Does an AI change my model?</h3>
+      <p>It proposes. A human accepts. An agent cannot write: only a human with the write role accepts
+      a proposal into a commit, and the commit records both parties.</p>
+    </li>
+    <li>
+      <h3>What does it cost, and what licence?</h3>
+      <p>The code is free and open source. The engine and server are AGPL-3.0-or-later. The
+      interchange format, the importers and the exporters are Apache-2.0. See the
+      <a href="#licence">licence section</a>.</p>
+    </li>
+  </ul>
+</section>
 
-    <figure>
-      <img src="workbench-requirements.png" width="1440" height="900" loading="lazy"
-           alt="The requirements table in the workbench, listing REQIDs, requirement text, a satisfied-by column naming the satisfying elements, and a coverage column with covered and uncovered badges.">
-      <figcaption><b>Traceability, element by element.</b> Each requirement carries its REQID, its
-      text, what satisfies it, and whether it is covered. The uncovered ones are listed rather than
-      summarised into a percentage.</figcaption>
-    </figure>
+<section class="section shell" id="install" aria-labelledby="install-h">
+  <div class="section__head">
+    <p class="eyebrow">08 / Install</p>
+    <h2 id="install-h">Install and run it yourself</h2>
+    <p>The Rust crates are not published to crates.io; build from the repository. You need Rust
+    stable via rustup.</p>
+  </div>
+
+  <div class="prose">
+    <h3>Build and test</h3>
+  </div>
+<pre><code>cargo build --workspace
+cargo test --workspace</code></pre>
+
+  <div class="prose">
+    <h3>Run the gate on the corpus</h3>
+    <p>Expected output: <code>GATE PASS</code>.</p>
+  </div>
+<pre><code>cargo run -p mw-gate -- --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json</code></pre>
+
+  <div class="prose">
+    <h3>Deploy it</h3>
+    <p>As a container, a Compose trial on one machine, or a Helm release.</p>
+  </div>
+<pre><code>docker build -f deploy/Dockerfile -t modelwrite/modelwrite:0.1.0 .
+docker compose -f deploy/docker-compose.yml up --build
+helm install modelwrite deploy/helm/modelwrite</code></pre>
+
+  <div class="callout" style="border-color:var(--line);border-left-color:var(--warn);background:var(--panel)">
+    <h3 style="color:var(--ink)">The service runs in open mode unless you configure authentication.</h3>
+    <p style="color:var(--ink-soft)">Open mode means an anonymous admin. The image refuses to start
+    that way unless <code>MW_ALLOW_OPEN=yes</code> is set, so for anything shared, set
+    <code>MW_AUTH_TOKEN</code> or <code>MW_AUTH_JWKS</code> instead. The Helm chart does not do TLS,
+    backups or high availability; see <code>deploy/README.md</code> for what it leaves to you.</p>
   </div>
 </section>
 
 <section class="section shell" id="architecture" aria-labelledby="architecture-h">
   <div class="section__head">
-    <p class="eyebrow">06 / Architecture</p>
+    <p class="eyebrow">09 / Architecture</p>
     <h2 id="architecture-h">Architecture</h2>
     <p>The engine crates are the contract. The server, the CLI and every connector build on them, and
     nothing bypasses the OKF crate and the gate.</p>
@@ -385,7 +649,7 @@
     <div class="layer">
       <p class="layer__name">Engine crates<span class="layer__note">AGPL-3.0-or-later</span></p>
       <ul class="layer__items">
-        <li><code>okf</code> &middot; <code>graph</code> &middot; <code>gate</code> &middot; <code>binding</code> &middot; <code>binding-xmi</code> (the SysML v1 XMI reader)</li>
+        <li><code>okf</code> &middot; <code>graph</code> &middot; <code>gate</code> &middot; <code>binding</code> &middot; <code>binding-xmi</code> (the SysML v1 XMI reader) &middot; <code>binding-sysmlv2</code> (the SysML v2 textual viewer)</li>
         <li><code>agent</code> (Reasoner and proposals) &middot; <code>capi</code> (C ABI) &middot; <code>mcp</code> (MCP server) &middot; <code>analytics</code></li>
       </ul>
     </div>
@@ -435,101 +699,17 @@
   </div>
 </section>
 
-<section class="section shell" id="install" aria-labelledby="install-h">
-  <div class="section__head">
-    <p class="eyebrow">07 / Install</p>
-    <h2 id="install-h">Install and run it yourself</h2>
-    <p>The Rust crates are not published to crates.io. Both declare <code>publish = false</code> in
-    their manifests, so <code>cargo install</code> will not work. Build from the repository. You need
-    Rust stable via rustup, and Python 3.12 or later for the judge harness.</p>
-  </div>
-
-  <div class="prose">
-    <h3>Build the crates</h3>
-    <p>The service is <code>mw-server</code>. The CLI is <code>mw-cli</code>, which builds the
-    <code>mw</code> binary.</p>
-  </div>
-<pre><code>cargo build --workspace
-cargo test --workspace
-cargo run -p mw-server</code></pre>
-
-  <div class="prose">
-    <h3>Run the gate on the corpus</h3>
-    <p>Expected output: <code>GATE PASS</code>.</p>
-  </div>
-<pre><code>cargo run -p mw-gate -- \
-  --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
-  --candidate sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json</code></pre>
-
-  <div class="prose">
-    <h3>Use the CLI against a local store</h3>
-    <p>The CLI reaches the service over plain HTTP, or opens a SQLite store directly for offline
-    use.</p>
-  </div>
-<pre><code>mw --db modelwrite.db project create coffee</code></pre>
-
-  <div class="prose">
-    <h3>Deploy it</h3>
-    <p>As a container, a Compose trial on one machine, or a Helm release.</p>
-  </div>
-<pre><code>docker build -f deploy/Dockerfile -t modelwrite/modelwrite:0.1.0 .
-docker compose -f deploy/docker-compose.yml up --build
-helm install modelwrite deploy/helm/modelwrite</code></pre>
-
-  <div class="callout" style="border-color:var(--line);border-left-color:var(--warn);background:var(--panel)">
-    <h3 style="color:var(--ink)">The service runs in open mode unless you configure authentication.</h3>
-    <p style="color:var(--ink-soft)">Open mode means an anonymous admin. The image refuses to start
-    that way unless <code>MW_ALLOW_OPEN=yes</code> is set, so for anything shared, set
-    <code>MW_AUTH_TOKEN</code> or <code>MW_AUTH_JWKS</code> instead. The Helm chart does not do TLS,
-    backups or high availability: see <code>deploy/README.md</code> for what it leaves to you. A
-    JWKS file is read once at startup, so adding or removing a signing key needs a restart.</p>
-  </div>
-</section>
-
-<section class="section shell" id="numbers" aria-labelledby="numbers-h">
-  <div class="section__head">
-    <p class="eyebrow">08 / Numbers</p>
-    <h2 id="numbers-h">Numbers you can check</h2>
-    <p>Every figure below has the command that produced it. If one does not reproduce, that is a bug
-    and it should be reported as one.</p>
-  </div>
-
-  <div class="stats">
-    <div class="stat"><span class="stat__num">501</span><span class="stat__label">workspace tests pass, 0 fail, 24 PostgreSQL tests marked ignored in that run</span></div>
-    <div class="stat"><span class="stat__num">6</span><span class="stat__label">CI jobs: <code>engine</code>, <code>msrv</code>, <code>postgres</code>, <code>browser</code>, <code>deploy</code>, <code>publish</code></span></div>
-    <div class="stat"><span class="stat__num">99</span><span class="stat__label">corpus graph nodes, 165 edges, one component, 0 isolated</span></div>
-  </div>
-
-  <div class="prose" style="margin-top:1.75rem">
-    <p>The test count comes from <code>cargo test --workspace --no-fail-fast</code> at the repository
-    root. The 24 ignored tests are the PostgreSQL backend suite, which the <code>postgres</code> CI
-    job runs against a real PostgreSQL 16 service container. The <code>browser</code> job builds the
-    service and drives it with Playwright end-to-end tests; <code>msrv</code> rebuilds each layer at
-    the toolchain floor its manifest declares, rather than at stable. The corpus is
-    <code>sample/corpus/coffee-machine</code>, pinned by tests and by the evidence annex: 99 graph
-    nodes, 165 graph edges, 25 requirements, 49 blocks, 9 signals, 8 activities, one connected
-    component and no isolated nodes.</p>
-    <p>The evidence records are not maintained by hand. The <code>engine</code> CI job regenerates
-    both and diffs them against the committed files, so a new timestamp or a nondeterministic
-    iteration order anywhere in the gate fails the build.</p>
-  </div>
-</section>
-
 <section class="section shell" id="licence" aria-labelledby="licence-h">
   <div class="section__head">
-    <p class="eyebrow">09 / Licence</p>
-    <h2 id="licence-h">Licence and governance</h2>
+    <p class="eyebrow">10 / Licence</p>
+    <h2 id="licence-h">Licence</h2>
   </div>
 
   <div class="prose">
     <p>The engine crates and the server are <strong>AGPL-3.0-or-later</strong>. The OKF interchange
     format, the importers and the exporters are <strong>Apache-2.0</strong>. The split is project
     policy, stated in <code>CONTRIBUTING.md</code>: importers and exporters ship under Apache-2.0 and
-    the engine stays AGPL-3.0-or-later. The reference implementation of OKF lives in the AGPL
-    engine.</p>
-    <p>Commercial use follows the documented open-core pattern: a private business repository
-    alongside the public engine, the evidence annex, and the rule packs. What you install is the
-    thing you can read.</p>
+    the engine stays AGPL-3.0-or-later. What you install is the thing you can read.</p>
   </div>
 </section>
 
@@ -539,8 +719,8 @@ helm install modelwrite deploy/helm/modelwrite</code></pre>
   <div class="shell footer__grid">
     <div>
       <h2>Reproduce the claims</h2>
-<pre><code>cargo test --workspace --no-fail-fast
-cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+cargo test -p mw-binding-xmi --test real_tmt -- --nocapture
 cargo run -p mw-gate -- \
   --reference sample/corpus/coffee-machine/okf/expected/coffee_machine_model.json \
   --candidate sample/corpus/coffee-machine/okf/corrupted/coffee_machine_model.json</code></pre>
@@ -553,6 +733,9 @@ cargo run -p mw-gate -- \
       <a href="https://github.com/modelwrite/modelwrite/blob/main/deploy/README.md">Deployment notes</a></p>
       <p>Licence: AGPL-3.0-or-later for the engine and server, Apache-2.0 for the interchange format
       and the importers and exporters.</p>
+      <p>Cameo, CATIA and MagicDraw are trademarks of Dassault Systèmes or its subsidiaries, used
+      here descriptively to name the tools Modelwrite reads. SysML is a trademark of the Object
+      Management Group.</p>
       <p>Hand-written HTML and CSS. No build step, no external requests, no cookies and no
       analytics.</p>
     </div>
