@@ -28,6 +28,11 @@ XMI needs its own corpus and its own fidelity report, which is a later tranche.
   Text=.../> stereotype application, and Satisfy/Allocate are uml:Abstraction
   elements whose client/supplier are CHILD elements (<client xmi:idref=.../>)
   with a <sysml:Satisfy base_Abstraction=.../> sibling application.
+- requirement-no-id.xmi: a requirement whose <sysml:Requirement> stereotype
+  application carries an EMPTY Id (Id=""), exactly as the two TMT template
+  requirements (#parent, #child) do. The reader carries the empty Id verbatim as
+  an empty reqId - a fact about the source, not a parsing gap - and the OKF
+  validator accepts it (a missing identifier is not a structural error).
 
 ## Conventions
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001"
+         xmlns:uml="http://www.omg.org/spec/UML/20131001"
+         xmlns:sysml="http://www.omg.org/spec/SysML/20181001/SysML">
+  <uml:Model xmi:id="model-noid" name="Requirement Without Id">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg-req" name="Requirements">
+      <packagedElement xmi:type="uml:Class" xmi:id="req-unnamed" name="Unnamed Template Requirement"/>
+    </packagedElement>
+  </uml:Model>
+  <!-- The MagicDraw shape from the TMT model: a requirement whose Id attribute is
+       PRESENT but EMPTY (Id=""), exactly as the two "#parent"/"#child" template
+       requirements carry it. The reader reads the empty Id verbatim, so reqId is
+       empty - a legitimate fact about the source, not a parsing gap. -->
+  <sysml:Requirement xmi:id="app-req-noid" base_Class="req-unnamed" Id="" Text=""/>
+</xmi:XMI>

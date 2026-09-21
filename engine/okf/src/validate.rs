@@ -143,9 +143,15 @@ pub fn validate(root: &OkfRoot) -> ValidationReport {
     }
     for r in &root.requirements {
         add_id(&r.id, "requirements", &mut report.errors);
+        // A requirement whose human-facing SysML id (reqId) is empty is a fact about
+        // the source - the Open-MBEE TMT model carries two template requirements with
+        // an empty Id - not a structural error. The traceability key is the element id,
+        // which add_id above already requires to be present and unique; reqId is a
+        // human-facing label carried for display, never a graph or coverage key. So an
+        // empty reqId is named (a warning), never hidden, and never refuses the document.
         if r.req_id.trim().is_empty() {
             report
-                .errors
+                .warnings
                 .push(format!("requirement {} has an empty reqId", r.id));
         }
     }

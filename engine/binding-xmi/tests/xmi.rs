@@ -627,6 +627,37 @@ fn magicdraw_requirements_and_abstraction_traceability_are_carried() {
 }
 
 #[test]
+fn a_requirement_with_an_empty_id_is_carried_and_validates() {
+    // The Open-MBEE TMT model carries two template requirements (#parent, #child)
+    // whose <sysml:Requirement> Id attribute is PRESENT but EMPTY (Id=""), so their
+    // reqId is legitimately empty. The reader carries that fact verbatim - an empty
+    // string, not a misread - and the validator accepts it: a missing human-facing
+    // identifier is not a structural error, and the element id stays the traceability
+    // key.
+    let (root, _loss) = import("requirement-no-id.xmi");
+
+    assert_eq!(root.requirements.len(), 1);
+    let requirement = &root.requirements[0];
+    assert_eq!(requirement.id, "req-unnamed");
+    assert_eq!(requirement.name, "Unnamed Template Requirement");
+    assert_eq!(requirement.kind, "requirement");
+    assert_eq!(requirement.req_id, "");
+    assert_eq!(requirement.req_text, "");
+
+    // The requirement is still a graph node, keyed by its element id.
+    let graph = root.graph.as_ref().expect("graph present");
+    assert!(graph.nodes.iter().any(|n| n.id == "req-unnamed" && n.kind == "requirement"));
+
+    // The imported document validates: the empty reqId is a warning, not an error.
+    let report = okf::validate::validate(&root);
+    assert!(report.valid, "unexpected errors: {:?}", report.errors);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("empty reqId") && w.contains("req-unnamed")));
+}
+
+#[test]
 fn requirements_and_traceability_round_trip_through_export() {
     let (root, _) = import("magicdraw-requirements.xmi");
     let bytes = XmiBinding::new()

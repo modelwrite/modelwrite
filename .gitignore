@@ -20,4 +20,6 @@ e2e/node_modules/
 e2e/test-results/
 e2e/playwright-report/
 e2e/.state.json
-e2e/*.png`ne2e/diag-*.js
+e2e/*.png
+e2e/diag-*.js
+e2e/flow-*.png

@@ -88,12 +88,22 @@ fn rejects_unknown_edge_kind() {
 }
 
 #[test]
-fn rejects_empty_requirement_id() {
+fn accepts_an_empty_requirement_id_as_a_warning() {
+    // A requirement with no human-facing SysML id (reqId) is a fact about the
+    // source - the Open-MBEE TMT model carries two template requirements (#parent,
+    // #child) whose Id attribute is empty - not a structural error. The traceability
+    // key is the element id, which the id checks above already enforce; reqId is a
+    // human-facing label. An empty reqId is named (a warning), never hidden, and
+    // never refuses the document.
     let mut root = expected();
     root.requirements[0].req_id = String::new();
     let report = validate::validate(&root);
-    assert!(!report.valid);
-    assert!(report.errors.iter().any(|e| e.contains("empty reqId")));
+    assert!(report.valid, "unexpected errors: {:?}", report.errors);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("empty reqId")));
+    assert!(!report.errors.iter().any(|e| e.contains("reqId")));
 }
 
 #[test]
