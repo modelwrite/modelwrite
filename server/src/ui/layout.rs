@@ -265,7 +265,9 @@ ul.projects {
 /* gap: 0 with a rule on two sides of every cell gives a true ruled grid and
    leaves no filled empty cell at the end of an incomplete row. The cell is the
    ruled box and a column: the whole-card link is its body, and the health band
-   is its footer, so the readout sits at the bottom of every card in a row. */
+   is its footer. The column is the fallback; where the engine has subgrid the
+   cell takes its two rows from the grid, so the body and the band are one
+   height each across a row. */
 ul.projects li {
   margin: 0; padding: 0;
   display: flex; flex-direction: column;
@@ -273,6 +275,19 @@ ul.projects li {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+}
+/* Subgrid is the alignment, not a flourish. In a column of its own, the band's
+   height is its own text's, so a one-line band sits shorter than a wrapped one
+   and the rule over the bands runs ragged across the row - and the top of a
+   band is the line the eye follows when it scans a row. Sharing the grid's two
+   tracks gives every cell in a row one body height and one band height, so the
+   band rule and the band itself are a single horizontal line. */
+@supports (grid-template-rows: subgrid) {
+  ul.projects li {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 2;
+  }
 }
 
 ul.branches li, ul.proposals li, ul.proposal-list li {
@@ -306,7 +321,13 @@ a.project-card::before {
   opacity: 0.9;
 }
 /* The scope mark: a square at the top right of every card, the same square on
-   every card, so the wall is legible as a grid even before it is read. */
+   every card, so the wall is legible as a grid even before it is read.
+   It is DECORATION and NOT a control, so it carries no label: it is a ::after,
+   with no DOM node, no tab stop, nothing to select and nothing for a screen
+   reader to reach (its content is empty), and the card around it is one link.
+   It reads as an orphaned checkbox only because a small square outline is what
+   a checkbox looks like. It is the registration mark of the wall; this comment
+   says so, because there is no control here to label. */
 a.project-card::after {
   content: "";
   position: absolute; right: 0.7rem; top: 0.7rem;
@@ -344,7 +365,8 @@ a.project-card:hover .project-name { color: var(--accent-strong); }
    "nothing to measure" is not "nothing wrong". No colour is introduced: this
    block reuses the tokens above and nothing else. */
 .project-health {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem;
+  display: flex; flex-wrap: wrap; align-items: baseline; align-content: flex-start;
+  gap: 0.35rem;
   margin: 0;
   padding: 0.45rem 0.9rem 0.45rem 1.05rem;
   border-top: 1px solid var(--border-muted);
@@ -353,6 +375,13 @@ a.project-card:hover .project-name { color: var(--accent-strong); }
   color: var(--text-2);
 }
 .project-health .dot { color: inherit; opacity: 0.55; margin: 0; }
+/* A count and the separator that introduces it are ONE wrapping unit, so the
+   dot always travels with the count it precedes and a band that wraps is never
+   left ending a line on a dangling separator. The unit carries the same 0.35rem
+   inside it that the band carries between units, so the spacing is unchanged. */
+.project-health .health-gap {
+  display: inline-flex; align-items: baseline; gap: 0.35rem;
+}
 .project-health .health-label {
   font-size: 10px; font-weight: 700;
   letter-spacing: 0.06em; text-transform: uppercase;

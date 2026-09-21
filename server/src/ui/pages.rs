@@ -677,9 +677,13 @@ fn health_band(row: &ProjectRow) -> Markup {
                     data-mw-dangling=(summary.dangling)
                     data-mw-uncovered=(summary.uncovered) {
                     span class="health-label" { "gaps" }
+                    // A count and the separator that introduces it are one wrapping
+                    // unit: the dot can never be left dangling at a line break.
                     @for (index, gap) in gaps.iter().enumerate() {
-                        @if index > 0 { span class="dot" { "·" } }
-                        (gap)
+                        span class="health-gap" {
+                            @if index > 0 { span class="dot" { "·" } }
+                            (gap)
+                        }
                     }
                     (health_link(row))
                 }
