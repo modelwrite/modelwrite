@@ -21,12 +21,13 @@ intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 ## Source pinned
 
 - Repository: `https://github.com/modelwrite/modelwrite.git` (public)
-- Commit built from: `55f653ceaf2222c7314d818f2d72bbc27330bf72`
-  (`docs: STPA completeness is in progress, not deployed` on top of
-  `0b369b5 STPA/STAMP completeness check (T1-T3)`)
-- Image: `modelwrite/modelwrite:idc-1-trial` (id `d767a42f08f7`, ~149 MB), built on the
+- Commit built from: `2772b5f76a7e30aecd4497a373db4c72cc87cc9d`
+  (`feat(server): wire the SysML v2 reader into the workbench import surface` on top of
+  `6ea0913 fix(content-address): one canonical serialisation across every write path`)
+- Image: `modelwrite/modelwrite:idc-1-trial` (id `5167eca952df`, ~149 MB), built on the
   host from the public repo — no registry pull, no registry credentials.
-- Previous (revert): image `50c8623ed6ac`, commit `47efbf1035a8250e227c9cb2d703a14c1dddf730`.
+- Previous (revert): image `d767a42f08f7`, commit `55f653ceaf2222c7314d818f2d72bbc27330bf72`
+  (still tagged on the host as `modelwrite/modelwrite:idc-1-trial-pre-canonical-55f653c`).
 
 > **Why not the v0.2.0 tag.** The tag predates the S2 crossModelEdges feature
 > (`engine/okf/src/types.rs`, `server/src/composition.rs`). The trial's variant-impact
@@ -183,6 +184,15 @@ systemctl status modelwrite-trial-verify.service
 - Canonical capture: `/opt/modelwrite/seed/manifest.json` + `documents/` (exact stored
   documents + replayable operations with expected hashes). Regenerate with
   `capture-seed.py`; replay with `seed-from-manifest.py`.
+- 2026-09-21 canonical-hash re-capture: the content-address fix (`6ea0913`) changed every
+  commit hash — the pre-fix manifest's `expectedHash` values (captured through the old
+  BTreeMap-order HTTP path) no longer matched a rebuilt server, so the reset's hash
+  verification would have failed on the next real rebuild. The manifest was re-captured
+  against a freshly-seeded container running the rebuilt image (commit `2772b5f`), and a
+  `FORCE=1` reset replayed and verified all eight commits against the new `expectedHash`.
+  The pre-fix manifest is preserved on the host as `manifest.json.pre-canonical.bak`.
+  `seed-trial.mjs` / `seed.mjs` hardcode no hashes — they re-derive them, so they were
+  unaffected.
 - Reproducible from this repository: `docs/deploy/seed-trial.mjs` reads
   `e2e/models/*.json` + the coffee-machine corpus straight from a checkout and rebuilds
   the same seven models with identical commit hashes (verified). The same logic also runs
