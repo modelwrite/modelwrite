@@ -477,7 +477,7 @@
     "references":  [
                        {
                            "project":  "purchasing-terminal",
-                           "revision":  "86a14a8128ee2a02085a56bf83a2504f12774e25a0a1d28005daf1fe1e9ee1ea",
+                           "revision":  "87be9f0740dae1fb16b573904c4428c2849a1cc081d6a36964a90631652c45c6",
                            "role":  "payment",
                            "bounds":  [
                                           "eftpos",
@@ -488,7 +488,7 @@
                        },
                        {
                            "project":  "coffee-machine",
-                           "revision":  "d427e847bf4d875d06fc7f2a5b47bb0a3dc53855a61850195c4ec78e7d45fc36",
+                           "revision":  "1ec97db8f80df53f22972fdc5cadd0a99528bef38be798ce74012c0e7784faed",
                            "role":  "beverage",
                            "bounds":  [
                                           "_2026x_1_12a70364_1789363229077_574630_3720",
@@ -497,7 +497,7 @@
                        },
                        {
                            "project":  "sandwich-toaster",
-                           "revision":  "6cc2b58d6f827363d032965ead2d7ecc33e95dfdab1089f9586423959b3bf9ac",
+                           "revision":  "0399697d7e9798db4303a38bd25559b09749495ff9002a2a10c325b8fb06f8cb",
                            "role":  "food",
                            "bounds":  [
                                           "heating-element",
@@ -507,7 +507,7 @@
                        },
                        {
                            "project":  "floor-robot",
-                           "revision":  "9dcccb6d13fb0fd67b46af70d08a730491e5a7d32ae52f3a2f4d42e843f0d712",
+                           "revision":  "8e42ad84dda9063ffaa95e1a6e5c72914fcd2c14bced42443e712b975b319bfa",
                            "role":  "floor-care",
                            "bounds":  [
                                           "camera-module",
