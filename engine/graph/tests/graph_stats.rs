@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-use graph::{graph_stats, requirement_coverage};
+use graph::{components, graph_stats, requirement_coverage};
 use okf::types::OkfRoot;
 
 fn expected() -> OkfRoot {
@@ -52,6 +52,40 @@ fn two_components_are_counted() {
     let stats = graph_stats(&okf(TINY));
     assert_eq!(stats.component_count, 2);
     assert_eq!(stats.component_sizes, vec![2, 1]);
+}
+
+#[test]
+fn components_list_each_group_membership() {
+    // TINY: p1-r1 (one Satisfy edge) forms one component; r2 (no edges) is a singleton.
+    let comps = components(&okf(TINY));
+    assert_eq!(comps.count, 2);
+    assert_eq!(
+        comps.groups,
+        vec![
+            vec!["p1".to_string(), "r1".to_string()],
+            vec!["r2".to_string()]
+        ]
+    );
+}
+
+#[test]
+fn corpus_is_one_component_of_every_node() {
+    let comps = components(&expected());
+    assert_eq!(comps.count, 1);
+    assert_eq!(comps.groups.len(), 1);
+    assert_eq!(comps.groups[0].len(), 99);
+}
+
+#[test]
+fn components_agree_with_graph_stats() {
+    // The membership count and sizes must never drift from the stats the gate reports.
+    let root = expected();
+    let comps = components(&root);
+    let stats = graph_stats(&root);
+    assert_eq!(comps.count, stats.component_count);
+    let mut sizes: Vec<usize> = comps.groups.iter().map(Vec::len).collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(sizes, stats.component_sizes);
 }
 
 #[test]

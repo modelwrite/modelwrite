@@ -490,6 +490,17 @@ pub async fn accept_proposal_form(
             &error.message,
         );
     }
+    // An empty commit message must be REFUSED with a visible error, never a silent re-render
+    // or a silent empty-message commit. The browser's `required` hint is not the authority -
+    // a direct POST bypasses it - so the server refuses it here.
+    if form.message.trim().is_empty() {
+        return layout::error_page(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(&identity.subject),
+            mechanism,
+            "commit message must not be empty",
+        );
+    }
     let nav = match layout::Nav::load(&state, &identity, Some(&project)) {
         Ok(mut nav) => {
             nav.section = Some("assist");

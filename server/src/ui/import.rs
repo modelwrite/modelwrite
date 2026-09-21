@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use axum::extract::{Form, Multipart, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use maud::{html, Markup};
+use maud::{html, Markup, PreEscaped};
 
 use agent::losses::entry_identity;
 use binding::{BindingInfo, Direction, LossReport, Mapping, MappingVerdict};
@@ -618,7 +618,25 @@ impl AcceptForm {
             .unwrap_or_else(|| DEFAULT_BRANCH.to_string());
         let message = form.get("message").cloned().unwrap_or_default();
         let holder = form.get("holder").cloned().unwrap_or_default();
-        let accept_losses = parse_accept_losses(form);
+        let accept_all = form
+            .get("accept_all")
+            .map(|value| value == "1")
+            .unwrap_or(false);
+        // "Accept all" carries every blocking entry identity in ONE hidden field, so a single
+        // click accepts the whole report without checking 252 boxes. The identities are
+        // newline-joined; an entry identity never contains a newline.
+        let accept_losses = if accept_all {
+            form.get("all_losses")
+                .map(|raw| {
+                    raw.split('\n')
+                        .filter(|identity| !identity.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            parse_accept_losses(form)
+        };
         AcceptForm {
             artifact_hash,
             branch,
@@ -1129,9 +1147,39 @@ fn committed_page(
     )
 }
 
+/// The inline enhancement for the loss-acceptance form: the select-all toggle and the live
+/// count of how many losses will be accepted. The page still works without it - the accept-all
+/// button needs no JavaScript, because it submits every blocking identity in one hidden field.
+const SELECT_ALL_SCRIPT: &str = r#"(function () {
+  'use strict';
+  var form = document.getElementById('import-accept-form');
+  if (!form) { return; }
+  var selectAll = form.querySelector('.mw-select-all');
+  var boxes = form.querySelectorAll('.loss-accept input[type="checkbox"]');
+  var count = form.querySelector('.mw-accept-count');
+  function sync() {
+    var n = 0;
+    for (var i = 0; i < boxes.length; i += 1) { if (boxes[i].checked) { n += 1; } }
+    if (count) { count.textContent = String(n) + ' selected'; }
+    if (selectAll) { selectAll.checked = boxes.length > 0 && n === boxes.length; }
+  }
+  if (selectAll) {
+    selectAll.addEventListener('change', function () {
+      for (var i = 0; i < boxes.length; i += 1) { boxes[i].checked = selectAll.checked; }
+      sync();
+    });
+  }
+  for (var j = 0; j < boxes.length; j += 1) { boxes[j].addEventListener('change', sync); }
+  sync();
+})();
+"#;
+
 /// The acceptance form: the original inputs carried as hidden fields, plus one checkbox per
-/// blocking loss. A checkbox that was already accepted on a prior submit stays checked, so a
-/// partial acceptance is never thrown away on the next attempt.
+/// blocking loss, a select-all toggle and an accept-all action. A checkbox that was already
+/// accepted on a prior submit stays checked, so a partial acceptance is never thrown away on
+/// the next attempt. The accept-all button submits every blocking identity at once - one click
+/// for the 252-loss report, with the per-entry boxes still there for a person who wants to
+/// decide each one.
 #[allow(clippy::too_many_arguments)]
 fn accept_form_markup(
     project: &str,
@@ -1142,12 +1190,33 @@ fn accept_form_markup(
     blocking: &[&Mapping],
     unaccepted: &[Mapping],
 ) -> Markup {
+    let total = blocking.len();
+    let already_accepted = total.saturating_sub(unaccepted.len());
+    // Every blocking entry identity, newline-joined, so the accept-all button can submit the
+    // whole report in one click without any checkbox.
+    let all_identities = blocking
+        .iter()
+        .map(|mapping| entry_identity(mapping))
+        .collect::<Vec<_>>()
+        .join("\n");
     html! {
-        form method="post" action={ "/ui/projects/" (crate::ui::urlencode(project)) "/import/accept" } class="import-form" {
+        form method="post" id="import-accept-form"
+             action={ "/ui/projects/" (crate::ui::urlencode(project)) "/import/accept" } class="import-form" {
             input type="hidden" name="artifactHash" value=(artifact_hash);
             input type="hidden" name="branch" value=(branch);
             input type="hidden" name="message" value=(message);
             input type="hidden" name="holder" value=(holder);
+            input type="hidden" name="all_losses" value=(all_identities);
+            p class="loss-accept-summary" {
+                strong { (total) } " blocking " @if total == 1 { "loss" } @else { "losses" }
+                " · " span class="mw-accept-count" { (already_accepted) " selected" }
+            }
+            p class="loss-select-all" {
+                label {
+                    input type="checkbox" class="mw-select-all";
+                    " Select all " (total) " losses"
+                }
+            }
             ul class="loss-accept" {
                 @for (index, mapping) in blocking.iter().enumerate() {
                     li {
@@ -1165,8 +1234,12 @@ fn accept_form_markup(
                     }
                 }
             }
-            button type="submit" { "Accept the checked losses and import" }
+            p class="accept-actions" {
+                button type="submit" name="accept_all" value="1" { "Accept all " (total) " losses and import" }
+                button type="submit" { "Accept the checked losses and import" }
+            }
         }
+        script { (PreEscaped(SELECT_ALL_SCRIPT)) }
     }
 }
 

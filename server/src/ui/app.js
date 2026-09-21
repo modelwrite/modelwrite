@@ -125,6 +125,30 @@
       applyViewBox();
     }
 
+    // The node label is 13px in SVG user units. Fit-to-view can shrink it below a readable
+    // size (the 99-node model renders its labels at ~6px, illegible by construction). Open at
+    // a minimum readable scale instead, anchored top-left; the Fit button still restores the
+    // full view, and a small model (the process view) already meets the minimum and stays
+    // fit-to-view.
+    var MIN_LABEL_PX = 11;
+    var LABEL_PX = 13;
+
+    function readableDefault() {
+      if (!(viewport.clientWidth > 0 && viewport.clientHeight > 0)) {
+        return;
+      }
+      var minScale = MIN_LABEL_PX / LABEL_PX;
+      var scale = Math.min(viewport.clientWidth / fullW, viewport.clientHeight / fullH);
+      if (scale >= minScale) {
+        return;
+      }
+      vb.x = 0;
+      vb.y = 0;
+      vb.w = Math.min(fullW, viewport.clientWidth / minScale);
+      vb.h = Math.min(fullH, viewport.clientHeight / minScale);
+      applyViewBox();
+    }
+
     function svgPoint(clientX, clientY) {
       var pt = svg.createSVGPoint();
       pt.x = clientX;
@@ -370,7 +394,8 @@
       }
     });
 
-    // ---- honour a ?select= deep link (the page already opens fit-to-view) ----
+    // ---- open at a readable scale, then honour a ?select= deep link ----
+    readableDefault();
     var key = readSelectFromUrl();
     if (key) {
       each(nodeEls, function (nodeEl) {

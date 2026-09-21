@@ -258,6 +258,61 @@ async fn accepting_with_write_commits_and_names_both_parties() {
 }
 
 #[tokio::test]
+async fn accepting_with_an_empty_message_is_refused_with_a_visible_error() {
+    use_scripted_reasoner();
+    let (router, store, _dir) = app_with_auth(admin());
+    seed_model_directly(store.as_ref(), minimal_model());
+
+    let assisted = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/assist",
+            &[("branch", "main"), ("request", "add a heater block")],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(assisted.status(), StatusCode::OK);
+    let id = store.list_proposals("coffee").unwrap()[0].id.clone();
+    let commits_before = store.commits_on("coffee", "main").unwrap().len();
+
+    // Both an empty and a whitespace-only message are refused with a VISIBLE error, never a
+    // silent re-render and never a silent empty-message commit.
+    for message in ["", "   "] {
+        let refused = router
+            .clone()
+            .oneshot(post_form(
+                &format!("/ui/projects/coffee/proposals/{}/accept", id),
+                &[("branch", "main"), ("message", message)],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            refused.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{:?}",
+            refused
+        );
+        let html = body_text(refused).await;
+        assert!(
+            html.contains("commit message must not be empty"),
+            "the refusal must render its reason"
+        );
+    }
+
+    // Nothing committed, and the proposal is still undecided.
+    assert_eq!(
+        store.commits_on("coffee", "main").unwrap().len(),
+        commits_before,
+        "an empty message must not commit"
+    );
+    let record = store.proposal("coffee", &id).unwrap().unwrap();
+    assert!(
+        record.decision.is_none(),
+        "the proposal must stay undecided"
+    );
+}
+
+#[tokio::test]
 async fn a_caller_without_write_sees_no_assist_or_accept() {
     use_scripted_reasoner();
     let (router, store, _dir) = app_with_auth(viewer());

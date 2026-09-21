@@ -320,11 +320,16 @@ fn model_markup(
     // The edit link is offered only to a caller who may write, so a read-only reviewer is
     // not invited into a form that will only be refused on submit.
     let can_edit = identity.may(Permission::Write);
+    // The BRANCH BEING VIEWED, not the branch the commit was created on. A freshly-created
+    // version points at an existing tip whose commit still records the branch it was created
+    // on (main), so writing through `commit.branch` would silently land edits on main instead
+    // of the version in the address bar. nav.branch is the view branch (see view_branch).
+    let branch = nav.branch.as_deref().unwrap_or(commit.branch.as_str());
     let body = html! {
         h1 { "Overview" }
         (overview_summary(root, &ctx, branches, latest_run, nav))
         p class="meta" {
-            "branch " (commit.branch) " · commit " code { (short_hash(&commit.hash)) }
+            "branch " (branch) " · commit " code { (short_hash(&commit.hash)) }
             @if !commit.message.is_empty() {
                 " · " (commit.message)
             }
@@ -338,15 +343,15 @@ fn model_markup(
         // Adding an element WRITES, so the link is offered only to a caller who may write.
         @if can_edit {
             p class="meta" {
-                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+                a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(branch)) } { "Add element" }
             }
         }
         // The assist panel WRITES a proposal, so it is offered only to a caller who may
         // write; a read-only reviewer is not invited into a form that will only be refused.
         @if can_edit {
-            (assist_panel_markup(project, &commit.branch, &reasoner_status()))
+            (assist_panel_markup(project, branch, &reasoner_status()))
         }
-        (structure_section(root, project, &commit.branch, can_edit))
+        (structure_section(root, project, branch, can_edit))
         (requirements_section(root, &ctx))
         (traceability_section(root, &ctx))
         (state_activity_section(root, &ctx))
@@ -560,6 +565,9 @@ fn section_markup(
 ) -> Markup {
     let ctx = view_context(root);
     let can_edit = identity.may(Permission::Write);
+    // Same view-branch rule as the overview: write to the branch in the address, never to
+    // the branch the tip commit happened to be created on.
+    let branch = nav.branch.as_deref().unwrap_or(commit.branch.as_str());
     // Structure and Requirements carry selectable elements, so they get the three-pane
     // enhancement (tree + properties). Traceability is a read-only matrix: it uses the
     // whole width instead of the reading-width cap.
@@ -570,10 +578,10 @@ fn section_markup(
                 p class="meta" { "The containment tree of blocks, actors and use cases, plus the model's signals and interfaces." }
                 @if can_edit {
                     p class="meta" {
-                        a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Add element" }
+                        a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/element/new?branch=" (crate::ui::urlencode(branch)) } { "Add element" }
                     }
                 }
-                (structure_section(root, project, &commit.branch, can_edit))
+                (structure_section(root, project, branch, can_edit))
                 (state_activity_section(root, &ctx))
                 script src="/ui/app.js" {}
             },

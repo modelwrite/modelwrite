@@ -124,6 +124,8 @@ pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) ->
             "/ui/projects/:project/overview",
             get(ui::model::overview_page),
         )
+        .route("/ui/projects/:project/health", get(ui::health::health_page))
+        .route("/ui/projects/:project/search", get(ui::search::search_page))
         .route(
             "/ui/projects/:project/structure",
             get(ui::model::structure_page),

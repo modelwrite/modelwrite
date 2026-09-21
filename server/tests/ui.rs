@@ -541,6 +541,54 @@ async fn the_model_page_resolves_branch_and_commit_and_404s_unknown() {
 }
 
 #[tokio::test]
+async fn add_element_and_edit_links_carry_the_viewed_branch_not_main() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let tip = commit_okf(&router, "main", "seed", expected).await;
+
+    // Create a version from main's tip: the new branch points at the SAME commit, whose
+    // stored branch is still "main". This is exactly the audit's branch-drop scenario.
+    let branched = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/branches",
+            serde_json::json!({ "name": "feature", "from": tip }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(branched.status(), StatusCode::CREATED);
+
+    let page = router
+        .oneshot(get("/ui/projects/coffee/overview?branch=feature"))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body_text(page).await;
+
+    // The add-element link must carry the VIEWED branch, not the commit's own branch.
+    assert!(
+        html.contains("/element/new?branch=feature"),
+        "the add-element link must carry the viewed branch feature"
+    );
+    assert!(
+        !html.contains("/element/new?branch=main"),
+        "the add-element link must NOT carry main"
+    );
+    // The edit links carry the viewed branch too (and never main).
+    assert!(
+        html.contains("/edit/") && html.contains("?branch=feature"),
+        "the edit links must carry the viewed branch feature"
+    );
+}
+
+#[tokio::test]
 async fn a_scoped_identity_cannot_see_another_projects_model() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(SqliteStore::open(&dir.path().join("mw.db")).unwrap());
@@ -2455,6 +2503,100 @@ async fn a_lossy_import_shows_its_losses_and_requires_acceptance_before_committi
 }
 
 #[tokio::test]
+async fn bulk_accept_imports_every_loss_in_one_click() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+
+    let artifact = xmi_fixture("coffee-grinder.xmi");
+    let hash = server::store::blob_hash(artifact.as_bytes());
+
+    // The refusal page carries the bulk controls with a visible count.
+    let refused = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import",
+            &[
+                ("binding", "sysml-v1-xmi@2.4"),
+                ("branch", "main"),
+                ("message", "import coffee-grinder"),
+                ("artifact", artifact.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = body_text(refused).await;
+    assert!(
+        html.contains("<strong>6</strong>"),
+        "the visible count of blocking losses must render"
+    );
+    assert!(
+        html.contains("blocking losses"),
+        "the count label must render"
+    );
+    assert!(
+        html.contains("0 selected"),
+        "the initial selected count must render"
+    );
+    assert!(
+        html.contains("Accept all 6 losses and import"),
+        "the accept-all action must render"
+    );
+    assert!(
+        html.contains("mw-select-all"),
+        "the select-all toggle must render"
+    );
+    assert!(
+        html.contains("all_losses"),
+        "the all-losses hidden field must render"
+    );
+
+    // One click: accept_all plus the newline-joined identities, no per-loss checkboxes.
+    let all_losses = [
+        "uml:Model model-grinder [lossy]",
+        "uml:Comment doc-grinder [lossy]",
+        "uml:Property prop-motor [lossy]",
+        "uml:Property prop-capacity [lossy]",
+        "uml:Dependency dep-satisfy [lossy]",
+        "uml:Package pkg-structure (Structure) [lossy]",
+    ]
+    .join(
+        "
+",
+    );
+
+    let accepted = router
+        .clone()
+        .oneshot(post_form(
+            "/ui/projects/coffee/import/accept",
+            &[
+                ("artifactHash", hash.as_str()),
+                ("branch", "main"),
+                ("message", "accept all losses"),
+                ("accept_all", "1"),
+                ("all_losses", all_losses.as_str()),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED, "{:?}", accepted);
+    let html = body_text(accepted).await;
+    assert!(html.contains("Import committed"), "success must render");
+
+    // Exactly one commit: the whole report was accepted at once.
+    let commits = router
+        .oneshot(get("/projects/coffee/commits?branch=main"))
+        .await
+        .unwrap();
+    assert_eq!(json_body(commits).await.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn an_unmapped_import_groups_by_verdict_with_blocking_first() {
     let dir = tempfile::tempdir().unwrap();
     let router = server::app(state(dir.path()));
@@ -3268,5 +3410,245 @@ async fn the_diagram_carries_the_selection_hook_for_sync() {
     assert!(
         html.contains("<script src=\"/ui/app.js\""),
         "the diagram page must load the enhancement asset"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The model-health view: one screen for "what is broken in my model?".
+
+#[tokio::test]
+async fn the_global_search_finds_elements_by_name_fragment() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "seed", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    // The header box is on the Changes page (the first page after landing), so "find the
+    // pump" is one click + one field instead of a hidden tree filter on select pages.
+    let changes = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee"))
+        .await
+        .unwrap();
+    assert_eq!(changes.status(), StatusCode::OK);
+    let html = body_text(changes).await;
+    assert!(
+        html.contains(r#"name="q""#),
+        "the header search box must render on the Changes page"
+    );
+    assert!(
+        html.contains("/ui/projects/coffee/search"),
+        "the header search must target the search page"
+    );
+
+    // Searching a name fragment surfaces the matching block and requirement, each with an
+    // open action and a reveal-in-diagram action.
+    let search = router
+        .oneshot(get("/ui/projects/coffee/search?q=pump"))
+        .await
+        .unwrap();
+    assert_eq!(search.status(), StatusCode::OK);
+    let html = body_text(search).await;
+    assert!(
+        html.contains("Water Pump"),
+        "the Water Pump block must match"
+    );
+    assert!(
+        html.contains("Pump Pressure"),
+        "the Pump Pressure requirement must match"
+    );
+    assert!(
+        html.contains("/model?branch=main&amp;select="),
+        "each match must offer an open action carrying the select hook"
+    );
+    assert!(
+        html.contains("/diagram?branch=main&amp;select="),
+        "each match must offer a reveal-in-diagram action"
+    );
+}
+
+#[tokio::test]
+async fn the_health_page_answers_what_is_broken_in_one_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&test_support::load_okf_expected()).unwrap();
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "seed", "okf": expected }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::CREATED);
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/coffee/health"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // The corpus has no orphans and one component, but two dangling Satisfy links and
+    // ten uncovered requirements — exactly what the audit assembled across six pages.
+    assert!(
+        html.contains("Orphaned nodes (0)"),
+        "orphan count must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Isolated groups (0)"),
+        "isolated-group count must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Dangling links (2)"),
+        "dangling-link count must render, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("_2026x_1_12a70364_1789524431087_459748_5711"),
+        "the first dangling endpoint must be named, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Uncovered requirements (10)"),
+        "uncovered count must render, got:\n{}",
+        html
+    );
+    // The navigator and the overview section links carry Health, so a visitor reaches it
+    // from landing in two clicks (open the project, click Health).
+    assert!(
+        html.contains(">Health<"),
+        "the navigator must offer Health, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_health_page_names_every_finding_by_id_and_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "coffee" })))
+        .await
+        .unwrap();
+    // One orphan block, one orphan requirement, one two-node group cut off from the main
+    // body, one dangling Satisfy link, and one uncovered requirement.
+    let broken = serde_json::json!({
+        "project": "coffee",
+        "summary": {},
+        "stateMachine": {"name": "sm", "regions": []},
+        "structure": [
+            {"id": "b1", "name": "Heater Block", "kind": "block", "stereotypes": [], "attributes": [], "documentation": ""},
+            {"id": "b2", "name": "Orphan Block", "kind": "block", "stereotypes": [], "attributes": [], "documentation": ""}
+        ],
+        "requirements": [
+            {"id": "r1", "name": "Heat requirement", "kind": "requirement", "stereotypes": [], "attributes": [], "documentation": "", "reqId": "1.1", "reqText": "heats"},
+            {"id": "r2", "name": "Cold requirement", "kind": "requirement", "stereotypes": [], "attributes": [], "documentation": "", "reqId": "1.2", "reqText": "cools"}
+        ],
+        "graph": {
+            "nodes": [
+                {"id": "b1", "kind": "block", "name": "Heater Block"},
+                {"id": "b2", "kind": "block", "name": "Orphan Block"},
+                {"id": "r1", "kind": "requirement", "name": "Heat requirement"},
+                {"id": "r2", "kind": "requirement", "name": "Cold requirement"},
+                {"id": "g1", "kind": "block", "name": "Group One"},
+                {"id": "g2", "kind": "block", "name": "Group Two"}
+            ],
+            "edges": [
+                {"source": "b1", "target": "r1", "kind": "dependency", "label": "Satisfy"},
+                {"source": "g1", "target": "g2", "kind": "part", "label": ""},
+                {"source": "b1", "target": "missing-node", "kind": "dependency", "label": "Satisfy"}
+            ]
+        }
+    });
+    let committed = router
+        .clone()
+        .oneshot(post(
+            "/projects/coffee/commits",
+            serde_json::json!({ "branch": "main", "author": "alex", "message": "broken", "okf": broken }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        committed.status(),
+        StatusCode::CREATED,
+        "broken model must commit"
+    );
+
+    let response = router
+        .oneshot(get("/ui/projects/coffee/health"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // Orphaned nodes, named by id and name.
+    assert!(html.contains("Orphaned nodes (2)"), "got:\n{}", html);
+    assert!(
+        html.contains("b2") && html.contains("Orphan Block"),
+        "orphan block named, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("r2") && html.contains("Cold requirement"),
+        "orphan requirement named, got:\n{}",
+        html
+    );
+
+    // Isolated groups, each with its members.
+    assert!(html.contains("Isolated groups (1)"), "got:\n{}", html);
+    assert!(
+        html.contains("g1") && html.contains("Group One"),
+        "group member named, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("g2") && html.contains("Group Two"),
+        "group member named, got:\n{}",
+        html
+    );
+
+    // Dangling links, naming the missing endpoint.
+    assert!(html.contains("Dangling links (1)"), "got:\n{}", html);
+    assert!(
+        html.contains("missing-node"),
+        "missing endpoint named, got:\n{}",
+        html
+    );
+
+    // Uncovered requirements, named by id and name.
+    assert!(
+        html.contains("Uncovered requirements (1)"),
+        "got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("r2") && html.contains("Cold requirement"),
+        "uncovered named, got:\n{}",
+        html
     );
 }

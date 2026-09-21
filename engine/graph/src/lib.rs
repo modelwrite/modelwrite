@@ -64,6 +64,61 @@ pub fn graph_stats(root: &OkfRoot) -> GraphStats {
     }
 }
 
+/// The connected components of the graph as per-node membership lists.
+///
+/// This is the per-node companion to [graph_stats]: the stats say HOW MANY components
+/// exist and their sizes, this names WHICH nodes belong to each. The model-health view
+/// ("what is broken in my model?") needs the membership to list every member of an
+/// isolated group rather than only counting it.
+///
+/// Deterministic: members are sorted by node id, and components are ordered by size
+/// descending then by their first member id. A healthy model has exactly one component.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Components {
+    pub count: usize,
+    pub groups: Vec<Vec<String>>,
+}
+
+/// Compute the connected components of the graph and their membership. Edges whose
+/// endpoint is not a node are ignored (they are the dangling links the health view reports
+/// separately), so a component never contains a name that is not a real node.
+pub fn components(root: &OkfRoot) -> Components {
+    let graph = root.graph.as_ref().expect("graph required; validate first");
+    let node_count = graph.nodes.len();
+    let index: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), i))
+        .collect();
+    let mut uf = UnionFind::new(node_count);
+    for e in &graph.edges {
+        if let (Some(&a), Some(&b)) = (index.get(e.source.as_str()), index.get(e.target.as_str())) {
+            uf.union(a, b);
+        }
+    }
+    let mut by_root: HashMap<usize, Vec<&str>> = HashMap::new();
+    for (i, node) in graph.nodes.iter().enumerate() {
+        by_root
+            .entry(uf.find(i))
+            .or_default()
+            .push(node.id.as_str());
+    }
+    let mut groups: Vec<Vec<String>> = by_root
+        .into_values()
+        .map(|mut ids| {
+            ids.sort_unstable();
+            ids.into_iter().map(str::to_string).collect()
+        })
+        .collect();
+    groups.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a[0].cmp(&b[0])));
+    Components {
+        count: groups.len(),
+        groups,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoverageReport {

@@ -147,6 +147,25 @@ test.describe('structure diagram', () => {
     await expect(page.locator('svg g.node[data-mw-kind="block"]').first()).not.toHaveClass(/mw-filtered-out/);
   });
 
+
+  test('opens at a readable label scale, not fit-to-view', async ({ page }) => {
+    await page.goto(DIAGRAM_URL);
+    await expect(page.locator('svg g.node[data-mw-id]').first()).toBeVisible();
+
+    // The camera is the SVG viewBox. Compute the on-screen scale and the effective node-label
+    // size; the default must keep labels readable (>= 11px), not the ~6px fit-to-view yields.
+    const geometry = await page.evaluate(() => {
+      const svg = document.querySelector('svg.mw-diagram-svg');
+      const viewport = svg.parentElement;
+      const vb = svg.viewBox.baseVal;
+      const scale = Math.min(viewport.clientWidth / vb.width, viewport.clientHeight / vb.height);
+      return { scale, labelPx: 13 * scale, vbW: vb.width, vbH: vb.height };
+    });
+
+    expect(geometry.scale).toBeGreaterThan(0.8);
+    expect(geometry.labelPx).toBeGreaterThanOrEqual(11);
+  });
+
   test('a model without an activity flow offers no process view', async ({ page }) => {
     await page.goto(DIAGRAM_URL);
     await expect(page.locator('.view-toggle .view-option').first()).toHaveText('Structure');

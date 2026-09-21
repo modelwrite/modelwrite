@@ -534,6 +534,14 @@ li.allocation { overflow-wrap: anywhere; }
   display: flex; align-items: baseline; gap: 0.5rem;
   font-weight: 400; font-size: 13px; color: var(--text);
 }
+.loss-accept-summary { font-size: 13px; color: var(--text); margin: 0 0 0.5rem; }
+.loss-accept-summary strong { font-size: 15px; }
+.loss-accept-summary .mw-accept-count { font-weight: 600; color: var(--accent-strong); }
+.loss-select-all { margin: 0.25rem 0 0.5rem; }
+.loss-select-all label { font-size: 13px; font-weight: 600; color: var(--text); }
+.accept-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.accept-actions button[name="accept_all"] { background: var(--pass); border-color: var(--pass); }
+.accept-actions button[name="accept_all"]:hover { background: #116329; border-color: #116329; }
 
 /* -- proposals / gate ---------------------------------------------------- */
 
@@ -765,6 +773,23 @@ li.allocation { overflow-wrap: anywhere; }
   content: ""; width: 7px; height: 7px; border-radius: 50%;
   background: var(--pass);
 }
+
+/* The global find-element search: one box in the header, on every project page. */
+.site-search { display: flex; align-items: center; gap: 0.35rem; }
+.site-search input[type="search"] { width: 15rem; max-width: 32vw; }
+
+/* -- global find-element results ------------------------------------------ */
+ul.search-hits { list-style: none; margin: 0; padding: 0; }
+li.search-hit {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.5rem 0.75rem; margin-bottom: 0.4rem; background: var(--surface);
+}
+li.search-hit code { font-family: var(--font-mono); }
+.hit-name { font-weight: 600; }
+.hit-kind { color: var(--text-2); font-size: 12px; }
+.hit-actions { margin-left: auto; display: inline-flex; gap: 0.6rem; }
+.hit-actions a { font-size: 12px; font-weight: 600; }
 
 /* -- chrome: the left navigator ------------------------------------------ */
 .rail .nav-group { margin-bottom: 1.1rem; }
@@ -1193,6 +1218,7 @@ pub fn html_response(status: StatusCode, markup: Markup) -> Response {
 /// model.
 pub const SECTIONS: &[(&str, &str)] = &[
     ("overview", "Overview"),
+    ("health", "Health"),
     ("structure", "Structure"),
     ("composition", "Composition"),
     ("requirements", "Requirements"),
@@ -1391,6 +1417,14 @@ pub fn shell_with_main_class(
                                     }
                                 }
                             }
+                        }
+                    }
+                    @if let Some(current) = &nav.current {
+                        form class="site-search" method="get" action={ "/ui/projects/" (crate::ui::urlencode(current.as_str())) "/search" } {
+                            @if let Some(branch) = &nav.branch {
+                                input type="hidden" name="branch" value=(branch.as_str());
+                            }
+                            input type="search" name="q" placeholder="Find element" aria-label="Find an element";
                         }
                     }
                     @if can_administer {

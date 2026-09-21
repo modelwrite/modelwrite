@@ -23,6 +23,7 @@ pub mod create;
 pub mod diagram;
 pub mod edit;
 pub mod gate;
+pub mod health;
 pub mod import;
 pub mod layout;
 pub mod model;
@@ -30,6 +31,7 @@ pub mod pages;
 pub mod proposals;
 pub mod register;
 pub mod review;
+pub mod search;
 pub mod version;
 
 /// Percent-encode a value for use in a URL PATH SEGMENT or QUERY STRING.
