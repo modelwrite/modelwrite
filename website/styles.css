@@ -823,4 +823,81 @@ figcaption b { color: var(--ink-soft); }
 
 /* A reproduce block inside a limits item sits a little below the text. */
 .limits pre { margin-top: 0.5rem; }
+/* ----------------------------------------------------- example corpus */
+.pill--warn { color: var(--warn); background: #f5ecdb; border-color: #e2d3b3; }
+.pill--muted { color: var(--muted); background: var(--panel-2); border-color: var(--line-strong); }
+
+.examples-key {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+.examples-key > li {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 1rem 1.1rem;
+}
+.examples-key .pill { display: inline-block; margin-bottom: 0.5rem; }
+.examples-key p { margin: 0; color: var(--ink-soft); font-size: 0.9375rem; }
+
+.section h3.examples-sub { margin: 2.25rem 0 0.75rem; font-size: 1rem; }
+
+.table-scroll { overflow-x: auto; }
+
+.examples {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 0.9375rem;
+}
+.examples th, .examples td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+.examples thead th {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 2px solid var(--line-strong);
+  white-space: nowrap;
+}
+.examples tbody tr:hover { background: var(--panel); }
+.examples td { color: var(--ink-soft); }
+.examples .ex-name { display: block; font-weight: 650; color: var(--ink); }
+.examples .ex-path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+.examples .ex-meta {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.71875rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+.examples .ex-upstream {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+.examples .ex-demo { max-width: 30rem; }
+
+@media (max-width: 46rem) {
+  .examples .ex-path, .examples .ex-meta { white-space: normal; overflow-wrap: anywhere; }
+}
+
 

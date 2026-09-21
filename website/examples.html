@@ -1,0 +1,295 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples &mdash; Modelwrite</title>
+<meta name="description" content="Every bundled example model in the Modelwrite repository, with the licence table that never drifts, and &mdash; honestly &mdash; what the platform can and cannot load from each one.">
+<meta name="color-scheme" content="light">
+<meta property="og:title" content="Modelwrite examples: the bundled corpus, loadable and read-only">
+<meta property="og:description" content="Every bundled example model, generated from the repository's licence table, with its honest loadable / read-only / refused state.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="masthead">
+  <div class="shell masthead__inner">
+    <a class="wordmark" href="index.html"><svg class="wordmark__mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</a>
+    <nav aria-label="Sections">
+      <ul>
+        <li><a href="index.html#see">See it</a></li>
+        <li><a href="index.html#measure">Measure it</a></li>
+        <li><a href="index.html#ask">Ask it</a></li>
+        <li><a href="index.html#trust">Trust it</a></li>
+        <li><a href="index.html#analytics">Analytics</a></li>
+        <li><a href="index.html#limits">Limits</a></li>
+        <li><a href="index.html#try">Try it</a></li>
+        <li><a href="examples.html" aria-current="page">Examples</a></li>
+      </ul>
+    </nav>
+    <a class="repo" href="https://github.com/modelwrite/modelwrite">github.com/modelwrite</a>
+  </div>
+</header>
+
+<main id="main">
+
+<div class="hero shell" id="top">
+  <p class="hero__kicker">Bundled example corpus &middot; sample/examples/</p>
+  <svg class="hero__mark" viewBox="0 0 32 32" width="56" height="56" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#1b1813" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#175e3e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <h1>Examples</h1>
+  <p class="hero__tagline">Every model the repository ships, and honestly what the platform can do with each one.</p>
+
+  <div class="hero__lede">
+    <p><code>sample/examples/</code> holds 98 files: five bundled example sets
+    (96 model files from five upstream projects) and four more upstream examples
+    that are fetched by a script because their licence or size keeps them out of
+    the repository. This page is generated from
+    <code>sample/examples/README.md</code>, so the licence table can never drift
+    from what is actually committed. The state of each example &mdash; loadable,
+    read-only, or refused &mdash; is stated, never overclaimed.</p>
+  </div>
+
+  <p class="hero__actions">
+    <a class="button" href="https://trial.modelwrite.org">Open the showcase</a>
+    <a class="button button--quiet" href="#corpus">The bundled examples</a>
+    <a class="button button--quiet" href="#showcase">What loads today</a>
+  </p>
+</div>
+
+<section class="section shell" id="corpus" aria-labelledby="corpus-h">
+  <div class="section__head">
+    <p class="eyebrow">01 / The corpus</p>
+    <h2 id="corpus-h">Every bundled example, with its licence and its honest state.</h2>
+    <p>The four states below are the whole story. <strong>Loadable</strong> is
+    XMI &mdash; the one format the platform imports and writes back today.
+    <strong>Read-only (viewer)</strong> is SysML v2 textual, carried as
+    <code>Direction::ImportOnly</code>: it imports, it does not write back.
+    <strong>Large / refused</strong> is the one XMI export whose migration needs
+    losses accepted by hand. <strong>Not importable</strong> is Gaphor&rsquo;s own
+    format, for which no binding exists. No bundled example is Loadable today:
+    the only XMI in the bundle is the Thirty Meter Telescope, and it is refused
+    pending acceptance &mdash; the one small loadable XMI, the MagicDraw coffee
+    machine, lives in <code>sample/corpus/</code> and is the showcase&rsquo;s
+    seeded <code>coffee-machine</code> project (see <a href="#showcase">what
+    loads today</a>).</p>
+  </div>
+
+  <!-- Generated from sample/examples/README.md by website/generate-examples.mjs. Do not edit by hand. -->
+<ul class="examples-key">
+      <li>
+        <span class="pill pill--pass">Loadable</span>
+        <p>XMI. The platform imports it today and writes it back — a round-trip, not a screenshot.</p>
+      </li>
+      <li>
+        <span class="pill pill--warn">Read-only &middot; viewer</span>
+        <p>SysML v2 textual. Carried by mw-binding-sysmlv2 as Direction::ImportOnly — it can be read, not written back.</p>
+      </li>
+      <li>
+        <span class="pill pill--warn">Large &middot; refused pending acceptance</span>
+        <p>XMI (the loadable format), but 36&nbsp;MB and its migration needs 48,553 losses accepted by hand before it loads.</p>
+      </li>
+      <li>
+        <span class="pill pill--muted">Not importable</span>
+        <p>Gaphor's own .gaphor XML, not OMG XMI. No Gaphor binding exists today, so the reader cannot open it.</p>
+      </li>
+</ul>
+
+<h3 class="examples-sub">Bundled &mdash; present in this repository</h3>
+<div class="table-scroll">
+<table class="examples">
+  <thead>
+    <tr>
+      <th scope="col">Example</th>
+      <th scope="col">Upstream repo</th>
+      <th scope="col">Licence</th>
+      <th scope="col">What it demonstrates</th>
+      <th scope="col">State today</th>
+    </tr>
+  </thead>
+  <tbody>
+      <tr>
+        <td><span class="ex-name">Thirty Meter Telescope</span>
+            <code class="ex-path">sysml-v1/openmbee-tmt</code>
+            <span class="ex-meta">commit b2a33b7 &middot; 36 MB (extracted XMI)</span></td>
+        <td><code class="ex-upstream">Open-MBEE/TMT-SysML-Model</code></td>
+        <td>Apache-2.0 (LICENSE) + Caltech BSD-style (COPYRIGHT)</td>
+        <td class="ex-demo">The Thirty Meter Telescope: a <strong>real Cameo/MagicDraw SysML v1 export</strong>. This is the content-rich vendor model the XMI reader is measured against (engine/binding-xmi/tests/real_tmt.rs).</td>
+        <td><span class="pill pill--warn">Large &middot; refused pending acceptance</span></td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">Gaphor examples</span>
+            <code class="ex-path">sysml-v1/gaphor-examples</code>
+            <span class="ex-meta">commit 968f6bb &middot; 665 KB</span></td>
+        <td><code class="ex-upstream">gaphor/gaphor (examples only)</code></td>
+        <td>Apache-2.0</td>
+        <td class="ex-demo">Small single-concept SysML v1 models, including the canonical Gaphor coffee machine. <strong>Gaphor .gaphor is Gaphor's own XML format, not XMI - not importable by the current reader.</strong></td>
+        <td><span class="pill pill--muted">Not importable</span></td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">GfSE community models</span>
+            <code class="ex-path">sysml-v2/gfse-models</code>
+            <span class="ex-meta">commit ebbb0c3 &middot; 198 KB (models only)</span></td>
+        <td><code class="ex-upstream">GfSE/SysML-v2-Models</code></td>
+        <td>BSD-3-Clause</td>
+        <td class="ex-demo">GfSE community SysML v2 models: system-of-systems, a family model, an Eve-Online mining frigate, SE_Models. Textual .sysml.</td>
+        <td><span class="pill pill--warn">Read-only &middot; viewer</span></td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">The Batmobile</span>
+            <code class="ex-path">sysml-v2/mbse4u-batmobile</code>
+            <span class="ex-meta">commit f6cdf35 &middot; 35 KB</span></td>
+        <td><code class="ex-upstream">MBSE4U/dont-panic-batmobile</code></td>
+        <td>Apache-2.0</td>
+        <td class="ex-demo">The Batmobile from the 'Don't Panic' SysML v2 introduction. Textual .sysml + notebook.</td>
+        <td><span class="pill pill--warn">Read-only &middot; viewer</span></td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">Apollo 11 mission</span>
+            <code class="ex-path">sysml-v2/airbus-apollo-11</code>
+            <span class="ex-meta">commit 6e9c93f &middot; 426 KB</span></td>
+        <td><code class="ex-upstream">airbus/apollo-11-sysml-v2</code></td>
+        <td>MPL-2.0</td>
+        <td class="ex-demo">The Apollo 11 mission, a layered SysML v2 model (Purpose, Function, Logical, Requirements, ...). Textual .sysml.</td>
+        <td><span class="pill pill--warn">Read-only &middot; viewer</span></td>
+      </tr>
+  </tbody>
+</table>
+</div>
+
+<h3 class="examples-sub">Not bundled &mdash; fetch with the script</h3>
+<div class="table-scroll">
+<table class="examples">
+  <thead>
+    <tr>
+      <th scope="col">Example</th>
+      <th scope="col">Upstream repo</th>
+      <th scope="col">Licence</th>
+      <th scope="col">Why it is not bundled</th>
+    </tr>
+  </thead>
+  <tbody>
+      <tr>
+        <td><span class="ex-name">OMG SysML v2 release</span>
+            <code class="ex-path">sysml-v2/omg-sysml-v2-release</code>
+            <span class="ex-meta">commit fb97b75</span></td>
+        <td><code class="ex-upstream">Systems-Modeling/SysML-v2-Release (sysml/src, kerml/src)</code></td>
+        <td>EPL-2.0</td>
+        <td class="ex-demo">Not AGPL-compatible.</td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">Capella samples</span>
+            <code class="ex-path">arcadia-capella/eclipse-capella-samples</code>
+            <span class="ex-meta">commit c5a3a5c</span></td>
+        <td><code class="ex-upstream">eclipse-capella/capella (samples only)</code></td>
+        <td>EPL-2.0</td>
+        <td class="ex-demo">Not AGPL-compatible.</td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">Capella IFE variant</span>
+            <code class="ex-path">arcadia-capella/dbinfrago-ife-variant</code>
+            <span class="ex-meta">commit 739641d</span></td>
+        <td><code class="ex-upstream">dbinfrago/Capella-IFE-sample</code></td>
+        <td>EPL-2.0 (model)</td>
+        <td class="ex-demo">Not AGPL-compatible.</td>
+      </tr>
+      <tr>
+        <td><span class="ex-name">MBSE4U SysML v2 book examples</span>
+            <code class="ex-path">sysml-v2/mbse4u-sysmlv2-book</code>
+            <span class="ex-meta">commit dae1f63</span></td>
+        <td><code class="ex-upstream">MBSE4U/the-sysmlv2-book-examples</code></td>
+        <td>Apache-2.0</td>
+        <td class="ex-demo">Bundle-safe but ~90 MB (Cameo .mdszip); kept out of git for size.</td>
+      </tr>
+  </tbody>
+</table>
+</div>
+
+  <p class="records__caption">Each row&rsquo;s path, upstream repo, commit, licence
+  and description are read straight from <code>sample/examples/README.md</code>; only
+  the state column is pinned in <code>website/generate-examples.mjs</code>. Regenerate
+  with <code>node website/generate-examples.mjs</code>. The not-bundled rows are the
+  examples the operator fetches locally &mdash; the repository ships the mechanism,
+  never the restricted content.</p>
+</section>
+
+<section class="section shell" id="showcase" aria-labelledby="showcase-h">
+  <div class="section__head">
+    <p class="eyebrow">02 / Loadable today</p>
+    <h2 id="showcase-h">What the showcase can actually open.</h2>
+    <p>The showcase seeds six projects, and one of them is a real imported vendor
+    model: <code>coffee-machine</code> is the MagicDraw (CATIA Magic) SysML v1
+    corpus from <code>sample/corpus/coffee-machine</code>, carried through the XMI
+    reader &mdash; 41 blocks, 25 requirements, 66 graph nodes, 95 graph edges, every
+    loss named. The other five are hand-authored scenario models for the platform
+    itself (the cafe-stand two-robot trade study included).</p>
+  </div>
+
+  <div class="prose">
+    <h3>Why no further small XMI example was added</h3>
+    <p>Adding another small, genuinely-imported XMI project to the showcase turns
+    out to be impossible today &mdash; not for lack of trying, but because there is
+    nothing new to import:</p>
+    <ul>
+      <li><strong>The MagicDraw corpus model is already seeded.</strong>
+      <code>coffee-machine</code> is exactly that model, so it is already a real
+      imported XMI project a visitor can click into.</li>
+      <li><strong>The Gaphor coffee machine is not XMI.</strong>
+      <code>coffee-machine.gaphor</code> is Gaphor&rsquo;s own XML
+      (<code>&lt;gaphor xmlns=&quot;https://gaphor.org/model&quot;&gt;</code>), not OMG
+      XMI, and the engine has no Gaphor binding. It is bundled as corpus material, not
+      forced into the showcase.</li>
+      <li><strong>The Thirty Meter Telescope is refused.</strong> It is the one XMI in
+      <code>sample/examples/</code>, and its migration needs 48,553 losses accepted by
+      hand (362 blocks, 633 edges, round-trips exactly). It is not a small example.</li>
+    </ul>
+  </div>
+
+  <div class="prose">
+    <h3>Reproduce the loadable set</h3>
+    <p>The seeded <code>coffee-machine</code> project is the OKF result of the XMI
+    reader on the MagicDraw corpus. Reproduce the import and the round-trip:</p>
+  </div>
+<pre><code>cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+cargo test -p mw-binding-xmi --test real_tmt -- --nocapture
+cargo test -p mw-binding-sysmlv2 --test real_examples -- --nocapture</code></pre>
+
+  <p class="records__caption">The seed is replayed from
+  <code>docs/deploy/seed-trial.mjs</code> and the host manifest every hour; see
+  <code>docs/deploy/idc-1-trial.md</code>.</p>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell footer__grid">
+    <div>
+      <h2>Reproduce the claims</h2>
+<pre><code>node website/generate-examples.mjs
+cargo test -p mw-binding-xmi --test real_magicdraw -- --nocapture
+cargo test -p mw-binding-xmi --test real_tmt -- --nocapture
+cargo test -p mw-binding-sysmlv2 --test real_examples -- --nocapture</code></pre>
+    </div>
+    <div>
+      <h2>The project</h2>
+      <p><a href="index.html">The site</a><br>
+      <a href="examples.html">The example corpus</a><br>
+      <a href="https://github.com/modelwrite/modelwrite">Source and issues on GitHub</a><br>
+      <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/evidence/README.md">The evidence annex</a><br>
+      <a href="https://github.com/modelwrite/modelwrite/blob/main/deploy/README.md">Deployment notes</a></p>
+      <p>Licence: AGPL-3.0-or-later for the engine and server, Apache-2.0 for the interchange format
+      and the importers and exporters. The example models keep their own upstream licences beside them.</p>
+      <p>Cameo, CATIA and MagicDraw are trademarks of Dassault Syst&egrave;mes or its subsidiaries, used
+      here descriptively to name the tools Modelwrite reads. SysML is a trademark of the Object
+      Management Group.</p>
+      <p>Hand-written HTML and CSS. No build step, no external requests, no cookies and no
+      analytics.</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
