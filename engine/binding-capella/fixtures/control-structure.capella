@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Capella_Version_7.0.0-->
+<org.polarsys.capella.core.data.capellamodeller:Project xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:org.polarsys.capella.core.data.capellacore="http://www.polarsys.org/capella/core/core/7.0.0"
+    xmlns:org.polarsys.capella.core.data.capellamodeller="http://www.polarsys.org/capella/core/modeller/7.0.0"
+    xmlns:org.polarsys.capella.core.data.ctx="http://www.polarsys.org/capella/core/ctx/7.0.0"
+    xmlns:org.polarsys.capella.core.data.fa="http://www.polarsys.org/capella/core/fa/7.0.0"
+    xmlns:org.polarsys.capella.core.data.information.datavalue="http://www.polarsys.org/capella/core/information/datavalue/7.0.0"
+    id="bd182435-e290-42ce-b99f-6dd06e7ae7c7" name="IFE Control Structure">
+  <ownedModelRoots xsi:type="org.polarsys.capella.core.data.capellamodeller:SystemEngineering"
+      id="8f49452e-61f2-4ba0-b944-352d1f4c4227" name="Control Structure">
+    <ownedArchitectures xsi:type="org.polarsys.capella.core.data.ctx:SystemAnalysis"
+        id="1d30b780-f222-4794-9f78-5b70ce799bf0" name="System Analysis">
+      <ownedFunctionPkg xsi:type="org.polarsys.capella.core.data.ctx:SystemFunctionPkg"
+          id="0ded555d-3875-4284-af53-0ecf5f890295" name="System Functions">
+        <ownedSystemFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+            id="f-issue" name="Issue Safety Instruction">
+          <ownedFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+              id="f-trigger" name="Trigger Audio Playback"/>
+          <outputs xsi:type="org.polarsys.capella.core.data.fa:FunctionOutputPort"
+              id="p-issue-out" name="FOP1"/>
+        </ownedSystemFunctions>
+        <ownedSystemFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+            id="f-report" name="Report Playback Status">
+          <inputs xsi:type="org.polarsys.capella.core.data.fa:FunctionInputPort"
+              id="p-report-in" name="FIP1"/>
+        </ownedSystemFunctions>
+        <ownedFunctionalExchanges xsi:type="org.polarsys.capella.core.data.fa:FunctionalExchange"
+            id="fx-control" name="Safety Instruction" source="#f-issue" target="#f-report"/>
+        <ownedFunctionalExchanges xsi:type="org.polarsys.capella.core.data.fa:FunctionalExchange"
+            id="fx-feedback" name="Playback Status" source="#f-report" target="#f-issue"/>
+      </ownedFunctionPkg>
+      <ownedSystemComponentPkg xsi:type="org.polarsys.capella.core.data.ctx:SystemComponentPkg"
+          id="f1c1d46d-23aa-407c-9c00-131f4695fa7e" name="System Components">
+        <ownedSystemComponents xsi:type="org.polarsys.capella.core.data.ctx:SystemComponent"
+            id="c-controller" name="Cabin Crew Controller">
+          <ownedFunctionalAllocation xsi:type="org.polarsys.capella.core.data.fa:ComponentFunctionalAllocation"
+              id="alloc-controller" targetElement="#f-issue" sourceElement="#c-controller"/>
+        </ownedSystemComponents>
+        <ownedSystemComponents xsi:type="org.polarsys.capella.core.data.ctx:SystemComponent"
+            id="c-display" name="Display Unit">
+          <ownedFunctionalAllocation xsi:type="org.polarsys.capella.core.data.fa:ComponentFunctionalAllocation"
+              id="alloc-display" targetElement="#f-report" sourceElement="#c-display"/>
+        </ownedSystemComponents>
+      </ownedSystemComponentPkg>
+      <ownedConstraints xsi:type="org.polarsys.capella.core.data.capellacore:Constraint"
+          id="sc-1" name="SC-1">
+        <ownedSpecification xsi:type="org.polarsys.capella.core.data.information.datavalue:OpaqueExpression"
+            id="opaque-1">
+          <bodies>The cabin crew must be able to issue a safety instruction at any time</bodies>
+        </ownedSpecification>
+      </ownedConstraints>
+    </ownedArchitectures>
+  </ownedModelRoots>
+</org.polarsys.capella.core.data.capellamodeller:Project>

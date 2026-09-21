@@ -1523,6 +1523,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mw-binding-capella"
+version = "0.1.0"
+dependencies = [
+ "mw-binding",
+ "mw-okf",
+ "roxmltree",
+ "serde_json",
+]
+
+[[package]]
 name = "mw-binding-sysmlv2"
 version = "0.1.0"
 dependencies = [
