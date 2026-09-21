@@ -23,3 +23,4 @@ e2e/.state.json
 e2e/*.png
 e2e/diag-*.js
 e2e/flow-*.png
+target-tests*/
