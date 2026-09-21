@@ -51,10 +51,45 @@ const DANG_GAP: f64 = 44.0;
 
 /// The three diagram types. The choice is kept in the URL view query like every other view.
 #[derive(Clone, Copy, PartialEq)]
-enum DiagramView {
+pub(crate) enum DiagramView {
     Structure,
     Process,
     Control,
+}
+
+impl DiagramView {
+    /// The URL value of the view, carried in shareable links and in the export provenance.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            DiagramView::Structure => "structure",
+            DiagramView::Process => "process",
+            DiagramView::Control => "control",
+        }
+    }
+
+    /// The human label of the view, for the presentation caption.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            DiagramView::Structure => "Structure",
+            DiagramView::Process => "Process",
+            DiagramView::Control => "Control",
+        }
+    }
+}
+
+/// The view a request resolves to: the named view when the model declares it, otherwise the
+/// structure view. This is the ONE fallback the page, the SVG export and the presentation view
+/// share, so the three can never disagree about which diagram a URL shows.
+pub(crate) fn resolve_view(graph: &Graph, requested: Option<&str>) -> DiagramView {
+    let has_process = graph_layout::process_layout(graph).is_some();
+    let has_control = graph_layout::control_layout(graph).is_some();
+    if requested == Some("control") && has_control {
+        DiagramView::Control
+    } else if requested == Some("process") && has_process {
+        DiagramView::Process
+    } else {
+        DiagramView::Structure
+    }
 }
 
 /// GET /ui/projects/:project/diagram?branch=&commit=&view= - the model's graph as inline SVG.
@@ -135,21 +170,11 @@ fn diagram_markup(
     query: &ModelQuery,
 ) -> Markup {
     let body = if let Some(graph) = &root.graph {
-        let structure = structure_svg(graph);
-        let process = process_svg(graph);
-        let control = control_svg(graph);
-        let view = if query.view.as_deref() == Some("control") && control.is_some() {
-            DiagramView::Control
-        } else if query.view.as_deref() == Some("process") && process.is_some() {
-            DiagramView::Process
-        } else {
-            DiagramView::Structure
-        };
-        let svg: &str = match view {
-            DiagramView::Structure => structure.as_str(),
-            DiagramView::Process => process.as_ref().expect("process chosen only when present"),
-            DiagramView::Control => control.as_ref().expect("control chosen only when present"),
-        };
+        let has_process = graph_layout::process_layout(graph).is_some();
+        let has_control = graph_layout::control_layout(graph).is_some();
+        let view = resolve_view(graph, query.view.as_deref());
+        let svg = diagram_svg(graph, view, &SvgOptions::NONE)
+            .expect("the structure view always has a layout for a graph");
         let kinds = distinct_kinds(graph);
         let unmappable = symbol::unmappable_findings(graph);
         html! {
@@ -164,7 +189,7 @@ fn diagram_markup(
             p class="meta" {
                 a href={ "/ui/projects/" (crate::ui::urlencode(project)) "/overview?branch=" (crate::ui::urlencode(commit.branch.as_str())) } { "Back to the overview" }
             }
-            (diagram_toolbar(project, commit, view, process.is_some(), control.is_some(), &kinds))
+            (diagram_toolbar(project, commit, view, has_process, has_control, &kinds))
             div class="diagram-viewport" {
                 (PreEscaped(svg))
             }
@@ -223,6 +248,18 @@ fn diagram_toolbar(
         "{base}?commit={}&view=control",
         crate::ui::urlencode(&commit.hash)
     );
+    // V1 visual outputs: the same view, at the same commit, as a download and as a chrome-free
+    // presentation page. Server-rendered links, so both work with JavaScript disabled.
+    let view_name = view.as_str();
+    let export_href = format!(
+        "{base}.svg?commit={}&view={view_name}",
+        crate::ui::urlencode(&commit.hash)
+    );
+    let present_href = format!(
+        "/ui/projects/{}/present?commit={}&view={view_name}",
+        crate::ui::urlencode(project),
+        crate::ui::urlencode(&commit.hash)
+    );
     html! {
         div class="diagram-toolbar" {
             span class="view-toggle" role="group" aria-label="Diagram type" {
@@ -233,6 +270,10 @@ fn diagram_toolbar(
                 @if has_control {
                     a.view-option.current[view == DiagramView::Control] href=(control_href) { "Control" }
                 }
+            }
+            span class="diagram-outputs" {
+                a class="diagram-output present" href=(present_href) { "Present" }
+                a class="diagram-output download" href=(export_href) { "Download SVG" }
             }
             span class="diagram-controls" {
                 button type="button" class="mw-zoom-out" title="Zoom out" aria-label="Zoom out" { "\u{2212}" }
@@ -300,19 +341,45 @@ fn kind_label(kind: &str) -> &str {
 // SVG composition.
 // ---------------------------------------------------------------------------
 
-fn structure_svg(graph: &Graph) -> String {
-    let layout = graph_layout::structure_layout(graph);
-    render_graph_svg(graph, &layout)
+/// Options that turn the page's inline SVG into a standalone artefact. The page passes
+/// [SvgOptions::NONE], so the page's bytes are untouched; the export adds provenance, an inlined
+/// stylesheet and a caption band. The caption is the artefact's FACE: the revision is readable in
+/// the picture itself, not only in metadata.
+#[derive(Clone, Copy)]
+pub(crate) struct SvgOptions<'a> {
+    /// Markup inserted right after the root svg start tag: provenance and inlined stylesheet.
+    pub preface: &'a str,
+    /// A caption drawn in a band beneath the drawing, stating the project and revision.
+    pub caption: Option<&'a str>,
+    /// Emit width/height attributes, so a downloaded file opens at a sensible size.
+    pub sized: bool,
 }
 
-fn process_svg(graph: &Graph) -> Option<String> {
-    let layout = graph_layout::process_layout(graph)?;
-    Some(render_graph_svg(graph, &layout))
+impl SvgOptions<'_> {
+    /// The page's options: nothing added, and not sized (the page sizes the SVG through CSS).
+    pub(crate) const NONE: SvgOptions<'static> = SvgOptions {
+        preface: "",
+        caption: None,
+        sized: false,
+    };
 }
 
-fn control_svg(graph: &Graph) -> Option<String> {
-    let layout = graph_layout::control_layout(graph)?;
-    Some(render_graph_svg(graph, &layout))
+/// The height of the caption band the export draws beneath the drawing.
+const CAPTION_H: f64 = 34.0;
+
+/// The SVG of one view, rendered by the SAME renderer the page uses. Returns None when the model
+/// does not declare that view (the process and control views are optional).
+pub(crate) fn diagram_svg(
+    graph: &Graph,
+    view: DiagramView,
+    options: &SvgOptions<'_>,
+) -> Option<String> {
+    let layout = match view {
+        DiagramView::Structure => graph_layout::structure_layout(graph),
+        DiagramView::Process => graph_layout::process_layout(graph)?,
+        DiagramView::Control => graph_layout::control_layout(graph)?,
+    };
+    Some(render_graph_svg(graph, &layout, options))
 }
 
 /// One endpoint of an edge as the renderer sees it: a placed node box, or a dangling marker.
@@ -330,7 +397,7 @@ impl Anchor<'_> {
     }
 }
 
-fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
+fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<'_>) -> String {
     let node_by_id: HashMap<&str, &GraphNode> =
         graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let box_by_id: HashMap<&str, &NodeBox> =
@@ -356,17 +423,32 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
         cursor += DANGLING_W + 24.0;
     }
     let canvas_w = layout.width.max(cursor + MARGIN - 24.0);
-    let canvas_h = if has_dangling {
+    // The drawing's own height; the caption band is added beneath it only for an export.
+    let drawing_h = if has_dangling {
         layout.height + DANG_GAP + DANGLING_H + MARGIN
     } else {
         layout.height
     };
+    let band = if options.caption.is_some() {
+        CAPTION_H
+    } else {
+        0.0
+    };
+    let canvas_h = drawing_h + band;
 
     let mut svg = String::new();
-    svg.push_str(&format!(
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {:.0} {:.0}' preserveAspectRatio='xMidYMid meet' class='mw-diagram-svg' role='img' aria-label='Model diagram'>",
-        canvas_w, canvas_h
-    ));
+    if options.sized {
+        svg.push_str(&format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='{:.0}' height='{:.0}' viewBox='0 0 {:.0} {:.0}' preserveAspectRatio='xMidYMid meet' class='mw-diagram-svg' role='img' aria-label='Model diagram'>",
+            canvas_w, canvas_h, canvas_w, canvas_h
+        ));
+    } else {
+        svg.push_str(&format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {:.0} {:.0}' preserveAspectRatio='xMidYMid meet' class='mw-diagram-svg' role='img' aria-label='Model diagram'>",
+            canvas_w, canvas_h
+        ));
+    }
+    svg.push_str(options.preface);
     svg.push_str("<g class='mw-transform'>");
 
     let mut edges: Vec<&GraphEdge> = graph.edges.iter().collect();
@@ -425,7 +507,20 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout) -> String {
         push_dangling(&mut svg, id, cx, cy);
     }
 
-    svg.push_str("</g></svg>");
+    svg.push_str("</g>");
+    if let Some(caption) = options.caption {
+        svg.push_str(&format!(
+            "<rect class='mw-caption-band' x='0' y='{:.0}' width='{:.0}' height='{:.0}'/>",
+            drawing_h, canvas_w, CAPTION_H
+        ));
+        svg.push_str(&format!(
+            "<text class='mw-caption' x='{:.1}' y='{:.1}' text-anchor='start'>{}</text>",
+            MARGIN,
+            drawing_h + 22.0,
+            xml_escape(caption)
+        ));
+    }
+    svg.push_str("</svg>");
     svg
 }
 
@@ -796,7 +891,7 @@ fn push_dangling(svg: &mut String, id: &str, cx: f64, cy: f64) {
 /// from a colleague, a supplier or an import, and a value like a script tag must render as
 /// text, never as markup. Escaping ampersand, angle brackets and both quote characters is
 /// valid in both contexts.
-fn xml_escape(value: &str) -> String {
+pub(crate) fn xml_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
         match c {

@@ -165,6 +165,16 @@ pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) ->
             "/ui/projects/:project/diagram",
             get(ui::diagram::diagram_page),
         )
+        // V1 visual outputs: the same diagram as a standalone downloadable SVG generated from
+        // the commit, and as a chrome-free full-screen presentation page.
+        .route(
+            "/ui/projects/:project/diagram.svg",
+            get(ui::export::diagram_svg_export),
+        )
+        .route(
+            "/ui/projects/:project/present",
+            get(ui::present::present_page),
+        )
         .route(
             "/ui/projects/:project/element/new",
             get(ui::create::element_form).post(ui::create::create_element),

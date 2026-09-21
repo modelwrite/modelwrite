@@ -878,6 +878,15 @@ main.mw-diagram { max-width: none; padding: 1.25rem 1.5rem; }
 .view-option:hover { color: var(--text); text-decoration: none; }
 .view-option.current { background: var(--accent-tint); color: var(--accent-strong); font-weight: 600; }
 .diagram-controls { display: inline-flex; gap: 0.3rem; align-items: center; }
+/* V1 visual outputs: the download and the presentation view. Server-rendered links, so both
+   work with JavaScript disabled. */
+.diagram-outputs { display: inline-flex; gap: 0.3rem; align-items: center; margin-left: auto; }
+.diagram-output {
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 600; color: var(--accent);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.22rem 0.6rem;
+}
+.diagram-output:hover { border-color: var(--accent); color: var(--accent-strong); text-decoration: none; }
 .diagram-controls button, .kind-filter {
   font-family: var(--font-ui); font-size: 12.5px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
