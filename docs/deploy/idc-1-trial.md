@@ -21,10 +21,11 @@ intentionally OPEN (no auth) so a browser can use it; see the Auth section.
 ## Source pinned
 
 - Repository: `https://github.com/modelwrite/modelwrite.git` (public)
-- Commit built from: `195cbf84090a68d994900baa2b3acae7ba998479`
-  (`ui: the wordmark links to the website rather than to the project list`)
-- Image: `modelwrite/modelwrite:idc-1-trial` (id `73211ddac82b`, ~149 MB), built on the
+- Commit built from: `47efbf1035a8250e227c9cb2d703a14c1dddf730`
+  (`Workbench UX: health view, bulk-accept, branch fix, readable diagram, global search, accept-error`)
+- Image: `modelwrite/modelwrite:idc-1-trial` (id `50c8623ed6ac`, ~149 MB), built on the
   host from the public repo — no registry pull, no registry credentials.
+- Previous (revert): image `73211ddac82b`, commit `195cbf84090a68d994900baa2b3acae7ba998479`.
 
 > **Why not the v0.2.0 tag.** The tag predates the S2 crossModelEdges feature
 > (`engine/okf/src/types.rs`, `server/src/composition.rs`). The trial's variant-impact
@@ -129,6 +130,11 @@ when the trial was opened, so a stranger's mess lasts minutes, not a day.)
 - Backups are timestamped (date+time), so every hourly reset is a distinct file. A skip
   takes NO backup (the outgoing DB is just the seed) and does NOT restart the service, so a
   quiet hour costs nothing.
+- Seed container: `reset-trial.sh` runs the throwaway replay container on `127.0.0.1:3104`
+  (`SEED_PORT=3104`) — a port kept clear of `modelwrite.service` (3102) and
+  `modelwrite-app.service` (3103). 2026-09-21: this was 3103 until the registered tier took
+  3103, which broke the hand-run reset with "Bind for 127.0.0.1:3103 failed: port is already
+  allocated"; moved to 3104.
 
 ## Seed (canonical + reproducible)
 
