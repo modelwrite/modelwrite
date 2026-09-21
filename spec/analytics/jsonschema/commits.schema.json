@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/commits.schema.json",
+  "title": "commits",
+  "description": "One row per commit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hash": {"type":"string"},
+    "project": {"type":"string"},
+    "branch": {"type":"string"},
+    "parents": {"type":"array","items":{"type":"string"}},
+    "author": {"type":"string"},
+    "message": {"type":"string"},
+    "committed_at": {"type":"string"},
+    "okf_hash": {"type":"string"},
+    "provenance_kind": {"type":"string"},
+    "import_artifact_hash": {"type":["string","null"]},
+    "binding_id": {"type":["string","null"]},
+    "binding_version": {"type":["string","null"]}
+  },
+  "required": ["hash", "project", "branch", "parents", "author", "message", "committed_at", "okf_hash", "provenance_kind", "import_artifact_hash", "binding_id", "binding_version"]
+}

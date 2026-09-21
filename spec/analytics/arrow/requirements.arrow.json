@@ -1,0 +1,15 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "requirements",
+  "fields": [
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "commit", "nullable": false, "type": "utf8" },
+    { "name": "element_id", "nullable": false, "type": "utf8" },
+    { "name": "identifier", "nullable": false, "type": "utf8" },
+    { "name": "text", "nullable": false, "type": "utf8" },
+    { "name": "name", "nullable": false, "type": "utf8" },
+    { "name": "kind", "nullable": false, "type": "utf8" },
+    { "name": "covered", "nullable": false, "type": "bool" },
+    { "name": "covering_link_kinds", "nullable": false, "type": "list<utf8>" }
+  ]
+}

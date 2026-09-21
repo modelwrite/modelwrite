@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/elements.schema.json",
+  "title": "elements",
+  "description": "One row per element per commit (structure/interfaces/signals sections).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "commit": {"type":"string"},
+    "element_id": {"type":"string"},
+    "section": {"type":"string"},
+    "name": {"type":"string"},
+    "kind": {"type":"string"},
+    "stereotypes": {"type":"array","items":{"type":"string"}},
+    "attributes": {"type":"array","items":{"$ref":"#/definitions/attribute"}},
+    "documentation": {"type":"string"}
+  },
+  "required": ["project", "commit", "element_id", "section", "name", "kind", "stereotypes", "attributes", "documentation"],
+  "definitions": {
+    "attribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "aggregation": { "type": "string" },
+        "default": { "type": "string" }
+      },
+      "required": ["name", "type", "aggregation", "default"]
+    }
+  }
+}

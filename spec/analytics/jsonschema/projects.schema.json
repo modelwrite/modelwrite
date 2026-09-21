@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/projects.schema.json",
+  "title": "projects",
+  "description": "One row per project.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "created_at": {"type":"string"}
+  },
+  "required": ["project", "created_at"]
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/requirements.schema.json",
+  "title": "requirements",
+  "description": "One row per requirement per commit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "commit": {"type":"string"},
+    "element_id": {"type":"string"},
+    "identifier": {"type":"string"},
+    "text": {"type":"string"},
+    "name": {"type":"string"},
+    "kind": {"type":"string"},
+    "covered": {"type":"boolean"},
+    "covering_link_kinds": {"type":"array","items":{"type":"string"}}
+  },
+  "required": ["project", "commit", "element_id", "identifier", "text", "name", "kind", "covered", "covering_link_kinds"]
+}

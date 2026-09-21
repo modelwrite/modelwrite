@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/metrics.schema.json",
+  "title": "metrics",
+  "description": "One row per metric per commit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "commit": {"type":"string"},
+    "metric_id": {"type":"string"},
+    "value": {"type":["number","null"]},
+    "value_state": {"type":"string"},
+    "unit": {"type":"string"},
+    "trust": {"type":"string"},
+    "basis_element_count": {"type":"integer"},
+    "basis_relationship_count": {"type":"integer"},
+    "constructs_not_carried": {"type":"integer"},
+    "basis_note": {"type":"string"},
+    "engine_version": {"type":"string"},
+    "evidence_hash": {"type":"string"}
+  },
+  "required": ["project", "commit", "metric_id", "value", "value_state", "unit", "trust", "basis_element_count", "basis_relationship_count", "constructs_not_carried", "basis_note", "engine_version", "evidence_hash"]
+}

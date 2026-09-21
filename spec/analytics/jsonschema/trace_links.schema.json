@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/trace_links.schema.json",
+  "title": "trace_links",
+  "description": "One row per coverage edge per commit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "commit": {"type":"string"},
+    "requirement_id": {"type":"string"},
+    "element_id": {"type":"string"},
+    "link_kind": {"type":"string"},
+    "source_id": {"type":"string"},
+    "target_id": {"type":"string"}
+  },
+  "required": ["project", "commit", "requirement_id", "element_id", "link_kind", "source_id", "target_id"]
+}

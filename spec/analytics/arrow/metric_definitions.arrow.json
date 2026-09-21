@@ -1,0 +1,11 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "metric_definitions",
+  "fields": [
+    { "name": "id", "nullable": false, "type": "utf8" },
+    { "name": "name", "nullable": false, "type": "utf8" },
+    { "name": "description", "nullable": false, "type": "utf8" },
+    { "name": "depends_on", "nullable": false, "type": "list<utf8>" },
+    { "name": "status", "nullable": false, "type": "utf8" }
+  ]
+}

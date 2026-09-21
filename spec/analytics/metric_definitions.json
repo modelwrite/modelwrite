@@ -1,0 +1,242 @@
+[
+  {
+    "depends_on": [
+      "graph.nodes"
+    ],
+    "description": "Number of nodes in the graph section (every element as a node).",
+    "id": "graph.node_count",
+    "name": "Graph nodes",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.edges"
+    ],
+    "description": "Number of edges in the graph section (every relationship as an edge).",
+    "id": "graph.edge_count",
+    "name": "Graph edges",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.nodes",
+      "graph.edges"
+    ],
+    "description": "Number of graph nodes with no incident edge. The graph-gaps headline: every orphan is named in graph_stats.isolated.",
+    "id": "graph.isolated_count",
+    "name": "Orphaned elements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.nodes",
+      "graph.edges"
+    ],
+    "description": "Number of connected components in the graph. More than one means the model is split into isolated groups.",
+    "id": "graph.component_count",
+    "name": "Isolated groups",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements"
+    ],
+    "description": "Number of requirements in the model.",
+    "id": "coverage.total",
+    "name": "Requirements total",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.edges"
+    ],
+    "description": "Number of dependency edges labelled Satisfy that target a requirement.",
+    "id": "coverage.satisfied",
+    "name": "Satisfied links",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.edges"
+    ],
+    "description": "Number of dependency edges labelled Refine that target a requirement.",
+    "id": "coverage.refined",
+    "name": "Refined links",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.edges"
+    ],
+    "description": "Number of dependency edges labelled Verify that target a requirement.",
+    "id": "coverage.verified",
+    "name": "Verified links",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "graph.edges"
+    ],
+    "description": "Number of dependency edges labelled Allocate with a requirement endpoint.",
+    "id": "coverage.allocated",
+    "name": "Allocated links",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "graph.edges"
+    ],
+    "description": "Number of requirements covered by at least one Satisfy/Refine/Verify/Allocate edge.",
+    "id": "coverage.covered",
+    "name": "Covered requirements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "graph.edges"
+    ],
+    "description": "Number of requirements with no covering edge. Each is named in the coverage report's uncovered list.",
+    "id": "coverage.uncovered",
+    "name": "Uncovered requirements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements"
+    ],
+    "description": "Number of requirements in the caller's specification (the portfolio question).",
+    "id": "compliance.specification_size",
+    "name": "Specification size",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "graph.edges"
+    ],
+    "description": "Requirements of the specification present and covered by the model.",
+    "id": "compliance.covered_count",
+    "name": "Specification covered",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "graph.edges"
+    ],
+    "description": "Requirements of the specification present in the model but uncovered.",
+    "id": "compliance.uncovered_count",
+    "name": "Specification uncovered",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements"
+    ],
+    "description": "Requirements of the specification absent from the model entirely. Never rendered as a blank.",
+    "id": "compliance.unknown_count",
+    "name": "Specification unknown",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "dataset"
+    ],
+    "description": "Number of requirements with at least one cost record across the supplied datasets.",
+    "id": "cost.costed_count",
+    "name": "Costed requirements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "requirements",
+      "dataset"
+    ],
+    "description": "Number of requirements with no cost record. Never rendered as zero.",
+    "id": "cost.uncosted_count",
+    "name": "Uncosted requirements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate"
+    ],
+    "description": "Whether the gate run passed (1) or failed (0) against its reference.",
+    "id": "gate.passed",
+    "name": "Gate passed",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "validate"
+    ],
+    "description": "Number of validation errors the gate recorded for the candidate.",
+    "id": "gate.validation_errors",
+    "name": "Validation errors",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "validate"
+    ],
+    "description": "Number of validation warnings the gate recorded, including dangling edge endpoints.",
+    "id": "gate.validation_warnings",
+    "name": "Validation warnings",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "diff"
+    ],
+    "description": "Elements present in the reference but missing from the candidate after a round trip.",
+    "id": "gate.roundtrip.missing_elements",
+    "name": "Missing elements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "diff"
+    ],
+    "description": "Elements present in the candidate but not the reference after a round trip.",
+    "id": "gate.roundtrip.extra_elements",
+    "name": "Extra elements",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "diff"
+    ],
+    "description": "Edges present in the reference but missing from the candidate after a round trip.",
+    "id": "gate.roundtrip.missing_edges",
+    "name": "Missing edges",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "diff"
+    ],
+    "description": "Edges present in the candidate but not the reference after a round trip.",
+    "id": "gate.roundtrip.extra_edges",
+    "name": "Extra edges",
+    "status": "active"
+  },
+  {
+    "depends_on": [
+      "gate",
+      "diff"
+    ],
+    "description": "Attributes whose value differs between reference and candidate after a round trip.",
+    "id": "gate.roundtrip.changed_attributes",
+    "name": "Changed attributes",
+    "status": "active"
+  }
+]

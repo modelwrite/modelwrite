@@ -9,6 +9,7 @@ pub mod compliance;
 pub mod confidence;
 pub mod cost;
 pub mod dataset;
+pub mod metrics;
 pub mod money;
 pub mod source;
 

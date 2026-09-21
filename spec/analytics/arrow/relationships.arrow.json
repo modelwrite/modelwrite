@@ -1,0 +1,12 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "relationships",
+  "fields": [
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "commit", "nullable": false, "type": "utf8" },
+    { "name": "source", "nullable": false, "type": "utf8" },
+    { "name": "target", "nullable": false, "type": "utf8" },
+    { "name": "kind", "nullable": false, "type": "utf8" },
+    { "name": "label", "nullable": false, "type": "utf8" }
+  ]
+}

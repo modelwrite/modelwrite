@@ -1,0 +1,13 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "trace_links",
+  "fields": [
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "commit", "nullable": false, "type": "utf8" },
+    { "name": "requirement_id", "nullable": false, "type": "utf8" },
+    { "name": "element_id", "nullable": false, "type": "utf8" },
+    { "name": "link_kind", "nullable": false, "type": "utf8" },
+    { "name": "source_id", "nullable": false, "type": "utf8" },
+    { "name": "target_id", "nullable": false, "type": "utf8" }
+  ]
+}

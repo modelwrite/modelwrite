@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/relationships.schema.json",
+  "title": "relationships",
+  "description": "One row per graph edge per commit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {"type":"string"},
+    "commit": {"type":"string"},
+    "source": {"type":"string"},
+    "target": {"type":"string"},
+    "kind": {"type":"string"},
+    "label": {"type":"string"}
+  },
+  "required": ["project", "commit", "source", "target", "kind", "label"]
+}

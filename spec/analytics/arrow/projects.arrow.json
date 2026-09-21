@@ -1,0 +1,8 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "projects",
+  "fields": [
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "created_at", "nullable": false, "type": "utf8" }
+  ]
+}

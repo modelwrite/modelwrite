@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mw-analytics-schema@1/metric_definitions.schema.json",
+  "title": "metric_definitions",
+  "description": "One row per metric (generated from the engine).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type":"string"},
+    "name": {"type":"string"},
+    "description": {"type":"string"},
+    "depends_on": {"type":"array","items":{"type":"string"}},
+    "status": {"type":"string"}
+  },
+  "required": ["id", "name", "description", "depends_on", "status"]
+}

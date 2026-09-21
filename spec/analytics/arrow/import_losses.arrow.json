@@ -1,0 +1,14 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "import_losses",
+  "fields": [
+    { "name": "import_artifact_hash", "nullable": false, "type": "utf8" },
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "binding_id", "nullable": false, "type": "utf8" },
+    { "name": "binding_version", "nullable": false, "type": "utf8" },
+    { "name": "construct", "nullable": false, "type": "utf8" },
+    { "name": "subject", "nullable": false, "type": "utf8" },
+    { "name": "severity", "nullable": false, "type": "utf8" },
+    { "name": "note", "nullable": false, "type": "utf8" }
+  ]
+}

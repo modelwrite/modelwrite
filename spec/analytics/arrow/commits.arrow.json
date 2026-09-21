@@ -1,0 +1,18 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "commits",
+  "fields": [
+    { "name": "hash", "nullable": false, "type": "utf8" },
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "branch", "nullable": false, "type": "utf8" },
+    { "name": "parents", "nullable": false, "type": "list<utf8>" },
+    { "name": "author", "nullable": false, "type": "utf8" },
+    { "name": "message", "nullable": false, "type": "utf8" },
+    { "name": "committed_at", "nullable": false, "type": "utf8" },
+    { "name": "okf_hash", "nullable": false, "type": "utf8" },
+    { "name": "provenance_kind", "nullable": false, "type": "utf8" },
+    { "name": "import_artifact_hash", "nullable": true, "type": "utf8" },
+    { "name": "binding_id", "nullable": true, "type": "utf8" },
+    { "name": "binding_version", "nullable": true, "type": "utf8" }
+  ]
+}

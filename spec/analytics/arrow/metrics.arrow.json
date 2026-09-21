@@ -1,0 +1,19 @@
+{
+  "format": "mw-arrow-schema@1",
+  "name": "metrics",
+  "fields": [
+    { "name": "project", "nullable": false, "type": "utf8" },
+    { "name": "commit", "nullable": false, "type": "utf8" },
+    { "name": "metric_id", "nullable": false, "type": "utf8" },
+    { "name": "value", "nullable": true, "type": "float64" },
+    { "name": "value_state", "nullable": false, "type": "utf8" },
+    { "name": "unit", "nullable": false, "type": "utf8" },
+    { "name": "trust", "nullable": false, "type": "utf8" },
+    { "name": "basis_element_count", "nullable": false, "type": "int64" },
+    { "name": "basis_relationship_count", "nullable": false, "type": "int64" },
+    { "name": "constructs_not_carried", "nullable": false, "type": "int64" },
+    { "name": "basis_note", "nullable": false, "type": "utf8" },
+    { "name": "engine_version", "nullable": false, "type": "utf8" },
+    { "name": "evidence_hash", "nullable": false, "type": "utf8" }
+  ]
+}
