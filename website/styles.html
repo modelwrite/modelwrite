@@ -1,0 +1,445 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modelwrite: three visual directions, four artefacts</title>
+<meta name="description" content="Three visual directions for the Modelwrite site and workbench, each applied to the same four artefacts: the site hero, the measure-it section, the workbench Projects page and the workbench model-health view.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles-compare.css">
+</head>
+<body>
+
+<div class="top">
+  <div class="top__inner">
+    <b>Modelwrite &mdash; three visual directions</b>
+    <span>four artefacts each &middot; one identity chosen and applied</span>
+    <nav>
+      <a href="#today">Today</a>
+      <a href="#dir-a">A &middot; Precision instrument</a>
+      <a href="#dir-b">B &middot; Editorial technical</a>
+      <a href="#dir-c">C &middot; Modern product</a>
+      <a href="#decision">Decision</a>
+    </nav>
+  </div>
+</div>
+
+<div class="page">
+
+<header class="masthead">
+  <h1>Three visual directions, four artefacts, one identity</h1>
+  <p class="lede">The site and the workbench are the same product and they currently look like two
+  companies. Below are three complete directions. Each one is applied to the <strong>same four
+  artefacts</strong> &mdash; the site hero, the &ldquo;measure it&rdquo; section, the workbench Projects page and
+  the workbench model-health view &mdash; so they compare like for like. The copy is the live copy, the
+  voice is unchanged, and no limit has been softened.</p>
+  <div class="note">
+    <p><strong>Nothing here is a mock-up.</strong> The product images are real captures of the running
+    workbench against the live showcase database, taken with one stylesheet injected per direction.
+    For direction A the capture is the workbench <em>as it now ships</em>; for B and C it is the same
+    page with that direction's stylesheet injected, so the comparison runs on identical content. The
+    site hero and measure-it artefacts are real HTML, rendered by this page. The page fetches
+    nothing: system font stacks, inline SVG, local files under <code>shots/</code>.</p>
+  </div>
+</header>
+
+<hr class="rule">
+
+<section class="block" id="today">
+  <header>
+    <p class="eyebrow">The starting point</p>
+    <h2>What the product looks like today</h2>
+    <p>The site is honest and well written, and it reads like a specification document: one paper
+    colour, one near-black ink, one green accent, and no product imagery above the fold. A visitor
+    is told the product exists and never shown it. The workbench is a different product in every
+    visual respect &mdash; generic blue on white &mdash; so the two surfaces share nothing but the name.</p>
+  </header>
+
+  <div class="today">
+    <figure>
+      <img src="shots/today-site.png" alt="The live site's hero: the word Modelwrite set very large, a kicker, a tagline, a paragraph, four buttons, a status line and a row of licence chips. No product imagery." width="1440" height="900" loading="lazy">
+      <figcaption><b>Site.</b> No product imagery above the fold; the wordmark carries the first screen.</figcaption>
+    </figure>
+    <figure>
+      <img src="shots/today-projects.png" alt="The workbench Projects page: ten flat white cards in a blue-and-white interface with a large empty area below the New project form." width="1440" height="900" loading="lazy">
+      <figcaption><b>Workbench &mdash; Projects.</b> Flat cards, no kind marks, no health signal, and a form that asks a stranger to do the hard part.</figcaption>
+    </figure>
+    <figure>
+      <img src="shots/today-health.png" alt="The workbench model-health view: two issues found on cafe-stand, an orphaned node and an isolated group of three, in the same blue-and-white interface." width="1440" height="900" loading="lazy">
+      <figcaption><b>Workbench &mdash; health.</b> The best asset in the product, in the least distinctive chrome.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="block" id="shared">
+  <header>
+    <p class="eyebrow">Held constant</p>
+    <h2>What the three directions share</h2>
+    <p>All three keep the product's voice: no marketing language, exact numbers, stated limits. All
+    three are built from system font stacks and inline SVG, fetch nothing, and use the same semantic
+    vocabulary &mdash; pass, fail, unknown and warn keep their meaning in every direction, and a chip
+    always carries a border and a word, never colour alone.</p>
+  </header>
+</section>
+
+<hr class="rule">
+
+
+<section class="block" id="dir-a">
+  <header>
+    <p class="eyebrow">Direction A</p>
+    <h2>Precision instrument</h2>
+    <p><strong>Cool neutral greys, one confident petrol accent, a tight type scale, hairline rules and square corners. A measurement tool, not a document.</strong></p>
+  </header>
+
+  <div class="spec">
+    <div><h4>Palette</h4><ul class="swatches"><li><span class="chip" style="background:#F5F7F9"></span><code>#F5F7F9</code><span class="role">canvas (page)</span><span class="ratio">18.50:1 with #101418</span></li><li><span class="chip" style="background:#FFFFFF"></span><code>#FFFFFF</code><span class="role">sheet / card</span><span class="ratio">18.50:1 with #101418</span></li><li><span class="chip" style="background:#EDF1F4"></span><code>#EDF1F4</code><span class="role">panel (wells, bars)</span><span class="ratio">15.14:1 with #101418</span></li><li><span class="chip" style="background:#CFD7DE"></span><code>#CFD7DE</code><span class="role">hairline</span><span class="ratio" style="color:#99a2ad">&mdash; non-text</span></li><li><span class="chip" style="background:#101418"></span><code>#101418</code><span class="role">ink (primary text)</span><span class="ratio">18.50:1</span></li><li><span class="chip" style="background:#49535C"></span><code>#49535C</code><span class="role">ink-2 (secondary)</span><span class="ratio">7.85:1</span></li><li><span class="chip" style="background:#5F6973"></span><code>#5F6973</code><span class="role">ink-3 (labels, meta)</span><span class="ratio">5.59:1 on #FFFFFF; 4.58:1 on #E4E9EE</span></li><li><span class="chip" style="background:#0B6E99"></span><code>#0B6E99</code><span class="role">accent (state, action, link)</span><span class="ratio">5.67:1 on #FFFFFF; 4.97:1 on #E6F2F7</span></li><li><span class="chip" style="background:#075A7E"></span><code>#075A7E</code><span class="role">accent-deep (hover)</span><span class="ratio">7.57:1</span></li><li><span class="chip" style="background:#E6F2F7"></span><code>#E6F2F7</code><span class="role">accent tint (selected row)</span><span class="ratio">4.97:1 with #0B6E99</span></li><li><span class="chip" style="background:#101418"></span><code>#101418</code><span class="role">chrome (instrument face)</span><span class="ratio">15.67:1 with #E7EDF2</span></li><li><span class="chip" style="background:#E7EDF2"></span><code>#E7EDF2</code><span class="role">chrome ink</span><span class="ratio">15.67:1</span></li><li><span class="chip" style="background:#9AA5AE"></span><code>#9AA5AE</code><span class="role">chrome muted (nav, meta)</span><span class="ratio">7.37:1 on #101418</span></li><li><span class="chip" style="background:#5CC6DE"></span><code>#5CC6DE</code><span class="role">accent on dark (nav hover)</span><span class="ratio">9.33:1 on #101418</span></li><li><span class="chip" style="background:#FFFFFF"></span><code>#FFFFFF</code><span class="role">text on the primary button</span><span class="ratio">5.67:1 on #0B6E99</span></li></ul></div>
+    <div><h4>Type</h4><dl class="stack"><dt>Interface &mdash; system UI sans, 16&nbsp;px base, 17&nbsp;px body on the site</dt><dd><code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code></dd><dt>identifiers, ids, hashes, commands</dt><dd><code>ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace</code></dd></dl>
+      <h4 style="margin-top:1.25rem">Rationale</h4>
+      <div class="rationale"><p>A safety engineer reads a drawing the way a metrologist reads a gauge: the interesting
+      information is the deviation, and anything that is not a measurement is noise. This direction
+      gives the page a cold, even ground (<code>#F5F7F9</code>), puts every value on a plain white sheet,
+      rules the card wall with hairlines instead of shadows, and spends its single accent &mdash; a petrol
+      <code>#0B6E99</code> &mdash; only on state and action. Square corners, a dark graphite instrument face
+      across the top of both surfaces, and monospace reserved for identifiers make the whole thing read
+      as a tool rather than a document. It is the direction that best fits a programme where the output
+      is printed, annotated and signed.</p></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>1. Site hero</b><span>the product capture sits above the fold, in the first screen</span></p>
+    <div class="art art--canvas">
+    <div class="bar">
+      <span class="name"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#e7edf2" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#5cc6de" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</span>
+      <nav aria-label="Sections"><a href="#dir-a">See it</a><a href="#dir-a">Measure it</a><a href="#dir-a">Ask it</a><a href="#dir-a">Trust it</a><a href="#dir-a">Analytics</a><a href="#dir-a">Limits</a><a href="#dir-a">Try it</a><a href="#dir-a">Examples</a></nav>
+      <span class="repo">github.com/modelwrite</span>
+    </div>
+    <div class="wrap">
+      <div class="hero2">
+        <div>
+        <p class="kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
+        <h1>Modelwrite</h1>
+        <p class="tagline">The open source analytics platform for getting value from a SysML investment.</p>
+        <div class="lede"><p>Your organisation has spent years building SysML models. Modelwrite is the open source
+      analytics platform that shows what they are worth. It reads the models you already have,
+      measures coverage, traceability and integration, tracks them baseline by baseline, and answers
+      questions with the evidence attached. You keep your modelling tool.</p></div>
+        <p class="actions"><a class="btn" href="#dir-a">Open the showcase</a><a class="btn btn--quiet" href="#dir-a">Browse the examples</a><a class="btn btn--quiet" href="#dir-a">Try your own model</a><a class="btn btn--quiet" href="#dir-a">Install it</a></p>
+          <p class="statusline"><b>Proof is the differentiator, not the headline.</b> Every number on this page names the
+      command that produced it, and the limits sit at the same weight as the claims.</p>
+          <ul class="chips"><li>OKF 1.0</li><li>AGPL-3.0-or-later engine</li><li>Apache-2.0 analytics schema</li><li>XMI + SysML v2 textual</li><li>self-hosted, air-gapped</li><li>SQLite or PostgreSQL</li></ul>
+        </div>
+        <figure>
+          <img class="shot" src="shots/dir-a-health-crop.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="896" height="856" loading="lazy">
+          <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>2. &ldquo;Measure it&rdquo; section</b><span>the model-health capture does the arguing</span></p>
+    <div class="art art--canvas">
+    <div class="wrap">
+      <p class="kicker">02 / Measure it</p>
+      <div class="measure">
+        <div>
+          <h2>Coverage, traceability, integration. The graph gaps lead.</h2>
+          <p>Coverage names which requirements are satisfied, refined, verified or allocated. Traceability
+      names the edges between them. Integration asks whether the model is one connected whole. The
+      graph gaps expose the model nobody can see at a glance.</p>
+          <ul class="gaps"><li><span class="n" aria-hidden="true">1</span><div><p><strong>Orphaned items.</strong> A node with no edge. It is present, but nothing connects to it.</p></div></li><li><span class="n" aria-hidden="true">2</span><div><p><strong>Isolated groups.</strong> More than one connected component. The model is split.</p></div></li><li><span class="n" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li></ul>
+        </div>
+        <figure>
+          <img class="shot" src="shots/dir-a-health.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="1440" height="900" loading="lazy">
+          <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="wb">
+    <div class="artefact">
+      <p class="artefact__label"><b>3. Workbench &mdash; Projects</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-a-projects.png" alt="The workbench Projects page in direction A, Precision instrument: the same ten showcase projects, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>Same content, one stylesheet swapped.</b> undefined</figcaption>
+      </figure>
+    </div>
+
+    <div class="artefact">
+      <p class="artefact__label"><b>4. Workbench &mdash; model health</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-a-health.png" alt="The workbench model-health view in direction A, Precision instrument: two issues found on cafe-stand, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>The differentiator, in the shared identity.</b> The findings are unchanged &mdash; one orphaned node, one isolated group of three. Only the palette, the type and the density move.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+
+<section class="block" id="dir-b">
+  <header>
+    <p class="eyebrow">Direction B</p>
+    <h2>Editorial technical</h2>
+    <p><strong>The confidence of a well-set engineering journal: warm paper, a real serif, generous space and rules instead of boxes.</strong></p>
+  </header>
+
+  <div class="spec">
+    <div><h4>Palette</h4><ul class="swatches"><li><span class="chip" style="background:#F7F2E6"></span><code>#F7F2E6</code><span class="role">canvas (page)</span><span class="ratio">15.45:1 with #1A1712</span></li><li><span class="chip" style="background:#FFFDF7"></span><code>#FFFDF7</code><span class="role">paper (card, plate)</span><span class="ratio">17.57:1 with #1A1712</span></li><li><span class="chip" style="background:#F1EBDD"></span><code>#F1EBDD</code><span class="role">panel</span><span class="ratio">16.21:1 with #1A1712</span></li><li><span class="chip" style="background:#D9D0BB"></span><code>#D9D0BB</code><span class="role">rule</span><span class="ratio" style="color:#99a2ad">&mdash; non-text</span></li><li><span class="chip" style="background:#1A1712"></span><code>#1A1712</code><span class="role">ink (primary text)</span><span class="ratio">17.57:1</span></li><li><span class="chip" style="background:#514A3D"></span><code>#514A3D</code><span class="role">ink-2 (secondary, italic meta)</span><span class="ratio">8.61:1</span></li><li><span class="chip" style="background:#5C5546"></span><code>#5C5546</code><span class="role">ink-3 (labels)</span><span class="ratio">7.34:1</span></li><li><span class="chip" style="background:#8C2F1E"></span><code>#8C2F1E</code><span class="role">accent (rules, links, kicker)</span><span class="ratio">8.13:1 on #FFFDF7; 7.40:1 on #F1EBDD</span></li><li><span class="chip" style="background:#6E2416"></span><code>#6E2416</code><span class="role">accent-deep (hover)</span><span class="ratio">10.51:1</span></li><li><span class="chip" style="background:#F7EBE6"></span><code>#F7EBE6</code><span class="role">accent tint</span><span class="ratio">7.40:1 with #8C2F1E</span></li></ul></div>
+    <div><h4>Type</h4><dl class="stack"><dt>Interface &mdash; system serif (Georgia), 17&nbsp;px base, 18&nbsp;px body on the site</dt><dd><code>Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif</code></dd><dt>identifiers, ids, hashes, commands</dt><dd><code>ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace</code></dd></dl>
+      <h4 style="margin-top:1.25rem">Rationale</h4>
+      <div class="rationale"><p>An engineering journal is a form this audience already trusts: it states a result, shows the plate,
+      and cites the run. This direction borrows that authority &mdash; a warm paper ground
+      (<code>#FFFDF7</code>), Georgia carrying the headings, rules instead of boxes, an oxblood
+      <code>#8C2F1E</code> for the rules and links, and the product capture presented as a plate. It is the
+      most generous of the three and the most persuasive to a manager reading for a decision. It is also
+      the slowest to scan and the worst fit for the workbench: a serif face and 15&nbsp;px italic meta text
+      cost real reading speed in dense tables, traceability matrices and containment trees.</p></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>1. Site hero</b><span>the product capture sits above the fold, in the first screen</span></p>
+    <div class="art art--sheet">
+    <div class="bar">
+      <span class="name"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#1a1712" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#8c2f1e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</span>
+      <nav aria-label="Sections"><a href="#dir-b">See it</a><a href="#dir-b">Measure it</a><a href="#dir-b">Ask it</a><a href="#dir-b">Trust it</a><a href="#dir-b">Analytics</a><a href="#dir-b">Limits</a><a href="#dir-b">Try it</a><a href="#dir-b">Examples</a></nav>
+      <span class="repo">github.com/modelwrite</span>
+    </div>
+    <div class="wrap">
+        <p class="kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
+        <h1>Modelwrite</h1>
+        <p class="tagline">The open source analytics platform for getting value from a SysML investment.</p>
+        <div class="lede"><p>Your organisation has spent years building SysML models. Modelwrite is the open source
+      analytics platform that shows what they are worth. It reads the models you already have,
+      measures coverage, traceability and integration, tracks them baseline by baseline, and answers
+      questions with the evidence attached. You keep your modelling tool.</p></div>
+        <p class="actions"><a class="btn" href="#dir-b">Open the showcase</a><a class="btn btn--quiet" href="#dir-b">Browse the examples</a><a class="btn btn--quiet" href="#dir-b">Try your own model</a><a class="btn btn--quiet" href="#dir-b">Install it</a></p>
+      <p class="statusline"><b>Proof is the differentiator, not the headline.</b> Every number on this page names the
+      command that produced it, and the limits sit at the same weight as the claims.</p>
+      <ul class="chips"><li>OKF 1.0</li><li>AGPL-3.0-or-later engine</li><li>Apache-2.0 analytics schema</li><li>XMI + SysML v2 textual</li><li>self-hosted, air-gapped</li><li>SQLite or PostgreSQL</li></ul>
+      <figure class="plate">
+        <img class="shot" src="shots/dir-b-health-crop.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="896" height="856" loading="lazy">
+        <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+      </figure>
+    </div>
+  </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>2. &ldquo;Measure it&rdquo; section</b><span>the model-health capture does the arguing</span></p>
+    <div class="art art--sheet">
+    <div class="wrap">
+      <p class="kicker">02 / Measure it</p>
+      <h2>Coverage, traceability, integration. The graph gaps lead.</h2>
+      <p>Coverage names which requirements are satisfied, refined, verified or allocated. Traceability
+      names the edges between them. Integration asks whether the model is one connected whole. The
+      graph gaps expose the model nobody can see at a glance.</p>
+      <ul class="gaps"><li><span class="n" aria-hidden="true">1</span><div><p><strong>Orphaned items.</strong> A node with no edge. It is present, but nothing connects to it.</p></div></li><li><span class="n" aria-hidden="true">2</span><div><p><strong>Isolated groups.</strong> More than one connected component. The model is split.</p></div></li><li><span class="n" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li></ul>
+      <figure class="plate">
+        <img class="shot" src="shots/dir-b-health.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="1440" height="900" loading="lazy">
+        <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+      </figure>
+    </div>
+  </div>
+  </div>
+
+  <div class="wb">
+    <div class="artefact">
+      <p class="artefact__label"><b>3. Workbench &mdash; Projects</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-b-projects.png" alt="The workbench Projects page in direction B, Editorial technical: the same ten showcase projects, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>Same content, one stylesheet swapped.</b> undefined</figcaption>
+      </figure>
+    </div>
+
+    <div class="artefact">
+      <p class="artefact__label"><b>4. Workbench &mdash; model health</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-b-health.png" alt="The workbench model-health view in direction B, Editorial technical: two issues found on cafe-stand, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>The differentiator, in the shared identity.</b> The findings are unchanged &mdash; one orphaned node, one isolated group of three. Only the palette, the type and the density move.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+
+<section class="block" id="dir-c">
+  <header>
+    <p class="eyebrow">Direction C</p>
+    <h2>Modern product</h2>
+    <p><strong>The craft level of the best developer tools: a near-black canvas, one violet accent, hairline borders, and a single white primary action.</strong></p>
+  </header>
+
+  <div class="spec">
+    <div><h4>Palette</h4><ul class="swatches"><li><span class="chip" style="background:#0A0B0D"></span><code>#0A0B0D</code><span class="role">canvas (page, chrome)</span><span class="ratio">17.11:1 with #EDEFF4</span></li><li><span class="chip" style="background:#14161B"></span><code>#14161B</code><span class="role">surface (card)</span><span class="ratio">15.73:1 with #EDEFF4</span></li><li><span class="chip" style="background:#1C1F26"></span><code>#1C1F26</code><span class="role">panel (wells)</span><span class="ratio">13.36:1 with #EDEFF4</span></li><li><span class="chip" style="background:#282C34"></span><code>#282C34</code><span class="role">hairline</span><span class="ratio" style="color:#99a2ad">&mdash; non-text</span></li><li><span class="chip" style="background:#EDEFF4"></span><code>#EDEFF4</code><span class="role">ink (primary text)</span><span class="ratio">17.11:1 on #0A0B0D</span></li><li><span class="chip" style="background:#A3ABB8"></span><code>#A3ABB8</code><span class="role">ink-2 (secondary)</span><span class="ratio">7.82:1 on #14161B; 8.51:1 on #0A0B0D</span></li><li><span class="chip" style="background:#8B949E"></span><code>#8B949E</code><span class="role">ink-3 (labels)</span><span class="ratio">6.21:1 on #14161B</span></li><li><span class="chip" style="background:#8B7CF6"></span><code>#8B7CF6</code><span class="role">accent (link, active)</span><span class="ratio">5.92:1 on #0A0B0D; 5.36:1 on #14161B</span></li><li><span class="chip" style="background:#A99CFF"></span><code>#A99CFF</code><span class="role">accent-bright (hover)</span><span class="ratio">7.60:1 on #14161B</span></li><li><span class="chip" style="background:#FFFFFF"></span><code>#FFFFFF</code><span class="role">primary action surface</span><span class="ratio">#0A0B0D on #FFFFFF is 18.50:1</span></li></ul></div>
+    <div><h4>Type</h4><dl class="stack"><dt>Interface &mdash; system UI sans, 16&nbsp;px base, generous heading scale</dt><dd><code>system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif</code></dd><dt>identifiers, ids, hashes, commands</dt><dd><code>ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace</code></dd></dl>
+      <h4 style="margin-top:1.25rem">Rationale</h4>
+      <div class="rationale"><p>This is the craft level of the tools the same engineers already use every day &mdash; an editor, a CI
+      dashboard, a terminal. A near-black canvas (<code>#0A0B0D</code>) with one violet accent, 10&nbsp;px
+      radii, hairline borders and a single white primary action make the next step unmissable and make
+      the product capture, not the copy, the loudest thing on the screen. It is the strongest answer to
+      &ldquo;we cannot see the product&rdquo;, and the weakest answer to the two constraints this audience actually
+      has: a defence programme's review packs are printed and circulated on white paper, and a dark-only
+      identity is the one that reads as consumer software rather than as part of a programme's tool chain.</p></div>
+    </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>1. Site hero</b><span>the product capture sits above the fold, in the first screen</span></p>
+    <div class="art art--canvas">
+    <div class="bar">
+      <span class="name"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M6 7 V27 H27" fill="none" stroke="#ffffff" stroke-width="3"/><path d="M13 17 L17 21 L24 11" fill="none" stroke="#a99cff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> modelwrite</span>
+      <nav aria-label="Sections"><a href="#dir-c">See it</a><a href="#dir-c">Measure it</a><a href="#dir-c">Ask it</a><a href="#dir-c">Trust it</a><a href="#dir-c">Analytics</a><a href="#dir-c">Limits</a><a href="#dir-c">Try it</a><a href="#dir-c">Examples</a></nav>
+      <span class="repo">github.com/modelwrite</span>
+    </div>
+    <div class="wrap">
+      <div class="hero2">
+        <div>
+        <p class="kicker">Open source analytics platform &middot; self-hosted &middot; air-gapped</p>
+        <h1>Modelwrite</h1>
+        <p class="tagline">The open source analytics platform for getting value from a SysML investment.</p>
+        <div class="lede"><p>Your organisation has spent years building SysML models. Modelwrite is the open source
+      analytics platform that shows what they are worth. It reads the models you already have,
+      measures coverage, traceability and integration, tracks them baseline by baseline, and answers
+      questions with the evidence attached. You keep your modelling tool.</p></div>
+        <p class="actions"><a class="btn" href="#dir-c">Open the showcase</a><a class="btn btn--quiet" href="#dir-c">Browse the examples</a><a class="btn btn--quiet" href="#dir-c">Try your own model</a><a class="btn btn--quiet" href="#dir-c">Install it</a></p>
+          <p class="statusline"><b>Proof is the differentiator, not the headline.</b> Every number on this page names the
+      command that produced it, and the limits sit at the same weight as the claims.</p>
+          <ul class="chips"><li>OKF 1.0</li><li>AGPL-3.0-or-later engine</li><li>Apache-2.0 analytics schema</li><li>XMI + SysML v2 textual</li><li>self-hosted, air-gapped</li><li>SQLite or PostgreSQL</li></ul>
+        </div>
+        <figure class="glow">
+          <img class="shot" src="shots/dir-c-health-crop.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="896" height="856" loading="lazy">
+          <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="artefact">
+    <p class="artefact__label"><b>2. &ldquo;Measure it&rdquo; section</b><span>the model-health capture does the arguing</span></p>
+    <div class="art art--canvas">
+    <div class="wrap">
+      <p class="kicker">02 / Measure it</p>
+      <h2>Coverage, traceability, integration. The graph gaps lead.</h2>
+      <p>Coverage names which requirements are satisfied, refined, verified or allocated. Traceability
+      names the edges between them. Integration asks whether the model is one connected whole. The
+      graph gaps expose the model nobody can see at a glance.</p>
+      <ul class="gaps"><li><span class="n" aria-hidden="true">1</span><div><p><strong>Orphaned items.</strong> A node with no edge. It is present, but nothing connects to it.</p></div></li><li><span class="n" aria-hidden="true">2</span><div><p><strong>Isolated groups.</strong> More than one connected component. The model is split.</p></div></li><li><span class="n" aria-hidden="true">3</span><div><p><strong>Dangling links.</strong> An edge whose endpoint is missing. The link points at nothing.</p></div></li></ul>
+      <figure class="glow" style="margin-top:1.3rem">
+        <img class="shot" src="shots/dir-c-health.png" alt="The model-health view for the cafe-stand platform model, captured from the running workbench: 2 issues found, one orphaned node (menu-block &mdash; Menu) and one isolated group of three nodes (cafe-stand, provisioning-bay, service-window)." width="1440" height="900" loading="lazy">
+        <figcaption><b>Model health on cafe-stand, captured from the running workbench.</b> Two issues found &mdash;
+    one orphaned node and one isolated group of three &mdash; each named rather than rolled into a score.</figcaption>
+      </figure>
+    </div>
+  </div>
+  </div>
+
+  <div class="wb">
+    <div class="artefact">
+      <p class="artefact__label"><b>3. Workbench &mdash; Projects</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-c-projects.png" alt="The workbench Projects page in direction C, Modern product: the same ten showcase projects, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>Same content, one stylesheet swapped.</b> undefined</figcaption>
+      </figure>
+    </div>
+
+    <div class="artefact">
+      <p class="artefact__label"><b>4. Workbench &mdash; model health</b><span>real capture, 1440&times;900</span></p>
+      <figure>
+        <div class="shotframe"><img src="shots/dir-c-health.png" alt="The workbench model-health view in direction C, Modern product: two issues found on cafe-stand, re-skinned." width="1440" height="900" loading="lazy"></div>
+        <figcaption><b>The differentiator, in the shared identity.</b> The findings are unchanged &mdash; one orphaned node, one isolated group of three. Only the palette, the type and the density move.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="block" id="decision">
+  <header>
+    <p class="eyebrow">The choice</p>
+    <h2>Direction A was applied to the site and to the workbench</h2>
+    <p><strong>Why A.</strong> This audience reads a deviation off a gauge and distrusts anything that
+    looks sold to them, so the surface should behave like an instrument: an even, cold ground, every
+    value on a plain sheet, hairline rules instead of shadows, and one accent spent only on state and
+    action. A is also the only direction that survives all three of the places this product is actually
+    read &mdash; a 14-inch screen in a lit office, a printed review pack, and a screenshot pasted into a
+    sign-off pack &mdash; and it is the only one of the three whose density fits the workbench's tables and
+    containment trees without a serif face or a 15&nbsp;px italic slow-scan. B is more beautiful and C is
+    the better answer to &ldquo;we cannot see the product&rdquo;, but B costs reading speed in exactly the
+    dense views the product exists for, and C's dark-only canvas is the wrong surface for a defence
+    programme whose artefacts end up on white paper.</p>
+    <p><strong>What that means in practice.</strong> One palette, one type scale, one radius, one
+    semantic vocabulary &mdash; the same hex literals in <code>website/styles.css</code> and in the
+    workbench stylesheet in <code>server/src/ui/layout.rs</code>, including the graphite instrument
+    face across the top of both. The accent tints and the pass/fail/warn colours keep their meaning;
+    the site's green is retired to the pass state only.</p>
+  </header>
+
+  <table class="cmp">
+    <caption class="artefact__caption" style="caption-side:bottom;text-align:left">Fit against the two readers and the places the artefact is read.</caption>
+    <thead><tr><th scope="col">Test</th><th scope="col">A &middot; Precision instrument</th><th scope="col">B &middot; Editorial technical</th><th scope="col">C &middot; Modern product</th></tr></thead>
+    <tbody>
+      <tr><td>Signal engineer reading for a defect</td><td class="yes">strongest &mdash; dense, calm, mono ids</td><td>solid, but slower to scan</td><td>strong, if they live in dark tools</td></tr>
+      <tr><td>Manager reading for a decision</td><td class="yes">strong &mdash; the evidence is the loudest thing</td><td class="yes">strongest &mdash; generous, authoritative</td><td>solid, product-forward</td></tr>
+      <tr><td>Printed in a review pack</td><td class="yes">native</td><td class="yes">native</td><td class="no">poor &mdash; inverts to a toner-heavy page</td></tr>
+      <tr><td>Dense tables, trees, matrices</td><td class="yes">native</td><td class="no">costly</td><td>good</td></tr>
+      <tr><td>&ldquo;Show me the product&rdquo;</td><td>good</td><td>good</td><td class="yes">strongest</td></tr>
+      <tr><td>Risk of reading as gloss</td><td class="yes">lowest</td><td>low</td><td>highest for this audience</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block">
+  <header>
+    <h2>What was changed, and what was not</h2>
+  </header>
+  <ul class="plain">
+    <li><strong>Changed:</strong> the palette, the type scale, the masthead (now a graphite instrument
+    face shared by both surfaces), the hero (now two columns with a real capture above the fold), the
+    button (one filled accent primary action), the radius (2&nbsp;px everywhere), and the workbench's
+    card wall (hairline-ruled grid with a kind mark and an index tab, replacing the floating cards).</li>
+    <li><strong>Changed, wording only:</strong> the heading <em>&ldquo;Two doors, both live. One is one
+    credential short of emailing your code.&rdquo;</em> became <em>&ldquo;Two doors, both live. One cannot
+    email its login code yet.&rdquo;</em> The fact, the emphasis and the body copy below it are untouched;
+    the sentence now says what it means.</li>
+    <li><strong>Not changed:</strong> every claim, every number, the analytics positioning, the
+    four-beat spine, both trial doors, the generated analytics listing, the FAQ, and the limits section
+    in full &mdash; including the sentences that cost the product something. No limit was softened and no
+    marketing language was added.</li>
+    <li><strong>Out of scope in the workbench:</strong> the CSS layer can give the project card a kind
+    mark and a ruled grid, but a real per-card health signal (orphans, uncovered requirements) needs a
+    query in <code>server/src/ui/pages.rs</code> and a field on the row, which is outside the stylesheet.
+    The direction calls for it; this change does not fake it.</li>
+  </ul>
+</section>
+
+<footer class="foot">
+  <h2>Constraints held</h2>
+  <p>No web fonts, no icon CDNs, no remote images, no framework, no build step. Every image on this
+  page is a local file under <code>website/shots/</code>, referenced relatively. Line length, body
+  contrast and focus visibility were checked: every body-text pair below reaches at least 4.5:1
+  (WCAG&nbsp;AA for normal text) and the smallest label reaches 4.58:1 on the darkest panel it sits on.</p>
+  <p>Modelwrite is AGPL-3.0-or-later. Cameo, CATIA and MagicDraw are trademarks of Dassault
+  Syst&egrave;mes or its subsidiaries, used descriptively. SysML is a trademark of the Object
+  Management Group.</p>
+</footer>
+
+</div>
+</body>
+</html>

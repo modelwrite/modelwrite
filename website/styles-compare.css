@@ -1,0 +1,322 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* modelwrite - the three visual directions.
+   A comparison page, not a product page. It is hand-written, has no build
+   step, fetches nothing (system font stacks only), and every product image is
+   a local file under shots/ captured from the running workbench.
+
+   The four artefacts are the same four in every direction, so they compare
+   like for like:
+     1. the site hero, with a real product capture in it;
+     2. the "measure it" section, using the model-health capture;
+     3. the WORKBENCH Projects page;
+     4. the WORKBENCH model-health view.
+
+   Artefacts 3 and 4 are real 1440x900 captures of the running workbench with
+   one stylesheet injected - the same content, re-skinned. Nothing is mocked up
+   in an image editor. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: #14161a;
+  color: #e8ebef;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+p { margin: 0 0 1rem; }
+p:last-child { margin-bottom: 0; }
+a { color: #7fd0e6; text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace; }
+
+:focus-visible { outline: 2px solid #5cc6de; outline-offset: 2px; }
+
+.page { max-width: 78rem; margin: 0 auto; padding: 0 1.5rem; }
+
+/* ------------------------------------------------------------- page chrome */
+
+.top {
+  border-bottom: 1px solid #262a31;
+  background: #0e1013;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.top__inner { max-width: 78rem; margin: 0 auto; padding: 0.7rem 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: baseline; }
+.top b { font-size: 0.95rem; letter-spacing: 0.01em; }
+.top span { color: #99a2ad; font-size: 0.85rem; }
+.top nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.85rem; }
+.top nav a { color: #b9c2cc; text-decoration: none; }
+.top nav a:hover { color: #7fd0e6; text-decoration: underline; }
+
+.masthead { padding: 3rem 0 1.5rem; }
+.masthead h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); letter-spacing: -0.025em; }
+.masthead .lede { max-width: 54rem; color: #b9c2cc; font-size: 1.0625rem; margin-top: 0.9rem; }
+.rule { height: 1px; background: #262a31; margin: 2rem 0; border: 0; }
+
+/* ------------------------------------------------------------------ blocks */
+
+.block { padding: 3rem 0; border-top: 1px solid #262a31; }
+.block > header { max-width: 60rem; margin-bottom: 1.75rem; }
+.block h2 { font-size: clamp(1.4rem, 3vw, 1.9rem); letter-spacing: -0.02em; }
+.block h3 { font-size: 1.15rem; margin: 2.25rem 0 0.85rem; }
+.block h4 { font-size: 0.8rem; font-family: ui-monospace, Consolas, monospace; letter-spacing: 0.09em; text-transform: uppercase; color: #99a2ad; margin: 0 0 0.5rem; }
+.block p { color: #b9c2cc; max-width: 60rem; }
+.block p strong { color: #e8ebef; }
+
+.eyebrow { font-family: ui-monospace, Consolas, monospace; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: #99a2ad; margin: 0 0 0.6rem; }
+
+.note { border-left: 3px solid #5cc6de; background: #16191e; padding: 0.85rem 1.1rem; margin: 1.25rem 0 0; max-width: 60rem; font-size: 0.9375rem; }
+.note p { margin: 0; }
+
+ul.plain { padding-left: 1.15rem; color: #b9c2cc; max-width: 60rem; }
+ul.plain li { margin-bottom: 0.4rem; }
+
+/* --------------------------------------------------------------- artefacts */
+
+.artefact { margin-top: 2rem; }
+.artefact__label {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #99a2ad; margin: 0 0 0.55rem;
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; align-items: baseline;
+}
+.artefact__label b { color: #e8ebef; font-weight: 650; }
+.artefact__caption { font-size: 0.875rem; color: #99a2ad; margin: 0.6rem 0 0; max-width: 62rem; }
+.artefact__caption b { color: #cdd4dc; }
+
+.frame { border: 1px solid #33383f; border-radius: 4px; overflow: hidden; background: #0b0d10; }
+.frame img { display: block; width: 100%; height: auto; }
+
+/* --------------------------------------------------------------- today row */
+
+.today { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+.today figure { margin: 0; }
+.today img { display: block; width: 100%; height: auto; border: 1px solid #33383f; border-radius: 4px; background: #0b0d10; }
+.today figcaption { font-size: 0.8125rem; color: #99a2ad; margin-top: 0.45rem; }
+
+/* --------------------------------------------------------- palette + type */
+
+.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1.5rem; margin-top: 1.25rem; }
+.spec h4 { margin-top: 0; }
+
+.swatches { list-style: none; margin: 0; padding: 0; }
+.swatches li { display: flex; align-items: center; gap: 0.65rem; padding: 0.28rem 0; font-size: 0.8125rem; border-bottom: 1px solid #21252b; }
+.swatches .chip { width: 1.5rem; height: 1.35rem; border-radius: 2px; border: 1px solid rgba(255,255,255,0.22); flex: none; }
+.swatches code { color: #e8ebef; min-width: 5.6rem; }
+.swatches .role { color: #99a2ad; }
+.swatches .ratio { margin-left: auto; color: #8fd6a2; font-family: ui-monospace, Consolas, monospace; font-size: 0.75rem; white-space: nowrap; }
+
+.stack { font-size: 0.8125rem; color: #b9c2cc; }
+.stack code { display: block; color: #e8ebef; background: #16191e; border: 1px solid #262a31; border-radius: 3px; padding: 0.45rem 0.6rem; margin: 0.25rem 0 0.75rem; overflow-wrap: anywhere; }
+.stack dt { color: #99a2ad; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
+
+.rationale { border-left: 3px solid #33383f; padding-left: 1.1rem; margin-top: 0.5rem; }
+.rationale p { max-width: 60rem; }
+
+/* ================================================================ DIRECTION
+   Each direction scope defines its own token block. Everything below the
+   direction scopes reads those tokens, so the three artefact sets are the
+   same markup run through three different design systems. */
+
+.dir { --radius: 2px; --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif; }
+
+#dir-a {
+  --bg: #ffffff;
+  --canvas: #f5f7f9;
+  --panel: #edf1f4;
+  --ink: #101418;
+  --ink-2: #49535c;
+  --ink-3: #5f6973;
+  --line: #cfd7de;
+  --line-2: #aeb9c2;
+  --accent: #0b6e99;
+  --accent-2: #075a7e;
+  --tint: #e6f2f7;
+  --chrome: #101418;
+  --chrome-ink: #e7edf2;
+  --chrome-mut: #9aa5ae;
+  --chrome-line: #2a323a;
+  --bright: #5cc6de;
+  --radius: 2px;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace;
+  --h1: 2rem;
+  --tagline: 1.15rem;
+  --body: 0.9375rem;
+}
+#dir-b {
+  --bg: #fffdf7;
+  --canvas: #f7f2e6;
+  --panel: #f1ebdd;
+  --ink: #1a1712;
+  --ink-2: #514a3d;
+  --ink-3: #5c5546;
+  --line: #d9d0bb;
+  --line-2: #bdb298;
+  --accent: #8c2f1e;
+  --accent-2: #6e2416;
+  --tint: #f7ebe6;
+  --chrome: #fffdf7;
+  --chrome-ink: #1a1712;
+  --chrome-mut: #514a3d;
+  --chrome-line: #1a1712;
+  --bright: #8c2f1e;
+  --radius: 3px;
+  --sans: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace;
+  --h1: 2.6rem;
+  --tagline: 1.3rem;
+  --body: 1.0625rem;
+}
+#dir-c {
+  --bg: #14161b;
+  --canvas: #0a0b0d;
+  --panel: #1c1f26;
+  --ink: #edeff4;
+  --ink-2: #a3abb8;
+  --ink-3: #8b949e;
+  --line: #282c34;
+  --line-2: #3a4150;
+  --accent: #8b7cf6;
+  --accent-2: #a99cff;
+  --tint: #1d1a33;
+  --chrome: #0a0b0d;
+  --chrome-ink: #ffffff;
+  --chrome-mut: #a3abb8;
+  --chrome-line: #282c34;
+  --bright: #a99cff;
+  --radius: 10px;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, Menlo, monospace;
+  --h1: 2.2rem;
+  --tagline: 1.2rem;
+  --body: 1rem;
+}
+
+/* --------------------------------------------- artefact shell (all directions) */
+
+.art {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-family: var(--sans);
+  color: var(--ink);
+  font-size: var(--body);
+  line-height: 1.55;
+}
+.art--canvas { background: var(--canvas); }
+.art--sheet { background: var(--bg); }
+.art a { color: var(--accent); }
+.art h1, .art h2, .art h3 { font-family: var(--sans); }
+.art p { margin: 0 0 0.7rem; color: var(--ink-2); }
+.art p:last-child { margin-bottom: 0; }
+
+/* a miniature of the site masthead, so the nav treatment is part of the view */
+.art .bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 1rem;
+  background: var(--chrome); color: var(--chrome-ink);
+  border-bottom: 1px solid var(--chrome-line);
+  padding: 0.55rem 1.1rem;
+}
+.art .bar .mark { width: 15px; height: 15px; flex: none; }
+.art .bar .name { font-weight: 650; font-size: 0.9rem; letter-spacing: 0.01em; display: inline-flex; align-items: center; gap: 0.4rem; }
+.art .bar nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 0.35rem 0.95rem; }
+.art .bar nav a { color: var(--chrome-mut); text-decoration: none; font-size: 0.8rem; }
+.art .bar nav a:hover { color: var(--bright); }
+.art .bar .repo { font-family: var(--mono); font-size: 0.72rem; color: var(--chrome-mut); border: 1px solid var(--chrome-line); border-radius: var(--radius); padding: 0.2rem 0.45rem; }
+
+.art .wrap { padding: 1.6rem 1.5rem 1.8rem; }
+.art .kicker { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 0.7rem; }
+.art h1 { font-size: var(--h1); letter-spacing: -0.03em; margin: 0 0 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+.art .tagline { font-size: var(--tagline); font-weight: 600; color: var(--ink); letter-spacing: -0.015em; margin: 0 0 0.85rem; }
+.art .lede { max-width: 34rem; }
+.art .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.1rem 0 0; }
+.art .btn { display: inline-block; font-size: 0.875rem; font-weight: 600; padding: 0.5rem 0.95rem; border-radius: var(--radius); text-decoration: none; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.art .btn--quiet { background: transparent; color: var(--accent); border-color: var(--line-2); }
+.art .statusline { margin: 1.1rem 0 0; padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--panel); font-size: 0.875rem; color: var(--ink-2); max-width: 34rem; }
+.art .statusline b { color: var(--ink); }
+.art .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.9rem 0 0; padding: 0; list-style: none; }
+.art .chips li { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 0.18rem 0.55rem; }
+.art .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--panel); }
+.art figcaption { font-size: 0.8rem; color: var(--ink-3); margin-top: 0.5rem; max-width: 34rem; }
+.art figure { margin: 0; }
+
+.art .hero2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 1.6rem; align-items: start; }
+@media (max-width: 54rem) { .art .hero2 { grid-template-columns: 1fr; } }
+
+.art h2 { font-size: 1.4rem; letter-spacing: -0.02em; margin: 0 0 0.6rem; }
+.art .gaps { list-style: none; margin: 1rem 0 0; padding: 0; }
+.art .gaps > li { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; padding: 0.5rem 0; border-top: 1px solid var(--line); }
+.art .gaps > li:last-child { border-bottom: 1px solid var(--line); }
+.art .gaps .n { font-family: var(--mono); color: var(--accent); font-weight: 700; }
+.art .gaps strong { color: var(--ink); }
+
+/* ------------------------------------------------- direction A refinements */
+
+#dir-a .art .bar .name, #dir-a .art .bar nav a { font-family: var(--mono); }
+#dir-a .art .bar nav a { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; }
+#dir-a .art h1 { font-family: var(--mono); letter-spacing: -0.02em; }
+#dir-a .art .gaps .n { border: 1px solid var(--line-2); width: 1.35rem; height: 1.35rem; display: grid; place-items: center; font-size: 0.75rem; }
+#dir-a .art .sect-rule { height: 1px; background: var(--line); margin: 1.4rem 0; }
+#dir-a .art .measure { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 1.5rem; align-items: start; }
+@media (max-width: 54rem) { #dir-a .art .measure { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------- direction B refinements */
+
+#dir-b .art { border-color: var(--line); }
+#dir-b .art .bar { border-bottom: 3px double var(--chrome-line); padding: 0.7rem 1.4rem; }
+#dir-b .art .bar .name { font-family: var(--serif); font-size: 1.25rem; font-weight: 600; }
+#dir-b .art .bar nav a { font-family: var(--sans); font-size: 0.9rem; color: var(--chrome-mut); }
+#dir-b .art .wrap { padding: 2.1rem 1.9rem 2.3rem; }
+#dir-b .art h1 { font-family: var(--serif); font-weight: 600; letter-spacing: -0.005em; }
+#dir-b .art .tagline, #dir-b .art h2 { font-family: var(--serif); font-weight: 600; }
+#dir-b .art .kicker { color: var(--accent); }
+#dir-b .art .lede { max-width: 40rem; }
+#dir-b .art .lede p:first-child::first-letter { font-size: 2.6em; line-height: 0.85; float: left; padding: 0.06em 0.09em 0 0; font-family: var(--serif); color: var(--accent); }
+#dir-b .art .statusline { border-left-width: 4px; }
+#dir-b .art .chips li { border-radius: 2px; letter-spacing: 0.04em; }
+#dir-b .art .plate { border: 1px solid var(--line); border-top: 4px solid var(--accent); background: var(--bg); padding: 0.9rem; margin-top: 1.3rem; }
+#dir-b .art .gaps > li { padding: 0.7rem 0; }
+#dir-b .art .gaps .n { font-family: var(--serif); font-size: 1.15rem; }
+
+/* ------------------------------------------------- direction C refinements */
+
+#dir-c .art { border-color: var(--line); }
+#dir-c .art .bar { padding: 0.6rem 1.1rem; }
+#dir-c .art .bar .name { font-weight: 600; }
+#dir-c .art .bar nav a { font-size: 0.82rem; }
+#dir-c .art .wrap { padding: 2rem 1.7rem 2.1rem; }
+#dir-c .art .btn { background: #ffffff; border-color: #ffffff; color: #0a0b0d; }
+#dir-c .art .btn--quiet { background: transparent; border-color: var(--line-2); color: var(--ink); }
+#dir-c .art .statusline { background: var(--panel); border-color: var(--line); border-left-color: var(--accent); }
+#dir-c .art .chips li { border-radius: 999px; background: var(--panel); border-color: transparent; color: var(--ink-2); }
+#dir-c .art .shot { border-color: var(--line-2); border-radius: 12px; }
+#dir-c .art .glow { box-shadow: 0 24px 60px -30px rgba(139,124,246,0.55); border-radius: 12px; }
+
+/* --------------------------------------------------------------- workbench */
+
+.wb { display: grid; gap: 1.75rem; }
+.wb figure { margin: 0; }
+.wb .shotframe { border: 1px solid #33383f; border-radius: 6px; overflow: hidden; background: #0b0d10; }
+.wb img { display: block; width: 100%; height: auto; }
+.wb figcaption { font-size: 0.875rem; color: #99a2ad; margin-top: 0.55rem; max-width: 62rem; }
+.wb figcaption b { color: #cdd4dc; }
+
+table.cmp { width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-top: 1.25rem; }
+table.cmp th, table.cmp td { text-align: left; vertical-align: top; padding: 0.6rem 0.7rem; border-bottom: 1px solid #262a31; }
+table.cmp thead th { font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #99a2ad; }
+table.cmp td { color: #b9c2cc; }
+table.cmp td:first-child { color: #e8ebef; }
+table.cmp .yes { color: #8fd6a2; }
+table.cmp .no { color: #f0a49c; }
+
+.foot { padding: 2.5rem 0 3.5rem; border-top: 1px solid #262a31; color: #99a2ad; font-size: 0.875rem; }
+.foot p { max-width: 62rem; }
+.foot h2 { font-size: 1rem; color: #e8ebef; margin-bottom: 0.6rem; }
