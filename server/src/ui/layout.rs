@@ -432,6 +432,29 @@ code.tip { color: var(--text-3); margin-left: 0.5rem; font-size: 12px; }
 .check-passed { color: var(--pass); font-weight: 600; }
 .check-failed { color: var(--fail); font-weight: 600; }
 
+/* -- the STPA method-coverage state: three states, never two ------------ */
+/* The same three states, the same meaning and the same tokens as the project-health
+   band: is-clean (pass), has-gaps (fail), and is-unmeasured - the analysis has not been
+   performed, so nothing was measured over. "Nothing to measure" is not "nothing wrong",
+   so the unmeasured state never wears the pass colour and never shows a zero. A check
+   with no subject is MARKED, in words, not rendered as a count. */
+.stpa-state {
+  font-family: var(--font-ui); font-weight: 600;
+  padding: 0.75rem 1rem; border-radius: var(--radius);
+  margin: 0 0 0.75rem;
+}
+.stpa-state.is-unmeasured {
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn);
+  color: var(--warn);
+}
+.stpa-state.has-gaps { color: var(--fail); }
+.stpa-state.is-clean { color: var(--pass); }
+.model-section.is-unmeasured { border-left: 3px solid var(--warn); }
+.check-unmeasured, .cannot-evaluate { color: var(--text-3); }
+.check-unmeasured { font-weight: 500; }
+.cannot-evaluate { margin: 0.35rem 0 0; }
+
 .covered, .uncovered,
 .mw-badge-covered, .mw-badge-uncovered, .mw-badge-unknown,
 .low-confidence {

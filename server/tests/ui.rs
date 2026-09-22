@@ -3821,6 +3821,188 @@ async fn the_stpa_page_is_silent_on_the_correct_model() {
         "a complete analysis must read as complete, got:\n{}",
         html
     );
+    // The clean state is the only state that may be shown, and it says what it measured over,
+    // so a reader can see the coverage is real rather than vacuous.
+    assert!(
+        html.contains("data-mw-stpa-state=\"performed\""),
+        "the performed state must be machine-readable, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("Measured over"),
+        "the clean state must name what it measured over, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("Not started"),
+        "a performed analysis must not read as unstarted, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_stpa_page_says_not_started_when_no_hazard_exists() {
+    // THE DEFECT A REAL USER HIT: "It didn't do the STPA because it didn't have any hazards."
+    // Every relational check is silent over this model, so it used to render as complete. The
+    // page must say the analysis has not started, name the missing stage, and mark the checks
+    // that have no subject as not evaluable - never as clean.
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(&router, "fs", "no-hazards.json", "no hazards").await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/stpa"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    // The state is stated plainly, up front, and is machine-readable.
+    assert!(
+        html.contains("Not started"),
+        "the page must say the analysis has not started, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("data-mw-stpa-state=\"not-started\""),
+        "the state must be machine-readable, got:\n{}",
+        html
+    );
+
+    // The missing stage is named, with what it needs.
+    assert!(
+        html.contains("Hazard identification") && html.contains("no Hazard has been identified"),
+        "the missing stage must be named, got:\n{}",
+        html
+    );
+    assert!(
+        html.contains("computed over Hazard nodes; the model declares none"),
+        "the gap must carry its basis, got:\n{}",
+        html
+    );
+
+    // The hazard check has no subject, so it is not evaluable - not clean.
+    assert!(
+        html.contains("cannot be evaluated yet"),
+        "a check with no subject must say so, got:\n{}",
+        html
+    );
+
+    // The hazard check carries the machine-readable state as well as the words.
+    assert!(
+        html.contains("data-mw-check-hazards=\"not-measurable\""),
+        "the hazard check must not be measurable without a hazard, got:\n{}",
+        html
+    );
+
+    // And nothing on the page may claim completeness over an analysis that has not started.
+    // The stylesheet always contains the class names, so the state is asserted by its token.
+    assert!(
+        !html.contains("data-mw-stpa-state=\"performed\""),
+        "an unstarted analysis must never carry the performed state, got:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("Complete: no missing UCA types"),
+        "zero findings over no hazards is not completeness, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn the_stpa_page_names_every_missing_stage_on_a_model_with_no_stpa_vocabulary() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = server::app(state(dir.path()));
+    router
+        .clone()
+        .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+        .await
+        .unwrap();
+    commit_stpa_fixture(&router, "fs", "no-stpa-elements.json", "untouched").await;
+
+    let response = router
+        .clone()
+        .oneshot(get("/ui/projects/fs/stpa"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+
+    assert!(
+        html.contains("Not started") && html.contains("data-mw-stpa-state=\"not-started\""),
+        "got:\n{}",
+        html
+    );
+    for stage in [
+        "no Loss has been identified",
+        "no Hazard has been identified",
+        "no SystemConstraint has been defined",
+    ] {
+        assert!(
+            html.contains(stage),
+            "the missing stage {stage:?} must be named, got:\n{}",
+            html
+        );
+    }
+    assert!(
+        !html.contains("data-mw-stpa-state=\"performed\"")
+            && !html.contains("Complete: no missing UCA types"),
+        "a model with no STPA vocabulary must never read as complete, got:\n{}",
+        html
+    );
+}
+
+#[tokio::test]
+async fn a_stpa_page_with_zero_findings_and_nothing_measured_can_never_render_a_pass() {
+    // The vacuous case, at the surface a reader actually looks at: zero findings counted in the
+    // four check lists, zero elements measured, and no pass anywhere on the page.
+    for fixture in ["no-hazards.json", "no-stpa-elements.json"] {
+        let dir = tempfile::tempdir().unwrap();
+        let router = server::app(state(dir.path()));
+        router
+            .clone()
+            .oneshot(post("/projects", serde_json::json!({ "name": "fs" })))
+            .await
+            .unwrap();
+        commit_stpa_fixture(&router, "fs", fixture, "vacuous").await;
+
+        let response = router
+            .clone()
+            .oneshot(get("/ui/projects/fs/stpa"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = body_text(response).await;
+
+        assert!(
+            html.contains("Unanalysed control actions")
+                && html.contains("UCAs with no loss scenario"),
+            "{fixture}: the checks are still on the page, got:\n{}",
+            html
+        );
+        assert!(
+            !html.contains("0 findings found."),
+            "{fixture}: the page must not reduce an unstarted analysis to a finding count, got:\n{}",
+            html
+        );
+        assert!(
+            !html.contains("data-mw-stpa-state=\"performed\"")
+                && !html.contains("Complete: no missing UCA types"),
+            "{fixture}: zero findings over nothing measured is not a pass, got:\n{}",
+            html
+        );
+        assert!(
+            html.contains("data-mw-stpa-state=\"not-started\""),
+            "{fixture}: the page must carry the not-started state, got:\n{}",
+            html
+        );
+    }
 }
 
 #[tokio::test]

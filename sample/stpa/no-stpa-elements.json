@@ -1,0 +1,88 @@
+{
+  "okf": "1.0",
+  "project": "Untouched Model (no STPA vocabulary)",
+  "exportedAt": "2026-09-21T00:00:00Z",
+  "summary": {
+    "blocks": 2,
+    "requirements": 1,
+    "interfaces": 0,
+    "signals": 0,
+    "activities": 0,
+    "graphNodes": 3,
+    "graphEdges": 2
+  },
+  "structure": [
+    {
+      "id": "sensor",
+      "name": "Smoke Sensor",
+      "kind": "block",
+      "stereotypes": [],
+      "attributes": [],
+      "documentation": ""
+    },
+    {
+      "id": "panel",
+      "name": "Control Panel",
+      "kind": "block",
+      "stereotypes": [],
+      "attributes": [],
+      "documentation": ""
+    }
+  ],
+  "interfaces": [],
+  "signals": [],
+  "requirements": [
+    {
+      "id": "r1",
+      "name": "The panel must read the sensor",
+      "kind": "requirement",
+      "stereotypes": [],
+      "attributes": [],
+      "documentation": "",
+      "reqId": "R-1",
+      "reqText": "The panel must read the sensor."
+    }
+  ],
+  "activities": [],
+  "stateMachine": {
+    "name": "Untouched",
+    "regions": []
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "sensor",
+        "kind": "block",
+        "name": "Smoke Sensor",
+        "stereotypes": []
+      },
+      {
+        "id": "panel",
+        "kind": "block",
+        "name": "Control Panel",
+        "stereotypes": []
+      },
+      {
+        "id": "r1",
+        "kind": "requirement",
+        "name": "The panel must read the sensor",
+        "stereotypes": []
+      }
+    ],
+    "edges": [
+      {
+        "source": "sensor",
+        "target": "panel",
+        "kind": "dependency",
+        "label": ""
+      },
+      {
+        "source": "panel",
+        "target": "r1",
+        "kind": "dependency",
+        "label": "Satisfy"
+      }
+    ]
+  },
+  "references": []
+}

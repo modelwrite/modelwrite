@@ -7,6 +7,14 @@
 //! the document and every finding names what was computed over and what the model did not carry
 //! - the basis rule, applied to the safety argument.
 //!
+//! ABOVE the five relational checks sits a METHOD-COVERAGE layer. Every relational check
+//! tests a relationship BETWEEN STPA elements, so a model that carries none of them returns
+//! zero findings - and zero findings over nothing used to read as "complete". That is a
+//! vacuous truth, and for a safety engineer it is a false assurance. The coverage layer checks
+//! that each STPA stage was PERFORMED AT ALL before its internal consistency is judged, and
+//! answers with one of three states ([StpaVerdict]): not started (nothing was measured over),
+//! performed with gaps found, and performed with no gaps. Only the last may read as clean.
+//!
 //! The checks are the five named in the STPA design note:
 //!
 //! 1. unanalysed control actions (a ControlAction missing one or more of the four UCA types),
@@ -65,6 +73,70 @@ pub fn uca_type(node: &GraphNode) -> Option<&str> {
         .find(|s| UCA_TYPES.contains(s))
 }
 
+/// One STPA method stage the model has not performed at all.
+///
+/// A relational finding says the analysis contradicts itself. A method gap says the stage was
+/// never run, so the relational check over it has no subject at all. The two are different
+/// failures and must never be collapsed: a check with no subject returns no findings, and no
+/// findings is not a pass.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MethodGap {
+    /// Stable stage token, for a test or a client to key on: "losses", "hazards",
+    /// "system-constraints", "control-structure", "unsafe-control-actions".
+    pub stage: String,
+    /// The stage's human name.
+    pub stage_name: String,
+    /// One line naming what the model does not carry.
+    pub headline: String,
+    /// What the stage is, and what has to exist before the checks below can say anything.
+    pub detail: String,
+    /// What the gap was computed over - the basis rule, applied to the method itself.
+    pub basis: String,
+}
+
+/// The three states of an STPA completeness check.
+///
+/// "Nothing to measure" and "nothing wrong" are different states, and a check must never let
+/// the first read as the second. This is the same distinction the project-health cards draw
+/// between "no commits yet - nothing to measure" and "no gaps".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StpaVerdict {
+    /// The model lacks the elements the method needs, so the stages were never performed and
+    /// nothing was measured over. This is NEVER a pass, however few findings it produces.
+    NotStarted,
+    /// The stages were performed and at least one relational check found a gap.
+    GapsFound,
+    /// Every stage was performed and every relational check is silent. The only state in which
+    /// a clean result may be shown.
+    Performed,
+}
+
+/// Whether one relational check has a subject in the model at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckState {
+    /// The model carries the elements the check relates, so its result is real - including a
+    /// result of zero findings.
+    Measured,
+    /// The model carries none of the check's subject, so the check has nothing to relate. Its
+    /// empty result means nothing was measured, not that nothing is wrong.
+    NotMeasurable,
+}
+
+/// Per-check coverage: which of the relational checks has a subject in this model. A page must
+/// render a [CheckState::NotMeasurable] check as "cannot be evaluated yet", never as clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckCoverage {
+    pub unanalysed_actions: CheckState,
+    pub feedback_loops: CheckState,
+    pub hazards_without_constraints: CheckState,
+    pub constraints_without_elements: CheckState,
+    pub ucas_without_scenarios: CheckState,
+}
+
 /// One control action with incomplete UCA coverage: which of the four types the model did not
 /// carry, and which it did.
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +190,9 @@ pub struct UcaWithoutScenario {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StpaReport {
+    /// The elements the method-coverage layer measures its stages over. Losses are counted here
+    /// for the first time because the performed-and-clean state has to name what it measured.
+    pub losses: usize,
     pub control_actions: usize,
     pub controllers: usize,
     pub controlled_processes: usize,
@@ -126,6 +201,9 @@ pub struct StpaReport {
     pub constraints: usize,
     pub ucas: usize,
     pub loss_scenarios: usize,
+    /// The STPA stages the model has not performed. Empty only when every stage was performed,
+    /// which is what makes [StpaReport::verdict] unable to report a vacuous pass.
+    pub method_gaps: Vec<MethodGap>,
     pub unanalysed_actions: Vec<UnanalysedAction>,
     pub feedback_gaps: Vec<FeedbackGap>,
     pub hazards_without_constraints: Vec<HazardFinding>,
@@ -138,6 +216,7 @@ pub struct StpaReport {
 impl StpaReport {
     fn empty(basis: String) -> Self {
         StpaReport {
+            losses: 0,
             control_actions: 0,
             controllers: 0,
             controlled_processes: 0,
@@ -146,6 +225,7 @@ impl StpaReport {
             constraints: 0,
             ucas: 0,
             loss_scenarios: 0,
+            method_gaps: method_gaps(0, 0, 0, 0, 0, 0),
             unanalysed_actions: Vec::new(),
             feedback_gaps: Vec::new(),
             hazards_without_constraints: Vec::new(),
@@ -155,6 +235,165 @@ impl StpaReport {
             basis,
         }
     }
+
+    /// The three-state verdict, COMPUTED and never stored.
+    ///
+    /// Because it is a function of the method gaps, and the gaps are a function of the elements
+    /// the model carries, there is no way for a report to claim a clean result over an empty
+    /// stage: a model with no STPA elements lands in [StpaVerdict::NotStarted] by construction,
+    /// not by a template happening to check a flag.
+    pub fn verdict(&self) -> StpaVerdict {
+        if !self.method_gaps.is_empty() {
+            StpaVerdict::NotStarted
+        } else if self.total_findings > 0 {
+            StpaVerdict::GapsFound
+        } else {
+            StpaVerdict::Performed
+        }
+    }
+
+    /// Whether the method was performed and every relational check is silent. This is the ONLY
+    /// state in which a clean result may be shown.
+    pub fn is_clean(&self) -> bool {
+        self.verdict() == StpaVerdict::Performed
+    }
+
+    /// Whether the model lacks the elements the method needs, so nothing was measured over.
+    pub fn is_not_started(&self) -> bool {
+        self.verdict() == StpaVerdict::NotStarted
+    }
+
+    /// Per-check coverage: which relational check has a subject in this model. A check with no
+    /// subject returns zero findings, and zero findings over nothing is not a pass.
+    pub fn check_coverage(&self) -> CheckCoverage {
+        let state = |subject: usize| {
+            if subject == 0 {
+                CheckState::NotMeasurable
+            } else {
+                CheckState::Measured
+            }
+        };
+        CheckCoverage {
+            unanalysed_actions: state(self.control_actions),
+            feedback_loops: state(self.controllers),
+            hazards_without_constraints: state(self.hazards),
+            constraints_without_elements: state(self.constraints),
+            ucas_without_scenarios: state(self.ucas),
+        }
+    }
+}
+
+/// The method-coverage checks: the STPA stages that have to be performed before the relational
+/// checks can say anything. A stage is missing when the model carries none of the elements it
+/// produces.
+///
+/// The last two are conditioned on the stage before them. A control structure is only missing
+/// if there are hazards it should have been built to control, and the UCA enumeration is only
+/// missing if there is a control structure to enumerate over - otherwise naming them would
+/// report a stage that the method has not yet reached as though it had been skipped.
+fn method_gaps(
+    losses: usize,
+    hazards: usize,
+    constraints: usize,
+    controllers: usize,
+    control_actions: usize,
+    ucas: usize,
+) -> Vec<MethodGap> {
+    let mut gaps = Vec::new();
+
+    if losses == 0 {
+        gaps.push(MethodGap {
+            stage: "losses".to_string(),
+            stage_name: "Loss identification".to_string(),
+            headline: "no Loss has been identified".to_string(),
+            detail: concat!(
+                "A Loss is something of value that could be lost - what the analysis exists ",
+                "to prevent. Hazards are anchored to losses, so with no Loss the safety ",
+                "argument has nothing to be about."
+            )
+            .to_string(),
+            basis: "computed over Loss nodes; the model declares none".to_string(),
+        });
+    }
+
+    if hazards == 0 {
+        gaps.push(MethodGap {
+            stage: "hazards".to_string(),
+            stage_name: "Hazard identification".to_string(),
+            headline: "no Hazard has been identified".to_string(),
+            detail: concat!(
+                "A Hazard is a system state that, in a worst-case environment, leads to a ",
+                "Loss. Naming the hazards is the first step of STPA, and every check below ",
+                "is a relation between a Hazard and the rest of the model - so with no ",
+                "Hazard those checks have nothing to relate. Returning no findings over no ",
+                "hazards means the analysis has not started, not that it is complete."
+            )
+            .to_string(),
+            basis: "computed over Hazard nodes; the model declares none".to_string(),
+        });
+    }
+
+    if constraints == 0 {
+        gaps.push(MethodGap {
+            stage: "system-constraints".to_string(),
+            stage_name: "System-constraint definition".to_string(),
+            headline: "no SystemConstraint has been defined".to_string(),
+            detail: concat!(
+                "A SystemConstraint is the system-level behaviour that must hold to prevent ",
+                "the hazards. Without one the hazards may be named, but nothing constrains ",
+                "them."
+            )
+            .to_string(),
+            basis: concat!(
+                "computed over requirements carrying the SystemConstraint stereotype; the ",
+                "model declares none"
+            )
+            .to_string(),
+        });
+    }
+
+    if hazards > 0 && controllers == 0 && control_actions == 0 {
+        gaps.push(MethodGap {
+            stage: "control-structure".to_string(),
+            stage_name: "Control-structure modelling".to_string(),
+            headline: "no Controller or ControlAction has been modelled".to_string(),
+            detail: concat!(
+                "STPA analyses how the control of a system can become unsafe, so it needs ",
+                "the control structure the hazards arise in. This model names its hazards ",
+                "but carries no Controller and no ControlAction to control them with."
+            )
+            .to_string(),
+            basis: format!(
+                concat!(
+                    "computed over Controller and ControlAction nodes; the model declares none, ",
+                    "though it declares {} hazard(s)"
+                ),
+                hazards
+            ),
+        });
+    }
+
+    if (controllers > 0 || control_actions > 0) && ucas == 0 {
+        gaps.push(MethodGap {
+            stage: "unsafe-control-actions".to_string(),
+            stage_name: "Unsafe-control-action identification".to_string(),
+            headline: "no UnsafeControlAction has been identified".to_string(),
+            detail: concat!(
+                "The model carries a control structure but no UnsafeControlAction. ",
+                "Enumerating how each control action can be unsafe - not provided, ",
+                "provided, wrong timing or order, stopped too soon or applied too long - is ",
+                "the step that turns a control structure into an analysis."
+            )
+            .to_string(),
+            basis: concat!(
+                "computed over UnsafeControlAction nodes; the model declares none, though it ",
+                "declares a control structure"
+            )
+            .to_string(),
+        });
+    }
+
+    gaps
 }
 
 /// Count the graph nodes carrying a stereotype.
@@ -201,19 +440,41 @@ pub fn stpa_report(root: &OkfRoot) -> StpaReport {
         graph.edges.len()
     );
 
+    // The elements every stage is measured over, read once so the counts the method-coverage
+    // layer judges and the counts the report publishes can never disagree.
+    let losses = count(&graph.nodes, STEREOTYPE_LOSS);
+    let control_actions = count(&graph.nodes, STEREOTYPE_CONTROL_ACTION);
+    let controllers = count(&graph.nodes, STEREOTYPE_CONTROLLER);
+    let hazards = count(&graph.nodes, STEREOTYPE_HAZARD);
+    let constraints = root
+        .requirements
+        .iter()
+        .filter(|r| is_requirement_stereotype(r, STEREOTYPE_CONSTRAINT))
+        .count();
+    let ucas = count(&graph.nodes, STEREOTYPE_UCA);
+
+    // The method-coverage layer: which stages were performed at all, judged before the
+    // relational checks below judge how consistently.
+    let method_gaps = method_gaps(
+        losses,
+        hazards,
+        constraints,
+        controllers,
+        control_actions,
+        ucas,
+    );
+
     StpaReport {
-        control_actions: count(&graph.nodes, STEREOTYPE_CONTROL_ACTION),
-        controllers: count(&graph.nodes, STEREOTYPE_CONTROLLER),
+        losses,
+        control_actions,
+        controllers,
         controlled_processes: count(&graph.nodes, STEREOTYPE_PROCESS),
         feedback: count(&graph.nodes, STEREOTYPE_FEEDBACK),
-        hazards: count(&graph.nodes, STEREOTYPE_HAZARD),
-        constraints: root
-            .requirements
-            .iter()
-            .filter(|r| is_requirement_stereotype(r, STEREOTYPE_CONSTRAINT))
-            .count(),
-        ucas: count(&graph.nodes, STEREOTYPE_UCA),
+        hazards,
+        constraints,
+        ucas,
         loss_scenarios: count(&graph.nodes, STEREOTYPE_LOSS_SCENARIO),
+        method_gaps,
         unanalysed_actions,
         feedback_gaps,
         hazards_without_constraints,
@@ -521,6 +782,49 @@ mod tests {
         serde_json::from_str(&text).expect("fixture must parse")
     }
 
+    /// The stage tokens of a report's method gaps, in the order the report names them.
+    fn stages(report: &StpaReport) -> Vec<&str> {
+        report
+            .method_gaps
+            .iter()
+            .map(|gap| gap.stage.as_str())
+            .collect()
+    }
+
+    /// A minimal model: graph nodes carrying the given stereotypes, graph edges naming their
+    /// endpoints, and requirements carrying theirs. Every field the report reads is exercised.
+    fn model(
+        nodes: &[(&str, &[&str])],
+        edges: &[(&str, &str, &str, &str)],
+        requirements: &[(&str, &[&str])],
+    ) -> OkfRoot {
+        let graph_nodes: Vec<serde_json::Value> = nodes
+            .iter()
+            .map(|(id, stereotypes)| {
+                serde_json::json!({ "id": id, "kind": "block", "name": id, "stereotypes": stereotypes })
+            })
+            .collect();
+        let graph_edges: Vec<serde_json::Value> = edges
+            .iter()
+            .map(|(source, target, kind, label)| {
+                serde_json::json!({ "source": source, "target": target, "kind": kind, "label": label })
+            })
+            .collect();
+        let reqs: Vec<serde_json::Value> = requirements
+            .iter()
+            .map(|(id, stereotypes)| {
+                serde_json::json!({ "id": id, "name": id, "kind": "requirement", "stereotypes": stereotypes })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "project": "test",
+            "structure": graph_nodes,
+            "requirements": reqs,
+            "graph": { "nodes": graph_nodes, "edges": graph_edges },
+        }))
+        .expect("test model must parse")
+    }
+
     #[test]
     fn defective_model_fires_every_check() {
         let report = stpa_report(&load("fire-suppression-defective.json"));
@@ -560,6 +864,11 @@ mod tests {
 
         assert_eq!(report.total_findings, 5);
         assert!(report.basis.contains("does not perform STPA"));
+
+        // Every stage was performed, so the gaps are real relational findings - the state where
+        // a non-zero finding count is the honest thing to show.
+        assert!(report.method_gaps.is_empty());
+        assert_eq!(report.verdict(), StpaVerdict::GapsFound);
     }
 
     #[test]
@@ -574,14 +883,219 @@ mod tests {
         assert_eq!(report.constraints_without_elements.len(), 0);
         assert_eq!(report.ucas_without_scenarios.len(), 0);
         assert_eq!(report.total_findings, 0);
+
+        // The ONLY state in which a clean result may be shown: every stage was performed, and
+        // the report carries the counts that prove the coverage was real.
+        assert!(report.method_gaps.is_empty());
+        assert_eq!(report.verdict(), StpaVerdict::Performed);
+        assert!(report.is_clean());
+        assert_eq!(report.losses, 1);
+        assert!(report.hazards > 0 && report.constraints > 0 && report.control_actions > 0);
+        let coverage = report.check_coverage();
+        assert_eq!(coverage.unanalysed_actions, CheckState::Measured);
+        assert_eq!(coverage.feedback_loops, CheckState::Measured);
+        assert_eq!(coverage.hazards_without_constraints, CheckState::Measured);
+        assert_eq!(coverage.constraints_without_elements, CheckState::Measured);
+        assert_eq!(coverage.ucas_without_scenarios, CheckState::Measured);
     }
 
     #[test]
-    fn a_model_without_a_graph_is_not_a_finding() {
+    fn a_model_without_a_graph_is_not_measured_rather_than_clean() {
         let root: OkfRoot = serde_json::from_str(r#"{"project":"empty"}"#).unwrap();
         let report = stpa_report(&root);
         assert_eq!(report.total_findings, 0);
         assert_eq!(report.control_actions, 0);
         assert!(report.basis.contains("no graph"));
+        // Zero findings over a document with no graph at all is not a pass.
+        assert_eq!(report.verdict(), StpaVerdict::NotStarted);
+        assert!(!report.is_clean());
+        assert!(!report.method_gaps.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The method-coverage layer. Every check above is RELATIONAL: it tests a relationship
+    // BETWEEN STPA elements. A model that carries no elements therefore returns zero findings,
+    // and zero findings used to read as "complete". These tests pin the three states that make
+    // that vacuous pass impossible.
+    // ---------------------------------------------------------------------------------------
+
+    #[test]
+    fn a_model_with_no_hazards_is_not_started_not_clean() {
+        // THE USER'S CASE. The model carries losses, a SystemConstraint, a control structure,
+        // all four UCAs and all four loss scenarios - and no Hazard. Every relational check is
+        // silent, so the old report said "complete". It must now say "not started".
+        let report = stpa_report(&load("no-hazards.json"));
+
+        assert_eq!(
+            report.total_findings, 0,
+            "the relational checks are all silent"
+        );
+        assert_eq!(report.hazards, 0);
+        assert!(report.losses > 0 && report.control_actions > 0 && report.ucas > 0);
+
+        assert_eq!(report.verdict(), StpaVerdict::NotStarted);
+        assert!(
+            !report.is_clean(),
+            "zero findings over no hazards is not clean"
+        );
+
+        assert_eq!(stages(&report), vec!["hazards"]);
+        let gap = &report.method_gaps[0];
+        assert_eq!(gap.stage, "hazards");
+        assert_eq!(gap.stage_name, "Hazard identification");
+        assert!(
+            gap.headline.contains("Hazard"),
+            "the missing stage is named: {}",
+            gap.headline
+        );
+        assert!(
+            gap.basis.contains("declares none"),
+            "the gap says what it was computed over: {}",
+            gap.basis
+        );
+    }
+
+    #[test]
+    fn a_model_with_no_stpa_elements_names_every_foundational_stage() {
+        let report = stpa_report(&load("no-stpa-elements.json"));
+        assert_eq!(report.total_findings, 0);
+        assert_eq!(report.verdict(), StpaVerdict::NotStarted);
+        assert_eq!(
+            stages(&report),
+            vec!["losses", "hazards", "system-constraints"]
+        );
+    }
+
+    #[test]
+    fn each_method_stage_is_named_when_it_alone_is_missing() {
+        // Stage 1: everything but a Loss.
+        let no_losses = stpa_report(&model(
+            &[
+                ("haz-1", &["Hazard"]),
+                ("controller", &["Controller"]),
+                ("ca", &["ControlAction"]),
+                ("uca", &["UnsafeControlAction", "not-provided"]),
+            ],
+            &[
+                ("controller", "ca", "triggers", ""),
+                ("uca", "ca", "reference", ""),
+            ],
+            &[("sc-1", &["SystemConstraint"])],
+        ));
+        assert_eq!(stages(&no_losses), vec!["losses"]);
+        assert_eq!(no_losses.verdict(), StpaVerdict::NotStarted);
+
+        // Stage 3: everything but a SystemConstraint.
+        let no_constraints = stpa_report(&model(
+            &[
+                ("loss-1", &["Loss"]),
+                ("haz-1", &["Hazard"]),
+                ("controller", &["Controller"]),
+                ("ca", &["ControlAction"]),
+                ("uca", &["UnsafeControlAction", "not-provided"]),
+            ],
+            &[
+                ("controller", "ca", "triggers", ""),
+                ("uca", "ca", "reference", ""),
+            ],
+            &[],
+        ));
+        assert_eq!(stages(&no_constraints), vec!["system-constraints"]);
+
+        // Stage 4: hazards, but nothing to control them with.
+        let no_structure = stpa_report(&model(
+            &[("loss-1", &["Loss"]), ("haz-1", &["Hazard"])],
+            &[],
+            &[("sc-1", &["SystemConstraint"])],
+        ));
+        assert_eq!(stages(&no_structure), vec!["control-structure"]);
+
+        // Stage 5: a control structure, but the UCA enumeration was never done.
+        let no_ucas = stpa_report(&model(
+            &[
+                ("loss-1", &["Loss"]),
+                ("haz-1", &["Hazard"]),
+                ("controller", &["Controller"]),
+                ("ca", &["ControlAction"]),
+            ],
+            &[("controller", "ca", "triggers", "")],
+            &[("sc-1", &["SystemConstraint"])],
+        ));
+        assert_eq!(stages(&no_ucas), vec!["unsafe-control-actions"]);
+    }
+
+    #[test]
+    fn a_vacuous_report_can_never_read_as_a_pass() {
+        // The vacuous case is structurally impossible, not handled by a template: the verdict is
+        // a function of the method gaps, and the method gaps are a function of the elements the
+        // model carries. Silence over nothing lands in NotStarted by construction.
+        for name in ["no-hazards.json", "no-stpa-elements.json"] {
+            let report = stpa_report(&load(name));
+            assert_eq!(report.total_findings, 0, "{name}: the checks are silent");
+            assert_ne!(
+                report.verdict(),
+                StpaVerdict::Performed,
+                "{name}: zero findings AND zero elements measured must not be a pass"
+            );
+            assert_eq!(report.verdict(), StpaVerdict::NotStarted, "{name}");
+            assert!(!report.is_clean(), "{name}");
+            assert!(
+                !report.method_gaps.is_empty(),
+                "{name}: a missing stage must be named"
+            );
+        }
+
+        // The implication that makes it structural, read over every fixture: Performed is only
+        // reachable when every stage was measured over real elements.
+        for name in [
+            "no-hazards.json",
+            "no-stpa-elements.json",
+            "fire-suppression-defective.json",
+            "fire-suppression-correct.json",
+        ] {
+            let report = stpa_report(&load(name));
+            if report.verdict() == StpaVerdict::Performed {
+                assert!(
+                    report.losses > 0
+                        && report.hazards > 0
+                        && report.constraints > 0
+                        && report.controllers > 0
+                        && report.control_actions > 0
+                        && report.ucas > 0,
+                    "{name}: Performed over an unmeasured stage is impossible"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_check_with_no_subject_is_not_measurable_rather_than_clean() {
+        // The hazard check has no subject in the no-hazards model: its empty result is
+        // "nothing to measure", never "nothing wrong". Every other check does have a subject.
+        let report = stpa_report(&load("no-hazards.json"));
+        let coverage = report.check_coverage();
+        assert_eq!(
+            coverage.hazards_without_constraints,
+            CheckState::NotMeasurable
+        );
+        assert_eq!(coverage.unanalysed_actions, CheckState::Measured);
+        assert_eq!(coverage.feedback_loops, CheckState::Measured);
+        assert_eq!(coverage.constraints_without_elements, CheckState::Measured);
+        assert_eq!(coverage.ucas_without_scenarios, CheckState::Measured);
+
+        // A model with nothing at all has no subject for any of the four document checks.
+        let blank = stpa_report(&load("no-stpa-elements.json"));
+        let coverage = blank.check_coverage();
+        assert_eq!(coverage.unanalysed_actions, CheckState::NotMeasurable);
+        assert_eq!(coverage.feedback_loops, CheckState::NotMeasurable);
+        assert_eq!(
+            coverage.hazards_without_constraints,
+            CheckState::NotMeasurable
+        );
+        assert_eq!(
+            coverage.constraints_without_elements,
+            CheckState::NotMeasurable
+        );
+        assert_eq!(coverage.ucas_without_scenarios, CheckState::NotMeasurable);
     }
 }

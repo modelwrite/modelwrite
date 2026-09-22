@@ -62,6 +62,31 @@ Controller → ControlAction → ControlledProcess → Feedback → Controller, 
 5. **Trend across baselines** — the same counts per commit on a branch, computed directly (no
    cached trend path).
 
+## Method coverage: three states, never two
+
+Every check above is **relational** — it tests a relationship BETWEEN STPA elements. A model
+that carries none of them therefore returns no findings, and no findings used to read as
+"complete". That is a vacuous truth, and for a safety engineer it is a false assurance: a check
+that passes because the thing it checks is not there.
+
+Above the relational checks sits a method-coverage layer that verifies each STPA stage was
+**performed at all**, and answers with one of three states (`StpaVerdict` in
+`engine/graph/src/stpa.rs`):
+
+- **Not started** — the model lacks the elements the method needs. The page names the missing
+  stage (Losses, Hazards, SystemConstraints, the control structure, the UCA enumeration) and
+  marks each check that has no subject as "cannot be evaluated yet". It never renders a bare
+  zero and never wears the pass state.
+- **Started, gaps found** — the stages were performed; the relational findings are named.
+- **Performed, no gaps** — the only state in which a clean result is shown, and it names the
+  counts it was computed over (losses, hazards, constraints, controllers, control actions,
+  UCAs, loss scenarios) so a reader can see the coverage is real.
+
+The verdict is computed, never stored: it is a function of the method gaps, and the gaps are a
+function of the elements the model carries, so no report can claim a clean result over an empty
+stage. Worked fixtures: `sample/stpa/no-hazards.json` (a complete model with no Hazard — zero
+relational findings, reported as **not started**) and `sample/stpa/no-stpa-elements.json` (a
+model with no STPA vocabulary at all).
 The checks live in `engine/graph/src/stpa.rs`; the screen is `server/src/ui/stpa.rs` at
 `/ui/projects/:project/stpa`; the control-structure view is a third diagram type
 (`?view=control`). Worked fixtures: `sample/stpa/fire-suppression-defective.json` (each check

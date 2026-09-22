@@ -10,13 +10,24 @@
 //!
 //! The page reads through the SAME identity, Read-permission and project-scope decisions as the
 //! JSON handlers, in the SAME order, so the workbench can never be a weaker path to the data.
+//!
+//! The page renders THREE states, never two, following the same distinction the project-health
+//! cards draw between "no commits yet - nothing to measure" and "no gaps":
+//!
+//! * NOT STARTED - the model lacks the elements the method needs, so nothing was measured over.
+//!   The page names the missing STPA stage up front and marks each check that has no subject as
+//!   "cannot be evaluated yet". It can never render a bare zero, because a check that passes
+//!   because the thing it checks is not there is the worst failure this product can produce.
+//! * STARTED, GAPS FOUND - the stages were performed; the relational findings are named.
+//! * PERFORMED, NO GAPS - the only state in which a clean result is shown, and it names the
+//!   counts it was computed over so the reader can see the coverage is real, not vacuous.
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use maud::{html, Markup};
 
-use graph::stpa::{stpa_report, StpaReport};
+use graph::stpa::{stpa_report, CheckState, StpaReport, StpaVerdict};
 use okf::types::OkfRoot;
 
 use crate::api::{load_model, ApiState};
@@ -138,16 +149,116 @@ fn trend_points(
     points
 }
 
-/// Whether the model declares any STPA vocabulary at all.
-fn has_stpa_content(report: &StpaReport) -> bool {
-    report.controllers > 0
-        || report.controlled_processes > 0
-        || report.control_actions > 0
-        || report.feedback > 0
-        || report.hazards > 0
-        || report.constraints > 0
-        || report.ucas > 0
-        || report.loss_scenarios > 0
+/// The count in a check heading, or the honest absence of one: a check whose subject the model
+/// does not carry cannot be evaluated, and must never show a zero that reads as "none found".
+///
+/// The state is also carried as a `data-mw-check` attribute on the section, so a test - or a
+/// client - can read the machine answer rather than parse prose. This is the same device the
+/// project health band uses for its counts.
+fn check_count(count: usize, state: CheckState) -> Markup {
+    match state {
+        CheckState::Measured => html! {
+            "(" (count) ")"
+        },
+        CheckState::NotMeasurable => html! {
+            span class="check-unmeasured" { "— cannot be evaluated yet" }
+        },
+    }
+}
+
+/// The stable token for a check state, for the `data-mw-check` attribute.
+fn check_state_token(state: CheckState) -> &'static str {
+    match state {
+        CheckState::Measured => "measured",
+        CheckState::NotMeasurable => "not-measurable",
+    }
+}
+
+/// Why a check cannot be evaluated: its subject is absent, so the check has nothing to relate.
+/// The wording refuses the pass reading explicitly, because an empty list is exactly what a
+/// safety engineer would otherwise take as "no problems found".
+fn cannot_evaluate(subject: &str) -> Markup {
+    html! {
+        p class="cannot-evaluate" {
+            "cannot be evaluated yet — this model declares no " (subject) ", so the check has "
+            "nothing to relate. That is not a pass: it means the stage that produces "
+            (subject) " has not been performed."
+        }
+    }
+}
+
+/// The one place the three states are stated, as a band above the checks.
+///
+/// "Not started" must never wear the pass colour and must never be reduced to a finding count:
+/// the model it describes produced no findings precisely because there was nothing to check.
+fn state_band(report: &StpaReport) -> Markup {
+    match report.verdict() {
+        StpaVerdict::NotStarted => {
+            let headlines: Vec<&str> = report
+                .method_gaps
+                .iter()
+                .map(|gap| gap.headline.as_str())
+                .collect();
+            html! {
+                p class="stpa-state is-unmeasured" data-mw-stpa-state="not-started" {
+                    strong { "Not started" }
+                    " — the STPA analysis has not been performed on this model: "
+                    (headlines.join("; "))
+                    ". The checks below reported no findings because they had nothing to "
+                    "measure, which is not the same as finding nothing wrong."
+                }
+            }
+        }
+        StpaVerdict::GapsFound => html! {
+            p class="stpa-state has-gaps check-failed" data-mw-stpa-state="gaps-found" {
+                (report.total_findings) " finding" @if report.total_findings != 1 { "s" } " found."
+            }
+        },
+        StpaVerdict::Performed => html! {
+            p class="stpa-state is-clean check-passed" data-mw-stpa-state="performed" {
+                "Complete: no missing UCA types, no open control loops, every hazard constrained, "
+                "every constraint reaching the design, every UCA explained."
+            }
+            p class="meta" data-mw-stpa-measured="true" {
+                "Measured over " (report.losses) " loss" @if report.losses != 1 { "es" }
+                " · " (report.hazards) " hazard" @if report.hazards != 1 { "s" }
+                " · " (report.constraints) " SystemConstraint" @if report.constraints != 1 { "s" }
+                " · " (report.controllers) " controller" @if report.controllers != 1 { "s" }
+                " · " (report.control_actions) " control action" @if report.control_actions != 1 { "s" }
+                " · " (report.ucas) " UCA" @if report.ucas != 1 { "s" }
+                " · " (report.loss_scenarios) " loss scenario" @if report.loss_scenarios != 1 { "s" }
+                " — the coverage this clean result was actually computed over."
+            }
+        },
+    }
+}
+
+/// The not-started state, stated in full: which STPA stages were never performed, what each one
+/// is, and what has to exist before the checks below can say anything at all.
+fn not_started_section(report: &StpaReport) -> Markup {
+    html! {
+        section class="model-section is-unmeasured" id="not-started" {
+            h2 { "The analysis has not started" }
+            p {
+                "Every completeness check below is a RELATION BETWEEN STPA elements: a hazard and "
+                "the constraint that mitigates it, a control action and the unsafe control actions "
+                "enumerated for it, a UCA and its loss scenario. Where a stage was never performed "
+                "the check over it has nothing to relate, so it returns no findings. No findings "
+                "here is not a clean result — it is an unstarted analysis."
+            }
+            p class="meta" { "These STPA stages have not been performed on this model:" }
+            ul class="gaps" {
+                @for gap in &report.method_gaps {
+                    li {
+                        strong { (gap.stage_name) }
+                        " — " (gap.headline)
+                        p class="meta" { (gap.detail) }
+                        p class="meta" { (gap.basis) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The honest boundary, stated once and loudly: the analysis is authored, the check is computed.
@@ -187,7 +298,8 @@ fn stpa_markup(
         section class="model-section" id="vocabulary" {
             h2 { "The control structure" }
             p class="meta" {
-                (report.controllers) " controller" @if report.controllers != 1 { "s" }
+                (report.losses) " loss" @if report.losses != 1 { "es" }
+                " · " (report.controllers) " controller" @if report.controllers != 1 { "s" }
                 " · " (report.controlled_processes) " controlled process" @if report.controlled_processes != 1 { "es" }
                 " · " (report.control_actions) " control action" @if report.control_actions != 1 { "s" }
                 " · " (report.feedback) " feedback signal" @if report.feedback != 1 { "s" }
@@ -199,15 +311,11 @@ fn stpa_markup(
             p class="meta" { (report.basis) }
         }
 
-        @if !has_stpa_content(&report) {
-            p class="empty-state" {
-                "This model declares no STPA vocabulary, so there is nothing to check. See the "
-                "domain pack at " code { "sample/stpa/stpa-vocabulary.json" } " for the convention."
-            }
-        } @else if report.total_findings == 0 {
-            p class="check-passed" { "Complete: no missing UCA types, no open control loops, every hazard constrained, every constraint reaching the design, every UCA explained." }
-        } @else {
-            p class="check-failed" { (report.total_findings) " finding" @if report.total_findings != 1 { "s" } " found." }
+        // The THREE-STATE verdict. A model that lacks the method elements reports no findings,
+        // and that must never be rendered as a clean result.
+        (state_band(&report))
+        @if report.is_not_started() {
+            (not_started_section(&report))
         }
 
         (unanalysed_section(&report))
@@ -234,14 +342,20 @@ fn stpa_markup(
 
 /// Check 1: every ControlAction must carry a UCA for each of the four types.
 fn unanalysed_section(report: &StpaReport) -> Markup {
+    let coverage = report.check_coverage();
     html! {
-        section class="model-section" id="unanalysed" {
-            h2 { "Unanalysed control actions (" (report.unanalysed_actions.len()) ")" }
+        section class="model-section" id="unanalysed" data-mw-check=(check_state_token(coverage.unanalysed_actions)) {
+            h2 {
+                "Unanalysed control actions "
+                (check_count(report.unanalysed_actions.len(), coverage.unanalysed_actions))
+            }
             p class="meta" {
                 "Every ControlAction must carry an UnsafeControlAction for each of the four types: "
                 "not-provided, provided, wrong-timing-or-order, stopped-too-soon-or-applied-too-long."
             }
-            @if report.unanalysed_actions.is_empty() {
+            @if coverage.unanalysed_actions == CheckState::NotMeasurable {
+                (cannot_evaluate("ControlAction"))
+            } @else if report.unanalysed_actions.is_empty() {
                 p { "None — every control action is analysed across the four types." }
             } @else {
                 ul class="gaps" {
@@ -261,14 +375,20 @@ fn unanalysed_section(report: &StpaReport) -> Markup {
 
 /// Check 2: a Controller with a ControlAction and no feedback path.
 fn feedback_section(report: &StpaReport) -> Markup {
+    let coverage = report.check_coverage();
     html! {
-        section class="model-section" id="feedback" {
-            h2 { "Control loops with no feedback (" (report.feedback_gaps.len()) ")" }
+        section class="model-section" id="feedback" data-mw-check=(check_state_token(coverage.feedback_loops)) {
+            h2 {
+                "Control loops with no feedback "
+                (check_count(report.feedback_gaps.len(), coverage.feedback_loops))
+            }
             p class="meta" {
                 "A Controller with a ControlAction and no Feedback path is the classic STPA defect - "
                 "structurally the same shape as the orphan/isolation the health view reports."
             }
-            @if report.feedback_gaps.is_empty() {
+            @if coverage.feedback_loops == CheckState::NotMeasurable {
+                (cannot_evaluate("Controller"))
+            } @else if report.feedback_gaps.is_empty() {
                 p { "None — every controller with a control action has a feedback path." }
             } @else {
                 ul class="gaps" {
@@ -288,17 +408,30 @@ fn feedback_section(report: &StpaReport) -> Markup {
 
 /// Check 3: hazards with no constraint, and constraints reaching no element.
 fn hazard_constraint_section(report: &StpaReport) -> Markup {
+    let coverage = report.check_coverage();
     html! {
-        section class="model-section" id="hazards-constraints" {
+        section class="model-section" id="hazards-constraints"
+            data-mw-check-hazards=(check_state_token(coverage.hazards_without_constraints))
+            data-mw-check-constraints=(check_state_token(coverage.constraints_without_elements)) {
             h2 {
-                "Hazards with no constraint (" (report.hazards_without_constraints.len()) ") "
-                "· constraints reaching no element (" (report.constraints_without_elements.len()) ")"
+                "Hazards with no constraint "
+                (check_count(
+                    report.hazards_without_constraints.len(),
+                    coverage.hazards_without_constraints,
+                ))
+                " · constraints reaching no element "
+                (check_count(
+                    report.constraints_without_elements.len(),
+                    coverage.constraints_without_elements,
+                ))
             }
             p class="meta" {
                 "Every hazard the analysis names must be mitigated by a constraint; every constraint "
                 "must reach the design - otherwise it is an aspiration."
             }
-            @if report.hazards_without_constraints.is_empty() {
+            @if coverage.hazards_without_constraints == CheckState::NotMeasurable {
+                (cannot_evaluate("Hazard"))
+            } @else if report.hazards_without_constraints.is_empty() {
                 p { "None — every hazard is mitigated by a SystemConstraint." }
             } @else {
                 ul class="gaps" {
@@ -310,7 +443,9 @@ fn hazard_constraint_section(report: &StpaReport) -> Markup {
                     }
                 }
             }
-            @if report.constraints_without_elements.is_empty() {
+            @if coverage.constraints_without_elements == CheckState::NotMeasurable {
+                (cannot_evaluate("SystemConstraint"))
+            } @else if report.constraints_without_elements.is_empty() {
                 p { "None — every SystemConstraint reaches the design." }
             } @else {
                 ul class="gaps" {
@@ -328,14 +463,20 @@ fn hazard_constraint_section(report: &StpaReport) -> Markup {
 
 /// Check 4: UCAs with no LossScenario.
 fn uca_scenario_section(report: &StpaReport) -> Markup {
+    let coverage = report.check_coverage();
     html! {
-        section class="model-section" id="uca-scenarios" {
-            h2 { "UCAs with no loss scenario (" (report.ucas_without_scenarios.len()) ")" }
+        section class="model-section" id="uca-scenarios" data-mw-check=(check_state_token(coverage.ucas_without_scenarios)) {
+            h2 {
+                "UCAs with no loss scenario "
+                (check_count(report.ucas_without_scenarios.len(), coverage.ucas_without_scenarios))
+            }
             p class="meta" {
                 "A claim that a UCA could happen, without a causal scenario, is an assertion — a "
                 "UCA must be explained by a LossScenario."
             }
-            @if report.ucas_without_scenarios.is_empty() {
+            @if coverage.ucas_without_scenarios == CheckState::NotMeasurable {
+                (cannot_evaluate("UnsafeControlAction"))
+            } @else if report.ucas_without_scenarios.is_empty() {
                 p { "None — every UCA is explained by a loss scenario." }
             } @else {
                 ul class="gaps" {
