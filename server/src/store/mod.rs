@@ -11,6 +11,11 @@ pub mod trials;
 
 pub use trials::{TrialRegistry, TrialStoreResolver};
 
+/// The analysis-run record lives with the frame that produces it ([crate::analyses]) and is
+/// re-exported here, so the store, the pages and the tests name ONE type - exactly as they do
+/// for [GateRun].
+pub use crate::analyses::AnalysisRun;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub name: String,
@@ -643,6 +648,28 @@ pub trait Store: Send + Sync {
     /// an earlier verdict: a verdict that followed a branch would be a claim about a model
     /// that was never checked.
     fn gate_runs_for_commit(&self, project: &str, hash: &str) -> Result<Vec<GateRun>, StoreError>;
+
+    /// Record one analysis run: the definition it ran, the commit it examined, the engine
+    /// version it was computed at, and the findings it measured. The audit row, when supplied,
+    /// rides the same transaction, so a durable run always has its record and vice versa.
+    ///
+    /// The run's id is a content address over everything that defines it (project, definition
+    /// version, commit, engine version, evidence hash), so re-running an unchanged analysis
+    /// over an unchanged model is a no-op that stores the SAME record rather than a second
+    /// one. That is ruling 1 of the analyses design - an analysis is a record, not a side
+    /// effect - held in storage rather than only in the code that produces it.
+    fn record_analysis_run(
+        &self,
+        run: &AnalysisRun,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError>;
+
+    /// One recorded analysis run by its address, if this project has it.
+    fn analysis_run(&self, project: &str, id: &str) -> Result<Option<AnalysisRun>, StoreError>;
+
+    /// Every analysis run recorded for this project, oldest first (insertion order), which is
+    /// the library read the analyses pages render and diff from.
+    fn analysis_runs(&self, project: &str) -> Result<Vec<AnalysisRun>, StoreError>;
 
     /// Record an import's loss report and round-trip diff, keyed by (project, artifact_hash).
     /// This runs BEFORE the commit is attempted, so a refused import still has its report

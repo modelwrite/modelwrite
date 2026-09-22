@@ -1489,6 +1489,40 @@ details.onboard-losses > summary {
 }
 details.onboard-losses > summary:hover { color: var(--accent-strong); }
 
+/* -- analyses: the library, one run, and the diff ------------------------- */
+/* Every colour here is one of the tokens above; this block introduces no new
+   token, so the analyses pages wear the same identity as the rest of the
+   product. The severity chips reuse .covered / .uncovered / .mw-badge-unknown
+   rather than defining a fourth way to say gap, clean and unmeasured. */
+
+.analysis-run { display: block; }
+.analysis-tallies { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.35rem 0 0.2rem; }
+ul.findings { list-style: none; margin: 0; padding: 0; }
+ul.findings li.finding {
+  border: 1px solid var(--border-muted);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.4rem;
+  background: var(--surface);
+}
+.finding-subject { font-size: 13px; color: var(--text); }
+.finding-id {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-3);
+  margin: 0.2rem 0 0; overflow-wrap: anywhere;
+}
+.finding-statement { margin: 0.2rem 0 0; font-size: 13px; color: var(--text); }
+.finding-evidence { margin-top: 0.3rem; }
+.finding-evidence summary { font-size: 12px; color: var(--text-2); cursor: pointer; }
+.finding-evidence summary:hover { color: var(--accent-strong); }
+.finding-evidence pre {
+  margin: 0.3rem 0 0; padding: 0.5rem 0.7rem;
+  background: var(--surface-1); border: 1px solid var(--border-muted);
+  border-radius: var(--radius); font-size: 11.5px; overflow: auto;
+}
+.analysis-summary { font-size: 14px; font-weight: 600; color: var(--text); margin: 0.5rem 0 1rem; }
+.diff-section { margin: 0.75rem 0 1.25rem; }
+
 "#;
 
 pub fn html_response(status: StatusCode, markup: Markup) -> Response {
@@ -1501,6 +1535,7 @@ pub fn html_response(status: StatusCode, markup: Markup) -> Response {
 pub const SECTIONS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("health", "Health"),
+    ("analyses", "Analyses"),
     ("stpa", "STPA"),
     ("structure", "Structure"),
     ("composition", "Composition"),

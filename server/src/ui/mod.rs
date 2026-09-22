@@ -17,6 +17,7 @@ use axum::body::Body;
 use axum::http::{header, StatusCode};
 use axum::response::Response;
 
+pub mod analyses;
 pub mod assist;
 pub mod composition;
 pub mod create;

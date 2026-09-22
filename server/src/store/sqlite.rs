@@ -4,8 +4,9 @@ use std::path::Path;
 use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
 
 use super::{
-    now_epoch, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun, ImportProvenance,
-    ImportRecord, Lock, Project, ProposalDecision, ProposalRecord, Store, StoreError,
+    now_epoch, AnalysisRun, AuditEntry, Commit, CommitGuard, CommitProvenance, GateRun,
+    ImportProvenance, ImportRecord, Lock, Project, ProposalDecision, ProposalRecord, Store,
+    StoreError,
 };
 
 const SCHEMA: &str = "
@@ -45,6 +46,28 @@ CREATE TABLE IF NOT EXISTS gate_runs (
     evidence TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+-- One analysis run: the definition it ran (as JSON, naming the engine computations it used),
+-- the commit it examined, the engine version it was computed at, and the findings it measured.
+-- The id is the run's content address, so UNIQUE (project, id) is what makes re-running the
+-- same analysis over the same commit the SAME record rather than a second one. seq is the
+-- insertion order the library lists runs by; it is deliberately NOT the id, because the id is
+-- a hash and a library is read in time order.
+CREATE TABLE IF NOT EXISTS analysis_runs (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
+    engine_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    run_by TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    findings TEXT NOT NULL,
+    measured INTEGER NOT NULL,
+    evidence_hash TEXT NOT NULL,
+    UNIQUE (project, id)
+);
+CREATE INDEX IF NOT EXISTS analysis_runs_by_project ON analysis_runs (project);
 CREATE TABLE IF NOT EXISTS imports (
     artifact_hash TEXT NOT NULL,
     project TEXT NOT NULL,
@@ -229,6 +252,67 @@ type ProposalRow = (
     Option<String>,
     String,
 );
+
+/// One analysis-run row exactly as stored: id, project, branch, commit_hash, engine_version,
+/// created_at, run_by, definition, findings, measured, evidence_hash.
+type AnalysisRunRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+);
+
+/// Parse an analysis-run row into its record. The definition and the findings are read back
+/// from the bytes they were stored as - the findings are the exact canonical bytes the
+/// evidence hash covers - and a column that cannot be parsed is reported as corruption rather
+/// than silently defaulted, which would make a run cite an evidence hash over other bytes.
+/// Shared by [Store::analysis_run] and [Store::analysis_runs] so the two reads cannot drift.
+fn analysis_run_from_row(row: AnalysisRunRow) -> Result<AnalysisRun, StoreError> {
+    let (
+        id,
+        project,
+        branch,
+        commit_hash,
+        engine_version,
+        created_at,
+        run_by,
+        definition,
+        findings_json,
+        measured,
+        evidence_hash,
+    ) = row;
+    let definition: crate::analyses::AnalysisDefinition = serde_json::from_str(&definition)
+        .map_err(|e| {
+            StoreError::Backend(format!("corrupt analysis definition for run {}: {}", id, e))
+        })?;
+    // The findings column is kept AS STORED: it is the canonical byte sequence the evidence
+    // hash was taken over, so a record read back cites the same bytes it was written with.
+    let findings: Vec<crate::analyses::Finding> =
+        serde_json::from_str(&findings_json).map_err(|e| {
+            StoreError::Backend(format!("corrupt analysis findings for run {}: {}", id, e))
+        })?;
+    Ok(AnalysisRun {
+        id,
+        project,
+        branch,
+        commit_hash,
+        engine_version,
+        created_at,
+        run_by,
+        definition,
+        findings,
+        findings_json,
+        measured: measured != 0,
+        evidence_hash,
+    })
+}
 
 /// Parse a proposal row into its record, reporting a corrupt decision or accepted-items
 /// column as a storage error rather than silently substituting a default. Shared by
@@ -1275,6 +1359,94 @@ impl Store for SqliteStore {
             })?;
             rows.collect()
         })
+    }
+
+    fn record_analysis_run(
+        &self,
+        run: &AnalysisRun,
+        audit: Option<&AuditEntry>,
+    ) -> Result<(), StoreError> {
+        // The id is a content address, so re-running the same analysis over the same commit
+        // is a no-op: the SAME record, not a second one. INSERT OR IGNORE is how that ruling
+        // is held in storage, and the audit row (when supplied) still rides the transaction -
+        // running an analysis is recorded even when it changes no record, because the log says
+        // what was ATTEMPTED.
+        let definition = serde_json::to_string(&run.definition).map_err(|e| {
+            StoreError::Backend(format!("analysis definition does not serialise: {}", e))
+        })?;
+        with_tx(&self.connection, |tx| {
+            tx.execute(
+                "INSERT OR IGNORE INTO analysis_runs (id, project, branch, commit_hash, engine_version, created_at, run_by, definition, findings, measured, evidence_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    run.id,
+                    run.project,
+                    run.branch,
+                    run.commit_hash,
+                    run.engine_version,
+                    run.created_at,
+                    run.run_by,
+                    definition,
+                    run.findings_json,
+                    run.measured as i64,
+                    run.evidence_hash
+                ],
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if let Some(audit) = audit {
+                insert_audit(tx, audit).map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+            Ok(())
+        })
+    }
+
+    fn analysis_run(&self, project: &str, id: &str) -> Result<Option<AnalysisRun>, StoreError> {
+        let row: Option<AnalysisRunRow> = self.with(|c| {
+            c.prepare(
+                "SELECT id, project, branch, commit_hash, engine_version, created_at, run_by, definition, findings, measured, evidence_hash FROM analysis_runs WHERE project = ?1 AND id = ?2",
+            )?
+            .query_row(params![project, id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                ))
+            })
+            .optional()
+        })?;
+        row.map(analysis_run_from_row).transpose()
+    }
+
+    fn analysis_runs(&self, project: &str) -> Result<Vec<AnalysisRun>, StoreError> {
+        let rows: Vec<AnalysisRunRow> = self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, project, branch, commit_hash, engine_version, created_at, run_by, definition, findings, measured, evidence_hash FROM analysis_runs WHERE project = ?1 ORDER BY seq",
+            )?;
+            let rows = stmt.query_map(params![project], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                ))
+            })?;
+            rows.collect()
+        })?;
+        rows.into_iter().map(analysis_run_from_row).collect()
     }
 
     #[allow(clippy::too_many_arguments)]

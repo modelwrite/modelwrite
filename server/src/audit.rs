@@ -22,3 +22,4 @@ pub const IMPORT_REFUSED: &str = "import.refused";
 pub const PROPOSAL_RECORD: &str = "proposal.record";
 pub const PROPOSAL_ACCEPT: &str = "proposal.accept";
 pub const PROPOSAL_REFUSED: &str = "proposal.refused";
+pub const ANALYSIS_RUN: &str = "analysis.run";

@@ -94,21 +94,24 @@ fn render_health_page(
 }
 
 /// One dangling link: an edge that names an endpoint with no matching node.
-struct DanglingLink {
-    source: String,
-    target: String,
-    kind: String,
-    label: String,
-    missing_source: bool,
-    missing_target: bool,
+///
+/// Read-only outside this module (the analyses frame names each dangling link as a finding, so
+/// that an analysis and the page it is an analysis of can never disagree), never constructed.
+pub(crate) struct DanglingLink {
+    pub(crate) source: String,
+    pub(crate) target: String,
+    pub(crate) kind: String,
+    pub(crate) label: String,
+    pub(crate) missing_source: bool,
+    pub(crate) missing_target: bool,
 }
 
 /// The four findings the health view reports, computed once from the document.
 pub(crate) struct HealthReport {
-    orphaned: Vec<String>,
-    isolated_groups: Vec<Vec<String>>,
-    dangling: Vec<DanglingLink>,
-    uncovered: Vec<String>,
+    pub(crate) orphaned: Vec<String>,
+    pub(crate) isolated_groups: Vec<Vec<String>>,
+    pub(crate) dangling: Vec<DanglingLink>,
+    pub(crate) uncovered: Vec<String>,
 }
 
 /// The NAMED gap counts a compact summary publishes, and nothing else. This product's whole
@@ -160,7 +163,10 @@ pub(crate) fn health_summary(root: &OkfRoot) -> Option<HealthSummary> {
 /// Compute the health report from the engine's graph analysis. The orphaned set and the
 /// component membership come straight from the graph crate; dangling links and names are the
 /// only page-local reads, both over the same document.
-fn health_report(root: &OkfRoot) -> HealthReport {
+///
+/// The analyses frame calls THIS function rather than reimplementing it, so the model-health
+/// analysis reports exactly the gaps this page renders and the two can never drift.
+pub(crate) fn health_report(root: &OkfRoot) -> HealthReport {
     let stats = graph_stats(root);
     let comps = components(root);
 
@@ -215,7 +221,10 @@ fn health_report(root: &OkfRoot) -> HealthReport {
 /// Every element id to its display name, read from the graph nodes first and supplemented by
 /// the structure, interface, signal and requirement lists, so a node the graph carries under an
 /// id the other lists also name is still resolved to its human name.
-fn name_index(root: &OkfRoot) -> HashMap<String, String> {
+///
+/// The analyses frame names its findings through THIS index, so an analysis names a subject
+/// exactly as the page that renders the model names it.
+pub(crate) fn name_index(root: &OkfRoot) -> HashMap<String, String> {
     let mut names = HashMap::new();
     if let Some(graph) = &root.graph {
         for node in &graph.nodes {

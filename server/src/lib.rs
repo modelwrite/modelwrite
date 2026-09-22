@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+pub mod analyses;
 pub mod analytics;
 pub mod analytics_api;
 pub mod api;
@@ -137,6 +138,20 @@ pub(crate) fn workbench_router(api_state: api::ApiState, max_body_bytes: u64) ->
             get(ui::model::overview_page),
         )
         .route("/ui/projects/:project/health", get(ui::health::health_page))
+        // A1 - the analyses frame: the library of stored runs, one run (addressable, and
+        // diffable against another through ?compare=), and the diff between any two runs.
+        .route(
+            "/ui/projects/:project/analyses",
+            get(ui::analyses::analyses_page).post(ui::analyses::run_analysis_form),
+        )
+        .route(
+            "/ui/projects/:project/analyses/diff",
+            get(ui::analyses::diff_page),
+        )
+        .route(
+            "/ui/projects/:project/analyses/:id",
+            get(ui::analyses::run_page),
+        )
         .route("/ui/projects/:project/stpa", get(ui::stpa::stpa_page))
         .route("/ui/projects/:project/search", get(ui::search::search_page))
         .route(
