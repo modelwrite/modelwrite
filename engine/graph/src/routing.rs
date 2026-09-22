@@ -10,7 +10,14 @@
 
 use std::collections::HashMap;
 
-use crate::layout::NodeBox;
+use crate::layout::{edge_label_size, NodeBox};
+
+/// A point in canvas units. Named so the placement signatures - which nest points two and three
+/// deep in slices, segments and result tuples - stay readable rather than becoming a wall of
+/// parentheses.
+pub type Point = (f64, f64);
+/// One straight run of a drawn line, from `0` to `1`.
+pub type Seg = (Point, Point);
 
 /// The side of a node an edge leaves from or arrives at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -802,4 +809,658 @@ fn seg_cross(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> Opti
             None
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Label placement: where the name of a relationship can actually be read.
+// ---------------------------------------------------------------------------
+
+/// The standoff a label keeps from the line it names, so no stroke strikes through the text.
+const LABEL_LINE_GAP: f64 = 3.0;
+/// The standoff two labels keep from each other.
+const LABEL_LABEL_GAP: f64 = 2.0;
+/// The standoff a label keeps from a node box.
+const LABEL_BOX_GAP: f64 = 2.0;
+/// The standoff a label keeps from the edge of the drawing.
+const LABEL_EDGE_INSET: f64 = 2.0;
+/// The clearance a leader keeps from a box or a label it passes.
+const LEADER_BOX_GAP: f64 = 1.0;
+/// How far along its own line the search walks, as a fraction of each segment. The middle of the
+/// longest segment is tried first and the walk fans out symmetrically, so a label lands where its
+/// line has the most room and the choice never depends on floating-point noise.
+const LABEL_STATIONS: [f64; 9] = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9];
+/// The step of the ring search that finds room for a label that cannot sit beside its own line,
+/// and how many rings it will walk. Eight units is a fifth of a node box's height: fine enough to
+/// find a pocket, coarse enough to stay cheap on a hundred-label drawing. A hundred and sixty
+/// rings reach 1280 units in every direction; past that a pocket is so far from the line that the
+/// geometry-aligned search below - which is bounded and rests labels against the boxes they fit
+/// between - is the better answer anyway.
+const LEADER_STEP: f64 = 16.0;
+const LEADER_RINGS: usize = 80;
+
+/// Where the renderer should draw an edge label, and how a reader gets from that label to the line
+/// it names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelPlacement {
+    /// The centre of the label's box.
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// An orthogonal leader from the label to its line, drawn when the label could not sit beside
+    /// the line itself. Empty when the label sits directly against it.
+    pub leader: Vec<(f64, f64)>,
+}
+
+impl LabelPlacement {
+    pub fn left(&self) -> f64 {
+        self.x - self.width / 2.0
+    }
+    pub fn right(&self) -> f64 {
+        self.x + self.width / 2.0
+    }
+    pub fn top(&self) -> f64 {
+        self.y - self.height / 2.0
+    }
+    pub fn bottom(&self) -> f64 {
+        self.y + self.height / 2.0
+    }
+}
+
+/// An axis-aligned rectangle: a label being placed, a node box it must miss, or a label already
+/// placed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Rect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl Rect {
+    fn centered(cx: f64, cy: f64, w: f64, h: f64) -> Rect {
+        Rect {
+            x: cx - w / 2.0,
+            y: cy - h / 2.0,
+            w,
+            h,
+        }
+    }
+
+    fn of(p: &LabelPlacement) -> Rect {
+        Rect {
+            x: p.left(),
+            y: p.top(),
+            w: p.width,
+            h: p.height,
+        }
+    }
+
+    /// A copy grown by \`by\` on every side, for a test that needs clearance rather than mere
+    /// non-overlap.
+    fn inflated(&self, by: f64) -> Rect {
+        Rect {
+            x: self.x - by,
+            y: self.y - by,
+            w: self.w + 2.0 * by,
+            h: self.h + 2.0 * by,
+        }
+    }
+
+    /// Whether two rectangles come closer than \`gap\`. Touching is clear: the test is strict, so a
+    /// label exactly \`gap\` from a box is not an overlap.
+    fn close_to(&self, o: &Rect, gap: f64) -> bool {
+        self.x - gap < o.x + o.w
+            && o.x < self.x + self.w + gap
+            && self.y - gap < o.y + o.h
+            && o.y < self.y + self.h + gap
+    }
+
+    fn inside(&self, bounds: (f64, f64)) -> bool {
+        self.x >= LABEL_EDGE_INSET
+            && self.y >= LABEL_EDGE_INSET
+            && self.x + self.w <= bounds.0 - LABEL_EDGE_INSET
+            && self.y + self.h <= bounds.1 - LABEL_EDGE_INSET
+    }
+
+    fn contains(&self, p: (f64, f64)) -> bool {
+        p.0 > self.x && p.0 < self.x + self.w && p.1 > self.y && p.1 < self.y + self.h
+    }
+}
+
+/// Whether a straight segment passes through the interior of a rectangle (Liang-Barsky). Exact
+/// rather than a bounding-box approximation, because the renderer draws lines that are not
+/// axis-aligned - the sampled curve of a self-loop, and a run to a dangling marker - and a
+/// bounding box around one of those would refuse a label a hundred units away from it. A segment
+/// that only grazes the border is not a hit: the text is not struck through.
+fn seg_hits_rect(a: (f64, f64), b: (f64, f64), r: &Rect) -> bool {
+    let d = (b.0 - a.0, b.1 - a.1);
+    let p = [-d.0, d.0, -d.1, d.1];
+    let q = [a.0 - r.x, r.x + r.w - a.0, a.1 - r.y, r.y + r.h - a.1];
+    let mut t0 = 0.0f64;
+    let mut t1 = 1.0f64;
+    for i in 0..4 {
+        if p[i].abs() < 1e-12 {
+            // Parallel to this edge: outside it unless the segment lies on the border, which is a
+            // graze rather than a crossing.
+            if q[i] <= 0.0 {
+                return false;
+            }
+        } else {
+            let t = q[i] / p[i];
+            if p[i] < 0.0 {
+                if t > t1 {
+                    return false;
+                }
+                t0 = t0.max(t);
+            } else {
+                if t < t0 {
+                    return false;
+                }
+                t1 = t1.min(t);
+            }
+        }
+    }
+    t0 < t1
+}
+
+/// The segments of a drawn polyline.
+fn segments_of(pts: &[(f64, f64)]) -> Vec<Seg> {
+    pts.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// A segment's length. Routes are axis-aligned, so the Manhattan length is the true length and it
+/// avoids a square root in the inner loop.
+fn seg_len(s: &Seg) -> f64 {
+    (s.0 .0 - s.1 .0).abs() + (s.0 .1 - s.1 .1).abs()
+}
+
+/// The place on a line its own name would go if nothing else were in the way: the middle of the
+/// longest segment, ties to the earliest.
+fn ideal_point(own: &[Seg]) -> (f64, f64) {
+    let mut best: Option<(f64, Seg)> = None;
+    for s in own {
+        let len = seg_len(s);
+        if best.map_or(true, |(bl, _)| len > bl + 1e-9) {
+            best = Some((len, *s));
+        }
+    }
+    match best {
+        Some((_, s)) => ((s.0 .0 + s.1 .0) / 2.0, (s.0 .1 + s.1 .1) / 2.0),
+        None => (0.0, 0.0),
+    }
+}
+
+/// The points of one square ring around \`c\`, walked clockwise from the top-left corner. The order
+/// is fixed, so a ring search always resolves the same way.
+fn ring_points(c: (f64, f64), r: f64) -> Vec<(f64, f64)> {
+    if r <= 0.0 {
+        return vec![c];
+    }
+    let steps = (2.0 * r / LEADER_STEP).round().max(1.0) as usize;
+    let mut pts = Vec::with_capacity(4 * steps + 1);
+    let at = |i: usize| -r + 2.0 * r * (i as f64) / (steps as f64);
+    for i in 0..=steps {
+        pts.push((c.0 + at(i), c.1 - r));
+    }
+    for i in 1..=steps {
+        pts.push((c.0 + r, c.1 + at(i)));
+    }
+    for i in 1..=steps {
+        pts.push((c.0 - at(i), c.1 + r));
+    }
+    for i in 1..=steps {
+        pts.push((c.0 - r, c.1 - at(i)));
+    }
+    pts
+}
+
+/// The point of a line closest to \`p\`, clamped to each segment so it always lands on the line.
+fn nearest_on_line(p: (f64, f64), own: &[Seg]) -> Option<(f64, f64)> {
+    let mut best: Option<(f64, (f64, f64))> = None;
+    for s in own {
+        let (a, b) = *s;
+        let cand = if (a.0 - b.0).abs() <= (a.1 - b.1).abs() {
+            let (lo, hi) = order(a.1, b.1);
+            (a.0, p.1.clamp(lo, hi))
+        } else {
+            let (lo, hi) = order(a.0, b.0);
+            (p.0.clamp(lo, hi), a.1)
+        };
+        let d = (cand.0 - p.0).powi(2) + (cand.1 - p.1).powi(2);
+        if best.map_or(true, |(bd, _)| d < bd - 1e-9) {
+            best = Some((d, cand));
+        }
+    }
+    best.map(|(_, cand)| cand)
+}
+
+/// The centre of every free vertical channel in `[lo, hi]` across the band `[y_lo, y_hi]`: an x
+/// that no box covers, with at least [MIN_CHANNEL] of clearance. Ascending. This is the same rule
+/// the edge router turns by, applied to the leader, so a leader turns in a channel an edge could
+/// have used rather than cutting through a box.
+fn leader_channels_x(lo: f64, hi: f64, y_lo: f64, y_hi: f64, boxes: &[Rect]) -> Vec<f64> {
+    let mut spans: Vec<(f64, f64)> = boxes
+        .iter()
+        .filter(|b| b.y < y_hi + LEADER_BOX_GAP && b.y + b.h > y_lo - LEADER_BOX_GAP)
+        .filter(|b| b.x < hi && b.x + b.w > lo)
+        .map(|b| (b.x - LEADER_BOX_GAP, b.x + b.w + LEADER_BOX_GAP))
+        .collect();
+    merge_spans(&mut spans);
+    channels_in(lo, hi, &spans)
+}
+
+/// The same, for a horizontal channel: a y that no box covers across `[x_lo, x_hi]`.
+fn leader_channels_y(lo: f64, hi: f64, x_lo: f64, x_hi: f64, boxes: &[Rect]) -> Vec<f64> {
+    let mut spans: Vec<(f64, f64)> = boxes
+        .iter()
+        .filter(|b| b.x < x_hi + LEADER_BOX_GAP && b.x + b.w > x_lo - LEADER_BOX_GAP)
+        .filter(|b| b.y < hi && b.y + b.h > lo)
+        .map(|b| (b.y - LEADER_BOX_GAP, b.y + b.h + LEADER_BOX_GAP))
+        .collect();
+    merge_spans(&mut spans);
+    channels_in(lo, hi, &spans)
+}
+
+/// The centres of the gaps in `[lo, hi]` left by the merged blocking spans, ascending.
+fn channels_in(lo: f64, hi: f64, merged: &[(f64, f64)]) -> Vec<f64> {
+    let mut out = Vec::new();
+    let mut cursor = lo;
+    for &(a, b) in merged {
+        if a - cursor > MIN_CHANNEL {
+            out.push((cursor + a) / 2.0);
+        }
+        cursor = cursor.max(b);
+    }
+    if hi - cursor > MIN_CHANNEL {
+        out.push((cursor + hi) / 2.0);
+    }
+    out
+}
+
+/// How many channel turns the leader router will try at each end. The nearest few are almost
+/// always the answer, and a handful keeps the search bounded on a wide drawing.
+const LEADER_CHANNELS: usize = 3;
+
+/// Candidate orthogonal leaders from a label's box to its line, in a fixed order. Every candidate
+/// starts on the box's own boundary - so a leader never strikes through its own label - and ends on
+/// the line it names.
+///
+/// A plain L (out of the box, one elbow, onto the line) is tried first, from each of the box's four
+/// sides. Where an L would cross a box the candidate leaves the box, turns into a free channel, runs
+/// there, and turns again - the same move the edge router makes, so a leader reads as a thin edge
+/// rather than as a line struck through the drawing.
+fn leader_candidates(rect: &Rect, own: &[Seg], boxes: &[Rect]) -> Vec<Vec<(f64, f64)>> {
+    let c = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0);
+    let Some(target) = nearest_on_line(c, own) else {
+        return Vec::new();
+    };
+    if rect.contains(target) {
+        return Vec::new();
+    }
+    let left = rect.x;
+    let right = rect.x + rect.w;
+    let top = rect.y;
+    let bottom = rect.y + rect.h;
+    let exits = [
+        (right, target.1.clamp(top, bottom)),
+        (left, target.1.clamp(top, bottom)),
+        (target.0.clamp(left, right), bottom),
+        (target.0.clamp(left, right), top),
+    ];
+    let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut push = |pts: Vec<(f64, f64)>| {
+        let mut pts = pts;
+        pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6);
+        if pts.len() < 2 || out.contains(&pts) {
+            return;
+        }
+        out.push(pts);
+    };
+    for ex in exits {
+        push(vec![ex, (target.0, ex.1), target]);
+        push(vec![ex, (ex.0, target.1), target]);
+        if (ex.1 - target.1).abs() > 1e-6 {
+            let (lo, hi) = order(ex.0, target.0);
+            let (y0, y1) = order(ex.1, target.1);
+            for x in leader_channels_x(lo, hi, y0, y1, boxes)
+                .into_iter()
+                .take(LEADER_CHANNELS)
+            {
+                push(vec![ex, (x, ex.1), (x, target.1), target]);
+            }
+        }
+        if (ex.0 - target.0).abs() > 1e-6 {
+            let (lo, hi) = order(ex.1, target.1);
+            let (x0, x1) = order(ex.0, target.0);
+            for y in leader_channels_y(lo, hi, x0, x1, boxes)
+                .into_iter()
+                .take(LEADER_CHANNELS)
+            {
+                push(vec![ex, (ex.0, y), (target.0, y), target]);
+            }
+        }
+    }
+    out
+}
+
+/// The length of a leader polyline.
+fn polyline_len(pts: &[(f64, f64)]) -> f64 {
+    pts.windows(2).map(|w| seg_len(&(w[0], w[1]))).sum()
+}
+
+/// Whether a leader crosses no box and no label already placed.
+fn leader_clear(leader: &[(f64, f64)], boxes: &[Rect], placed: &[Option<LabelPlacement>]) -> bool {
+    leader.windows(2).all(|w| {
+        !boxes
+            .iter()
+            .any(|b| seg_hits_rect(w[0], w[1], &b.inflated(LEADER_BOX_GAP)))
+            && !placed
+                .iter()
+                .flatten()
+                .any(|p| seg_hits_rect(w[0], w[1], &Rect::of(p).inflated(LEADER_BOX_GAP)))
+    })
+}
+
+/// The shortest leader that gets from a label's box to its line, without running back through the
+/// label's own text.
+///
+/// With `require_clear` the leader must also cross no box and no other label - the good answer,
+/// and the one every ordinary placement gets. Without it, a leader that crosses something is
+/// accepted when nothing clean exists: the labels are drawn BEFORE the node boxes, so such a
+/// leader passes behind a box rather than through the text, and a label whose leader is partly
+/// hidden still names its relationship while a dropped label names nothing at all. Ties go to the
+/// candidate the enumeration produced first, so the choice is stable either way.
+fn best_leader(
+    rect: &Rect,
+    own: &[Seg],
+    boxes: &[Rect],
+    placed: &[Option<LabelPlacement>],
+    require_clear: bool,
+) -> Option<Vec<(f64, f64)>> {
+    let mut clean: Option<(f64, Vec<Point>)> = None;
+    let mut any: Option<(f64, Vec<Point>)> = None;
+    for leader in leader_candidates(rect, own, boxes) {
+        if leader.iter().skip(1).any(|p| rect.contains(*p)) {
+            continue;
+        }
+        let len = polyline_len(&leader);
+        if leader_clear(&leader, boxes, placed)
+            && clean.as_ref().map_or(true, |(bl, _)| len < bl - 1e-9)
+        {
+            clean = Some((len, leader.clone()));
+        }
+        if any.as_ref().map_or(true, |(bl, _)| len < bl - 1e-9) {
+            any = Some((len, leader));
+        }
+    }
+    if require_clear {
+        clean.map(|(_, leader)| leader)
+    } else {
+        clean.or(any).map(|(_, leader)| leader)
+    }
+}
+/// The test every candidate placement must pass: inside the drawing, off every box, off every
+/// label already placed, and off every drawn line except the one segment it sits beside.
+fn clear_for(
+    r: &Rect,
+    skip: Option<usize>,
+    all: &[Seg],
+    boxes: &[Rect],
+    placed: &[Option<LabelPlacement>],
+    bounds: (f64, f64),
+) -> bool {
+    r.inside(bounds)
+        && !boxes.iter().any(|b| r.close_to(b, LABEL_BOX_GAP))
+        && !placed
+            .iter()
+            .flatten()
+            .any(|p| r.close_to(&Rect::of(p), LABEL_LABEL_GAP))
+        && !all
+            .iter()
+            .enumerate()
+            .any(|(k, s)| Some(k) != skip && seg_hits_rect(s.0, s.1, r))
+}
+
+/// The best placement whose box rests against the geometry of the drawing: against a box edge or
+/// the drawing edge, in either axis.
+///
+/// Why the geometry and not a grid: a label that fits a corridor with a unit to spare has a window
+/// of feasible positions narrower than any grid step worth walking, so a grid search would report
+/// "no room" about a place that plainly has room. Every feasible position can be slid - in x and
+/// in y, without leaving the feasible set - until it rests against the drawing edge or the edge of
+/// some box in both axes, so the candidates here are aligned to the geometry itself. Among the
+/// clear ones the winner is the one nearest its own line, ties to the first the sweep reaches.
+#[allow(clippy::too_many_arguments)]
+fn sweep_aligned(
+    own: &[Seg],
+    all: &[Seg],
+    boxes: &[Rect],
+    placed: &[Option<LabelPlacement>],
+    bounds: (f64, f64),
+    w: f64,
+    h: f64,
+    ideal: (f64, f64),
+    require_clear_leader: bool,
+) -> Option<(Point, Vec<Point>)> {
+    let mut xs: Vec<f64> = vec![
+        LABEL_EDGE_INSET + w / 2.0,
+        bounds.0 - LABEL_EDGE_INSET - w / 2.0,
+    ];
+    let mut ys: Vec<f64> = vec![
+        LABEL_EDGE_INSET + h / 2.0,
+        bounds.1 - LABEL_EDGE_INSET - h / 2.0,
+    ];
+    for b in boxes {
+        xs.push(b.x - LABEL_BOX_GAP - w / 2.0);
+        xs.push(b.x + b.w + LABEL_BOX_GAP + w / 2.0);
+        ys.push(b.y - LABEL_BOX_GAP - h / 2.0);
+        ys.push(b.y + b.h + LABEL_BOX_GAP + h / 2.0);
+    }
+    let by_value = |a: &f64, b: &f64| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+    xs.sort_by(by_value);
+    xs.dedup();
+    ys.sort_by(by_value);
+    ys.dedup();
+
+    let mut best: Option<(f64, Point, Vec<Point>)> = None;
+    for &y in &ys {
+        for &x in &xs {
+            let r = Rect::centered(x, y, w, h);
+            if !clear_for(&r, None, all, boxes, placed, bounds) {
+                continue;
+            }
+            let Some(leader) = best_leader(&r, own, boxes, placed, require_clear_leader) else {
+                continue;
+            };
+            let near = nearest_on_line((x, y), own).unwrap_or(ideal);
+            let d = (x - near.0).powi(2) + (y - near.1).powi(2);
+            if best.as_ref().map_or(true, |(bd, _, _)| d < bd - 1e-9) {
+                best = Some((d, (x, y), leader));
+            }
+        }
+    }
+    best.map(|(_, c, leader)| (c, leader))
+}
+
+/// Place one label: beside its own line where that works, otherwise nearby and led to it.
+#[allow(clippy::too_many_arguments)]
+fn place_one(
+    own: &[Seg],
+    first: usize,
+    all: &[Seg],
+    boxes: &[Rect],
+    placed: &[Option<LabelPlacement>],
+    bounds: (f64, f64),
+    w: f64,
+    h: f64,
+) -> Option<LabelPlacement> {
+    // 1. Along the line: longest segment first, middle station first, both sides of the line.
+    let mut by_len: Vec<usize> = (0..own.len()).collect();
+    by_len.sort_by(|&a, &b| {
+        seg_len(&own[b])
+            .partial_cmp(&seg_len(&own[a]))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.cmp(&b))
+    });
+    for &k in &by_len {
+        let (a, b) = own[k];
+        let horizontal = (a.1 - b.1).abs() < 1e-6;
+        for &f in &LABEL_STATIONS {
+            let (sx, sy) = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+            for side in [1.0f64, -1.0f64] {
+                let (cx, cy) = if horizontal {
+                    (sx, sy - side * (h / 2.0 + LABEL_LINE_GAP))
+                } else {
+                    (sx - side * (w / 2.0 + LABEL_LINE_GAP), sy)
+                };
+                let r = Rect::centered(cx, cy, w, h);
+                if clear_for(&r, Some(first + k), all, boxes, placed, bounds) {
+                    return Some(LabelPlacement {
+                        x: cx,
+                        y: cy,
+                        width: w,
+                        height: h,
+                        leader: Vec::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. Off the line, with a leader: the nearest clear pocket to the line, found in rings, and the
+    // shortest orthogonal leader from the label's edge back to the line that crosses nothing.
+    //
+    // The ring is walked outward from the line and each ring is walked from the point nearest the
+    // line outward, so the first pocket that works is the one the reader's eye reaches first.
+    let ideal = ideal_point(own);
+    let mut chosen: Option<(Point, Vec<Point>)> = None;
+    'rings: for ring in 0..=LEADER_RINGS {
+        let radius = ring as f64 * LEADER_STEP;
+        let mut points = ring_points(ideal, radius);
+        points.sort_by(|a, b| {
+            let da = (a.0 - ideal.0).powi(2) + (a.1 - ideal.1).powi(2);
+            let db = (b.0 - ideal.0).powi(2) + (b.1 - ideal.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for c in points {
+            let r = Rect::centered(c.0, c.1, w, h);
+            if !clear_for(&r, None, all, boxes, placed, bounds) {
+                continue;
+            }
+            if let Some(leader) = best_leader(&r, own, boxes, placed, true) {
+                chosen = Some((c, leader));
+                break 'rings;
+            }
+        }
+    }
+
+    // 3. The positions where a label rests against a box edge or the drawing edge. A uniform grid
+    //    can miss a corridor that fits the label with a unit to spare, because the window that fits
+    //    is narrower than the grid step - the coffee machine has exactly such a corridor. These
+    //    candidates are aligned to the geometry itself, so a corridor that fits at all contains one,
+    //    and this bounds the search when the rings come up empty on a crowded drawing.
+    if chosen.is_none() {
+        chosen = sweep_aligned(own, all, boxes, placed, bounds, w, h, ideal, true);
+    }
+
+    // 4. A clear place, led however it can be led. A name too wide for any free channel - the
+    //    corpus has a 306-unit one - may have no box position whose leader is also clean. The label
+    //    itself must still land on nothing; the leader may pass behind a box, because the labels are
+    //    drawn before the boxes and a partly hidden leader still names its relationship, while a
+    //    dropped label names nothing at all.
+    if chosen.is_none() {
+        chosen = sweep_aligned(own, all, boxes, placed, bounds, w, h, ideal, false);
+    }
+
+    let ((cx, cy), leader) = chosen?;
+    Some(LabelPlacement {
+        x: cx,
+        y: cy,
+        width: w,
+        height: h,
+        leader,
+    })
+}
+/// Place every edge label so a reader can find it and read it: never under a box, never under
+/// another label, and never across a line that is not the one it names.
+///
+/// \`lines[i]\` is the polyline the renderer draws for edge \`i\` and \`labels[i]\` is the text it
+/// carries; an empty label draws nothing. \`bounds\` is the drawing area - the caption band is not
+/// part of it.
+///
+/// The method, least invasive first, per label:
+///
+/// 1. ALONG THE LINE. Every segment of the edge, longest first, is walked with stations - the
+///    middle first, then fanning out - and both sides of the line are tried at each one. A label
+///    that lands clear of every box, every label already placed and every other line is put there.
+///    This is the repair for the crowding that made this function exist. The old rule dropped
+///    every label at the midpoint of the chord between its two anchors; for a fan-out that shares
+///    a trunk - the coffee machine's eleven containment edges out of one box - that midpoint IS
+///    the trunk line, so eleven names landed on one vertical line, on top of each other, and under
+///    each other's boxes.
+/// 2. OFF THE LINE, WITH A LEADER. When no station on the line is clear - a 44-unit channel asked
+///    to hold a 164-unit name - search outward from the line in rings, take the nearest clear
+///    pocket, and lead from the label's edge to the line with an orthogonal leader. That is
+///    standard engineering-drawing practice, and it is what keeps the name readable instead of
+///    dropping it.
+/// 3. WHERE IT RESTS AGAINST THE GEOMETRY. The rings walk a grid, and a corridor that fits a wide
+///    label with a unit to spare can be narrower than the grid step. Every feasible place can be
+///    slid until it rests against a box edge or the drawing edge, so those positions are tried too,
+///    nearest the line first.
+/// 4. A CLEAR PLACE, LED HOWEVER IT CAN BE LED. A name too wide for any free channel may have no
+///    clear place whose leader is also clean. The label itself must still land on nothing; its
+///    leader may then pass behind a box, which still names the relationship - unlike a dropped
+///    label, which names nothing.
+/// 5. NOTHING. \`None\` means no clear position exists anywhere in the drawing at all. The caller
+///    must not draw the label - and must not quietly lose the relationship either: the renderer
+///    collects every name it could not place and states it on the page.
+///
+/// Labels are placed biggest first, ties by index, so the largest names - which need the largest
+/// clear rectangle - are not left with the leavings. Every iteration is over an ordered slice and
+/// every tie is broken explicitly, so the placement is a pure function of the geometry: the same
+/// model always exports byte-identically.
+pub fn place_labels(
+    nodes: &[NodeBox],
+    lines: &[Vec<(f64, f64)>],
+    labels: &[&str],
+    bounds: (f64, f64),
+) -> Vec<Option<LabelPlacement>> {
+    let n = labels.len().min(lines.len());
+    let boxes: Vec<Rect> = nodes
+        .iter()
+        .map(|b| Rect {
+            x: b.x,
+            y: b.y,
+            w: b.width,
+            h: b.height,
+        })
+        .collect();
+    // Every drawn segment, once, flattened, with the flat index of each line's first segment so a
+    // station can exclude exactly the one segment it sits beside.
+    let segs: Vec<Vec<Seg>> = lines[..n].iter().map(|p| segments_of(p)).collect();
+    let mut all: Vec<Seg> = Vec::new();
+    let mut first: Vec<usize> = Vec::with_capacity(n);
+    for list in &segs {
+        first.push(all.len());
+        all.extend_from_slice(list);
+    }
+
+    let mut out: Vec<Option<LabelPlacement>> = vec![None; n];
+    let mut order: Vec<usize> = (0..n).filter(|&i| !labels[i].is_empty()).collect();
+    order.sort_by(|&a, &b| {
+        let (wa, _) = edge_label_size(labels[a]);
+        let (wb, _) = edge_label_size(labels[b]);
+        wb.partial_cmp(&wa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.cmp(&b))
+    });
+
+    for &i in &order {
+        let (w, h) = edge_label_size(labels[i]);
+        if let Some(p) = place_one(&segs[i], first[i], &all, &boxes, &out, bounds, w, h) {
+            out[i] = Some(p);
+        }
+    }
+    out
 }

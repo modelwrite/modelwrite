@@ -173,7 +173,7 @@ fn diagram_markup(
         let has_process = graph_layout::process_layout(graph).is_some();
         let has_control = graph_layout::control_layout(graph).is_some();
         let view = resolve_view(graph, query.view.as_deref());
-        let svg = diagram_svg(graph, view, &SvgOptions::NONE)
+        let (svg, unplaced) = diagram_svg_with_unplaced(graph, view, &SvgOptions::NONE)
             .expect("the structure view always has a layout for a graph");
         let kinds = distinct_kinds(graph);
         let unmappable = symbol::unmappable_findings(graph);
@@ -193,6 +193,22 @@ fn diagram_markup(
             (diagram_export_scopes(project, commit, view, graph))
             div class="diagram-viewport" {
                 (PreEscaped(svg))
+            }
+            @if !unplaced.is_empty() {
+                div class="symbol-report" role="note" aria-label="Unplaceable relationship names" {
+                    h2 { "Relationship names that could not be placed" }
+                    p {
+                        "There was no clear space on this drawing for " (unplaced.len())
+                        " relationship name(s). They are named here rather than dropped in "
+                        "silence, and each relationship is still listed on the page of the "
+                        "element it belongs to."
+                    }
+                    ul {
+                        @for name in &unplaced {
+                            li { code { (name) } }
+                        }
+                    }
+                }
             }
             @if !unmappable.is_empty() {
                 div class="symbol-report" role="note" aria-label="Unmapped symbols" {
@@ -941,6 +957,18 @@ pub(crate) fn diagram_svg(
     options: &SvgOptions<'_>,
 ) -> Option<String> {
     let layout = layout_for(graph, view)?;
+    Some(render_graph_svg(graph, &layout, options).0)
+}
+
+/// The same drawing, plus the names of any relationship labels the placement could not find a
+/// readable home for. The page draws a note for each of them: a relationship name that is not on
+/// the drawing is a relationship nobody can check, so it is never dropped without being said.
+pub(crate) fn diagram_svg_with_unplaced(
+    graph: &Graph,
+    view: DiagramView,
+    options: &SvgOptions<'_>,
+) -> Option<(String, Vec<String>)> {
+    let layout = layout_for(graph, view)?;
     Some(render_graph_svg(graph, &layout, options))
 }
 
@@ -1025,7 +1053,11 @@ impl Anchor<'_> {
     }
 }
 
-fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<'_>) -> String {
+fn render_graph_svg(
+    graph: &Graph,
+    layout: &DiagramLayout,
+    options: &SvgOptions<'_>,
+) -> (String, Vec<String>) {
     let node_by_id: HashMap<&str, &GraphNode> =
         graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let box_by_id: HashMap<&str, &NodeBox> =
@@ -1093,12 +1125,71 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<
     }
     let routed = routing::route_graph(&layout.nodes, &requests);
 
+    // The line each edge actually draws, so the label placer reasons about the drawing the reader
+    // sees rather than about the endpoints. A node-to-node edge draws its route; a self-loop draws
+    // its curve, sampled; an edge to a dangling marker draws a straight run to the marker.
+    let mut drawn: Vec<Vec<(f64, f64)>> = Vec::with_capacity(edges.len());
+    for (pos, edge) in edges.iter().enumerate() {
+        let (Some(src), Some(tgt)) = (resolve(&edge.source), resolve(&edge.target)) else {
+            drawn.push(Vec::new());
+            continue;
+        };
+        let line = match (&src, &tgt) {
+            (Anchor::Node(sb), Anchor::Node(_)) if edge.source == edge.target => {
+                self_loop_points(sb)
+            }
+            (Anchor::Node(_), Anchor::Node(_)) => route_for
+                .get(&pos)
+                .map(|&ri| routed[ri].points.clone())
+                .unwrap_or_default(),
+            _ => vec![
+                anchor_point(&src, tgt.center()),
+                anchor_point(&tgt, src.center()),
+            ],
+        };
+        drawn.push(line);
+    }
+
+    // Place every edge label against those lines BEFORE drawing any of them. A label goes beside
+    // its own line where there is room, is led to it from a clear pocket where there is not, and is
+    // placed so that it lands on no box, on no other label, and across no other line - the
+    // containment border is one of those lines, and it used to cut the names in half. The
+    // placement is a pure function of this geometry, so the export stays byte-identical.
+    let labelled: Vec<usize> = (0..edges.len())
+        .filter(|&pos| !edges[pos].label.is_empty() && drawn[pos].len() >= 2)
+        .collect();
+    let label_lines: Vec<Vec<(f64, f64)>> =
+        labelled.iter().map(|&pos| drawn[pos].clone()).collect();
+    let label_text: Vec<&str> = labelled
+        .iter()
+        .map(|&pos| edges[pos].label.as_str())
+        .collect();
+    let placed = routing::place_labels(
+        &layout.nodes,
+        &label_lines,
+        &label_text,
+        (canvas_w, drawing_h),
+    );
+    let mut label_for: HashMap<usize, routing::LabelPlacement> = HashMap::new();
+    // The names the placement could not place. There should be none: the placer leads a label out
+    // to clear space rather than give up on it. When there is one the page says so, because a
+    // relationship nobody can name is a relationship nobody can check.
+    let mut unplaced: Vec<String> = Vec::new();
+    for (slot, &pos) in labelled.iter().enumerate() {
+        match &placed[slot] {
+            Some(placement) => {
+                label_for.insert(pos, placement.clone());
+            }
+            None => unplaced.push(edges[pos].label.clone()),
+        }
+    }
+
     for (pos, edge) in edges.iter().enumerate() {
         let (Some(src), Some(tgt)) = (resolve(&edge.source), resolve(&edge.target)) else {
             continue;
         };
         let route = route_for.get(&pos).map(|&ri| &routed[ri]);
-        push_edge(&mut svg, edge, &src, &tgt, route);
+        push_edge(&mut svg, edge, &src, &tgt, route, label_for.get(&pos));
     }
 
     for node_box in &layout.nodes {
@@ -1127,7 +1218,7 @@ fn render_graph_svg(graph: &Graph, layout: &DiagramLayout, options: &SvgOptions<
         ));
     }
     svg.push_str("</svg>");
-    svg
+    (svg, unplaced)
 }
 
 fn edge_group(kind: &str) -> &'static str {
@@ -1192,6 +1283,7 @@ fn push_edge(
     src: &Anchor<'_>,
     tgt: &Anchor<'_>,
     route: Option<&routing::RoutedEdge>,
+    label: Option<&routing::LabelPlacement>,
 ) {
     let group = edge_group(&edge.kind);
     // Dependency (Satisfy/…) edges are a secondary relationship: dashed so they read as a layer
@@ -1210,8 +1302,8 @@ fn push_edge(
     ));
 
     // A self-loop, an orthogonal route between two nodes, or a straight line to a dangling marker.
-    let (head_x, head_y, head_dx, head_dy, label_x, label_y) = match (src, tgt) {
-        (Anchor::Node(sb), Anchor::Node(tb)) if edge.source == edge.target => {
+    let (head_x, head_y, head_dx, head_dy) = match (src, tgt) {
+        (Anchor::Node(sb), Anchor::Node(_)) if edge.source == edge.target => {
             let cx = sb.center_x();
             let cy = sb.center_y();
             let top = cy - 24.0;
@@ -1219,21 +1311,14 @@ fn push_edge(
                 "<path class='mw-edge {group}' d='M {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}' fill='none'/>",
                 cx, top, cx - 30.0, top - 24.0, cx + 30.0, top - 24.0, cx, top
             ));
-            (cx, top, 0.0, 1.0, cx, top - 28.0)
+            (cx, top, 0.0, 1.0)
         }
         (Anchor::Node(_sb), Anchor::Node(_tb)) => {
             let r = route.expect("node-to-node edge is routed");
             push_polyline(svg, &r.points, &r.jumps, group, dash);
             let last = r.points[r.points.len() - 1];
             let prev = r.points[r.points.len() - 2];
-            (
-                last.0,
-                last.1,
-                last.0 - prev.0,
-                last.1 - prev.1,
-                (r.points[0].0 + last.0) / 2.0,
-                (r.points[0].1 + last.1) / 2.0 - 5.0,
-            )
+            (last.0, last.1, last.0 - prev.0, last.1 - prev.1)
         }
         _ => {
             let (sx, sy) = anchor_point(src, tgt.center());
@@ -1243,20 +1328,77 @@ fn push_edge(
                 "<line class='mw-edge {group}' x1='{:.1}' y1='{:.1}' x2='{:.1}' y2='{:.1}'{dash}/>",
                 sx, sy, tx, ty
             ));
-            (tx, ty, dx, dy, (sx + tx) / 2.0, (sy + ty) / 2.0 - 5.0)
+            (tx, ty, dx, dy)
         }
     };
 
     push_arrowhead(svg, head_x, head_y, head_dx, head_dy, arrow_group(group));
-    if !edge.label.is_empty() {
-        svg.push_str(&format!(
-            "<text class='edge-label' x='{:.1}' y='{:.1}' text-anchor='middle'>{}</text>",
-            label_x,
-            label_y,
-            xml_escape(&edge.label)
-        ));
+    if let Some(placement) = label {
+        push_edge_label(svg, placement, &edge.label);
     }
     svg.push_str("</g>");
+}
+
+/// The point on a text baseline that puts the ink at the centre of the box the placement chose:
+/// the browser sets 11 px text with an ascent of 12 and a descent of 3, so the baseline sits
+/// (12 - 3) / 2 below the centre of the ink. Measured in the browser, not assumed.
+const EDGE_LABEL_BASELINE: f64 = 4.5;
+
+/// The ink an edge label's leader is drawn in: the same --text-2 the label rule uses, so a leader
+/// reads as part of the label rather than as another edge. The class carries no stylesheet rule
+/// (the stylesheet is not this module's to change), so the stroke is inline - which also means the
+/// leader can never fall back to SVG's default of no stroke and vanish.
+const EDGE_LEADER_INK: &str = "#49535c";
+
+/// Draw a placed edge label: its text centred on the box the placement chose, and the leader that
+/// leads to its line when the label had to leave the line to stay readable. A label that sits
+/// beside its line gets no leader - the line is already next to it.
+fn push_edge_label(svg: &mut String, placement: &routing::LabelPlacement, text: &str) {
+    if placement.leader.len() >= 2 {
+        let points: Vec<String> = placement
+            .leader
+            .iter()
+            .map(|(x, y)| format!("{:.1},{:.1}", x, y))
+            .collect();
+        svg.push_str(&format!(
+            "<polyline class='edge-leader' points='{}' fill='none' stroke='{EDGE_LEADER_INK}' stroke-width='1'/>",
+            points.join(" ")
+        ));
+    }
+    svg.push_str(&format!(
+        "<text class='edge-label' x='{:.1}' y='{:.1}' text-anchor='middle'>{}</text>",
+        placement.x,
+        placement.y + EDGE_LABEL_BASELINE,
+        xml_escape(text)
+    ));
+}
+
+/// The curve the renderer draws for a self-loop, sampled into a polyline: the label placer needs
+/// the line the reader sees, not the control points that produce it.
+fn self_loop_points(b: &NodeBox) -> Vec<(f64, f64)> {
+    let cx = b.center_x();
+    let top = b.center_y() - 24.0;
+    let (p0, p1, p2, p3) = (
+        (cx, top),
+        (cx - 30.0, top - 24.0),
+        (cx + 30.0, top - 24.0),
+        (cx, top),
+    );
+    (0..=8)
+        .map(|i| {
+            let t = i as f64 / 8.0;
+            let u = 1.0 - t;
+            let x = u * u * u * p0.0
+                + 3.0 * u * u * t * p1.0
+                + 3.0 * u * t * t * p2.0
+                + t * t * t * p3.0;
+            let y = u * u * u * p0.1
+                + 3.0 * u * u * t * p1.1
+                + 3.0 * u * t * t * p2.1
+                + t * t * t * p3.1;
+            (x, y)
+        })
+        .collect()
 }
 
 /// Render an orthogonal route as a polyline, or as a path when it carries crossing jumps (no

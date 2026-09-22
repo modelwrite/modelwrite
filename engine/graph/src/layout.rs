@@ -125,6 +125,31 @@ const FIT_EPSILON: f64 = 1e-9;
 /// channel it can turn in. Closing the gap further does not just look cramped - edges start
 /// crossing boxes. A caller that asks for a smaller gap than this gets exactly what it asked for.
 const ROUTABLE_V_GAP: f64 = 12.0;
+/// The font size the renderer draws an edge label at: the one stylesheet's `.edge-label` rule.
+/// An edge label is smaller than a node name because it annotates a line, not a box.
+pub const EDGE_LABEL_PX: f64 = 11.0;
+/// The advance per character at that size, and the slack for the first and last glyph's bearings.
+/// Measured, not guessed: the browser paints 11 px system-ui text at 4.30-6.75 units per character
+/// depending on the glyphs, so a flat 6.45 plus 3 units of slack is an estimate that is never
+/// narrower than what actually paints. A label placed against this estimate is therefore clear by
+/// at least the difference, and the collision test below can never pass on a label that overlaps
+/// on screen.
+const EDGE_CHAR_W: f64 = 6.45;
+const EDGE_PAD_X: f64 = 3.0;
+/// The line height of an 11 px edge label, measured in Chromium: the ascent is 12 units and the
+/// descent 3, so the ink box is 15 high and the baseline sits 4.5 below the centre of that box.
+/// The renderer places labels by that centre and offsets the baseline by the same 4.5.
+const EDGE_LABEL_H: f64 = 15.0;
+
+/// A deterministic estimate of an edge label's rendered box: the same string always measures the
+/// same size, and the estimate is deliberately generous. Pure, no font table, no system fonts -
+/// so the label a placement decides is clear is clear in every browser, not just the one it was
+/// measured in.
+pub fn edge_label_size(text: &str) -> (f64, f64) {
+    let chars = text.chars().count() as f64;
+    (chars * EDGE_CHAR_W + EDGE_PAD_X, EDGE_LABEL_H)
+}
+
 /// The estimated horizontal advance per character, shared by sizing and truncation so the two
 /// can never disagree about how much text fits a box.
 pub const CHAR_W: f64 = 7.4;
