@@ -68,7 +68,7 @@
         <li>OKF 1.0</li>
         <li>AGPL-3.0-or-later engine</li>
         <li>Apache-2.0 analytics schema</li>
-        <li>XMI + SysML v2 textual</li>
+        <li>XMI, SysML v2 textual, Capella/Arcadia</li>
         <li>self-hosted, air-gapped</li>
         <li>SQLite or PostgreSQL</li>
       </ul>
@@ -133,11 +133,103 @@
     <h2 id="see-h">Read the models you already have.</h2>
     <p>Modelwrite reads the SysML you already have. XMI and Cameo import carry a loss report that
     names what did not survive, so a loss is a decision you make rather than a surprise at
-    acceptance. SysML v2 textual notation reads as a viewer: it imports, it does not write back. You
-    keep your modelling tool.</p>
+    acceptance. Three readers are registered today: SysML v1 XMI reads and writes, and SysML v2
+    textual notation and Capella/Arcadia read as viewers &mdash; they import, they do not write
+    back. You keep your modelling tool.</p>
   </div>
 
-  <div class="prose">
+  <div class="prose" style="margin-top:1.75rem">
+    <h3 id="drop-zone">Start at the drop zone</h3>
+    <p>The workbench front door is one target: <strong>Drop your SysML model here, or choose a
+    file</strong>. The format is detected from the file itself and the project is named from it, so
+    there is nothing to choose and no project to create first. On the drop it reports in plain
+    language what it detected, what it carried, whether it round-trips and the five biggest classes
+    of loss, then offers one button that names the counts it is accepting. The artifact is retained
+    content-addressed before anything is read, so accepting re-reads the bytes already stored rather
+    than asking for the file again; nothing is committed until that button is pressed. When the
+    model lands, the page links straight to its health view.</p>
+    <p>On the CoffeeMachine MagicDraw container dropped against a local server, the summary reads
+    that it detected a Cameo/MagicDraw <code>.mdzip</code>, carried 41 blocks, 95 relationships and
+    25 requirements, round-trips exactly, and found 252 things outside what the reader carries
+    &mdash; 124 it cannot map at all and 128 it carries with a named drop &mdash; plus 22 further
+    declarations recognised as carrying no model content. The one button reads <em>Import 41 blocks
+    and 95 relationships, accepting these 252 named losses</em>.</p>
+    <p>The five biggest classes of loss, as that page lists them, each with one real example:</p>
+  </div>
+
+  <ul class="gaps">
+    <li><span class="gaps__mark" aria-hidden="true">1</span><div><p><strong>102 &times; uml:Property.</strong> 51 are attributes on a recognised XMI element that the OKF model has no place for; the other 51 are properties whose <code>xmi:id</code> is dropped because an OKF Attribute has no id slot.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">2</span><div><p><strong>33 &times; uml:Association.</strong> 28 drop the association's <code>xmi:id</code> (an OKF GraphEdge has no id slot) and 5 run between elements outside the carried subset.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">3</span><div><p><strong>28 &times; uml:Abstraction.</strong> Every one drops its <code>xmi:id</code>, for the same reason.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">4</span><div><p><strong>14 &times; uml:Port.</strong> 8 are unmapped attributes on a recognised element and 6 drop an <code>xmi:id</code> an OKF Attribute has no slot for.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">5</span><div><p><strong>13 &times; uml:Package.</strong> OKF has no package or namespace concept: members are promoted to the top-level structure and the package is dropped.</p></div></li>
+  </ul>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p>Those are the same numbers the XMI reader reports in the loss report below, because it is the
+    same reader: the front door is a second entrance to one measurement, not a second measurement.
+    Reproduce the drop against a server you are running:</p>
+  </div>
+<pre><code>curl -F "artifact=@sample/corpus/coffee-machine/legacy/CoffeeMachine-SysML-Model.mdzip" \
+  http://127.0.0.1:8080/onboard</code></pre>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <h3>The three readers, and their directions</h3>
+    <p>Three readers are registered in the workbench today. Two of them are viewers, and the
+    workbench says so in the reader list, in the loss report and in the refusal when an export is
+    attempted.</p>
+  </div>
+
+  <div class="cards">
+    <article class="card">
+      <div class="card__head">
+        <h3><code>sysml-v1-xmi@2.4</code></h3>
+        <span class="card__num">reads and writes</span>
+      </div>
+      <p>SysML v1 XMI: MagicDraw, Cameo, and any XMI 2.x writer. It imports and it writes back, so
+      it is the one reader the gate can measure a round trip on.</p>
+      <p><span class="pill pill--pass">Reads and writes</span></p>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <h3><code>sysml-v2-textual@1.0</code></h3>
+        <span class="card__num">viewer</span>
+      </div>
+      <p>SysML v2 textual notation. It reads a stated subset into OKF and cannot write it back, so
+      a SysML v2 model is never exported from here.</p>
+      <p><span class="pill pill--warn">Reads, does not write back</span></p>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <h3><code>capella-arcadia@1.0</code></h3>
+        <span class="card__num">viewer</span>
+      </div>
+      <p>Capella/Arcadia: components, functions, functional and component exchanges, allocations
+      and constraints. It reads the semantic model and cannot write it back.</p>
+      <p><span class="pill pill--warn">Reads, does not write back</span></p>
+    </article>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <h3>Capella/Arcadia, so a team can keep doing STPA where it already does it</h3>
+    <p>A Capella model is a project folder, but only the <code>.capella</code> file holds the
+    semantic model, and only it is read: the <code>.aird</code> diagram layer and the
+    <code>.afm</code> viewpoint metadata are refused with a message naming them. Drop that one
+    file.</p>
+    <p>The reason the reader is here is STPA. A team that does STPA in Capella &mdash; which is
+    where MIT's STAMP Tools plugin lives &mdash; can keep doing it there, bring the Capella model in
+    as a viewer, and have the platform hold the analysis as a versioned model and check its
+    completeness. Nothing has to be converted to get there.</p>
+    <p>On the real In-Flight Entertainment System model
+    (<code>dbinfrago/Capella-IFE-sample</code>, EPL-2.0, fetched outside this repository) the reader
+    carries 335 elements, 29 requirements, 364 graph nodes and 787 graph edges, and names 3,451
+    content losses and 1,090 lossy id/name drops rather than dropping them in silence. The corpus is
+    not committed because EPL-2.0 is not AGPL-compatible, so the test skips loudly when it has not
+    been fetched. Reproduce it:</p>
+  </div>
+<pre><code>cargo test -p mw-binding-capella --test real_capella -- --nocapture</code></pre>
+
+  <div class="prose" style="margin-top:1.75rem">
     <h3>The loss report, on a real model</h3>
     <p>Put a MagicDraw SysML export through the XMI reader and it reports what it carried and what
     it did not. On the coffee-machine MagicDraw model the reader carries 41 structure elements (the
@@ -267,6 +359,67 @@
     visible when a baseline changes. These are the metrics in the analytics schema, listed in the
     <a href="#analytics">analytics section</a>.</p>
   </div>
+
+  <div class="prose" style="margin-top:2rem">
+    <h3 id="analyses-frame">An analysis is a record, not a page that recomputes</h3>
+    <p>Running an analysis stores a <strong>record</strong>: a named definition, run over one
+    commit, stamped with the definition version and the engine version it was computed at, with the
+    findings it measured and an evidence hash over their canonical bytes. The same definition over
+    the same commit at the same engine version produces the same record, so re-running an unchanged
+    analysis over an unchanged model stores the same record rather than a second one. Records
+    accumulate in a <strong>library</strong> you can read back and compare, months later, without
+    the engine that produced them.</p>
+    <p>Two built-in analyses ship today, both at definition version 1, on engine 0.2.0. A
+    definition the bounded run vocabulary cannot express is refused with a reason, never silently
+    approximated.</p>
+  </div>
+
+  <ul class="gaps">
+    <li><span class="gaps__mark" aria-hidden="true">1</span><div><p><strong>Requirement coverage.</strong> Every requirement the model declares, named, with whether a Satisfy, Refine, Verify or Allocate link covers it. Computed by <code>graph.requirement_coverage</code> in mw-graph &mdash; the same coverage report the gate and the requirements page use.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">2</span><div><p><strong>Model health (graph gaps).</strong> Orphaned nodes, isolated groups and dangling links. Computed by <code>graph.graph_stats</code>, <code>graph.components</code> and the workbench's own dangling-link detector &mdash; the same detector the health view renders, reused rather than reimplemented, so an analysis can never disagree with the page it is an analysis of.</p></div></li>
+  </ul>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p>The ruling the frame exists to keep: <strong>the engine measures, and an analysis never
+    writes to the model it measures.</strong> Running one resolves a commit, reads the document and
+    stores the record; no write path to a model is reachable from it. Where the engine cannot
+    measure at all &mdash; a document that carries no graph &mdash; the run says so with the reason
+    on each finding and records itself as not measured, rather than publishing a zero that would
+    read as &ldquo;no gaps&rdquo;.</p>
+  </div>
+
+  <figure class="measure__shot">
+    <img src="shots/analyses-library.png" alt="The analyses library for the coffee-analyses project in the Modelwrite workbench. A 'Run an analysis' form offers Requirement coverage (v1) and Model health (graph gaps) (v1) against a branch, with the button 'Run and store the record'. Below it, 'Library (4)' lists four stored runs newest first. Each names its definition and version, commit short hash, branch, engine 0.2.0, a stored timestamp, severity tallies (5 gap / 0 unknown / 0 ok; 12 gap / 0 unknown / 13 ok; 2 gap / 0 unknown / 0 ok; 10 gap / 0 unknown / 15 ok), a run id and an evidence hash. Under the library, 'Compare two runs' offers a From and a To selector and the button 'Diff the two runs'." width="1440" height="1047" loading="lazy">
+    <figcaption><b>What a stored analysis record looks like.</b> Every row is a record rather than
+    a recomputation: the definition and its version, the commit it examined, the branch, the engine
+    version it was computed at, the severity tallies, and the run and evidence hashes that address
+    it. Four runs are stored here &mdash; two definitions over two commits &mdash; and any two of
+    them can be compared from the control at the foot of the page.</figcaption>
+  </figure>
+
+  <div class="prose" style="margin-top:2rem">
+    <h3 id="stpa-checks">STPA completeness: five checks over an analysis you authored</h3>
+    <p>The platform holds an authored STPA analysis &mdash; losses, hazards, system constraints,
+    controllers, control actions, feedback, unsafe control actions and loss scenarios &mdash; as a
+    versioned model, and checks its completeness and internal consistency. Five relational checks,
+    each a relation between STPA elements rather than a judgement about the design:</p>
+  </div>
+
+  <ul class="gaps">
+    <li><span class="gaps__mark" aria-hidden="true">1</span><div><p><strong>Unanalysed control actions.</strong> Every ControlAction must carry an UnsafeControlAction for each of the four types: not-provided, provided, wrong-timing-or-order, stopped-too-soon-or-applied-too-long. The finding names the types the model did not carry and the ones it did.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">2</span><div><p><strong>Control loops with no feedback.</strong> A Controller that issues a ControlAction and receives no Feedback path. Read off the same graph adjacency the orphan and isolation detectors use, so it is a degree check and not a second implementation.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">3</span><div><p><strong>Hazards with no constraint.</strong> Every Hazard the analysis names must be mitigated by a SystemConstraint.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">4</span><div><p><strong>Constraints reaching no element.</strong> A SystemConstraint no design element satisfies is an aspiration, not a constraint. Read from the platform's own requirement coverage, filtered to SystemConstraints.</p></div></li>
+    <li><span class="gaps__mark" aria-hidden="true">5</span><div><p><strong>UCAs with no loss scenario.</strong> A claim that a control action could be unsafe, without a causal scenario, is an assertion.</p></div></li>
+  </ul>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p>Above those five sits a method-coverage layer that asks whether each STPA stage was performed
+    at all before judging how consistently it was performed &mdash; because a relational check over
+    a stage that was never done returns no findings, and no findings over nothing is not a clean
+    result. That layer, its three states, and the ruling that keeps them honest are set out in
+    <a href="#safety-argument">the safety argument</a>, where the distinction is the point.</p>
+  </div>
 </section>
 
 <section class="section shell" id="screenshots" aria-labelledby="screenshots-h">
@@ -304,6 +457,34 @@
     the element, the edge and the run that produced it. An agent reads and proposes. It cannot
     write. Only a human with the write role accepts a proposal into a commit, and the commit records
     both parties.</p>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <h3 id="analyses-diff">The analyses diff: two runs, compared by finding identity</h3>
+    <p>A finding's id is a function of the definition, the check and the measured subject, never of
+    the run. The same uncovered requirement therefore has the same address in two runs a month
+    apart, which is what lets two stored runs be compared by finding identity &mdash; so what
+    appeared, what was resolved and what was measured differently is read rather than inferred. The
+    three lists are disjoint by construction, and the diff has its own address.</p>
+    <p>Measured, not asserted. On the <code>coffee-analyses</code> project, requirement coverage v1
+    run over commit <code>f9591a6b</code> and again over commit <code>a79b8c81</code>, where a
+    requirement and its links were dropped, reads: 1 appeared, 1 resolved, 1 measured differently,
+    23 unchanged. The requirement the change adds appears as a gap. The requirement that lost its
+    covering link is reported as measured differently rather than as newly broken, because its
+    address did not move &mdash; it is the same subject, read with a different severity, and the
+    evidence of both readings rides the change.</p>
+    <p>One thing the diff refuses to do is turn &ldquo;could not be measured&rdquo; into
+    &ldquo;clean&rdquo;: the measured flag is part of the comparison, so a run that had no graph to
+    measure and a run that measured nothing wrong are not reported as the same thing.</p>
+  </div>
+
+  <div class="prose" style="margin-top:1.75rem">
+    <h3>Ask anything, with the evidence attached</h3>
+    <p>A question is answered from the model, not from prose about the model, and the answer carries
+    its basis: the element, the edge and the run it came from. Open a stored run and each finding
+    shows its one-line measurement and, under it, the engine's own values &mdash; the measurement
+    itself, not a restatement of it. Where the engine could not measure, the finding says so and
+    carries the reason, instead of a zero.</p>
   </div>
 </section>
 
@@ -386,6 +567,83 @@
   <code>sample/corpus/coffee-machine</code>. Neither record contains a timestamp: dates appear in
   filenames only, so a re-run is either byte-identical or it is a bug. That is what makes the result
   citable.</p>
+
+  <div class="prose" style="margin-top:2rem">
+    <h3 id="safety-argument">The safety argument: authored or computed</h3>
+    <p><strong>The analysis is AUTHORED; the check is COMPUTED.</strong> Modelwrite does not perform STPA, does not infer hazards from a design, and will never claim to. It holds your control structure and analysis as a versioned model, checks completeness and internal consistency, names everything missing, and reports each finding's basis.</p>
+    <p>A completeness check has three states, not two. Reading them as two is the failure the third
+    one exists to prevent: a relational check over a stage that was never performed returns no
+    findings, and an empty list is exactly what a safety engineer would otherwise take as
+    &ldquo;no problems found&rdquo;.</p>
+  </div>
+
+  <div class="cards">
+    <article class="card">
+      <div class="card__head">
+        <h3>Not started</h3>
+        <span class="card__num">never a clean result</span>
+      </div>
+      <p><span class="pill pill--warn">Not started</span></p>
+      <p>The model lacks the elements the method needs, so nothing was measured over. It names which
+      STPA stage is missing and never shows a clean result. A model with no hazards lands here: the
+      checks reported no findings because they had nothing to measure, which is not the same as
+      finding nothing wrong.</p>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <h3>Gaps found</h3>
+        <span class="card__num">every finding named</span>
+      </div>
+      <p><span class="pill pill--fail">Gaps found</span></p>
+      <p>The stages were performed and at least one relational check found a gap. Every finding is
+      named, not counted into a score, and each one carries what it was computed over and what the
+      model did not carry.</p>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <h3>Performed</h3>
+        <span class="card__num">the only clean result</span>
+      </div>
+      <p><span class="pill pill--pass">Performed</span></p>
+      <p>The only state in which a clean result is shown &mdash; and it names what it was measured
+      over: the losses, hazards, SystemConstraints, controllers, control actions, UCAs and loss
+      scenarios the clean result was actually computed over.</p>
+    </article>
+  </div>
+
+  <figure class="measure__shot">
+    <img src="shots/stpa-not-started.png" alt="The STPA completeness page in the Modelwrite workbench for a project called stpa-no-hazards. Above the checks, an amber band reads 'Not started — the STPA analysis has not been performed on this model: no Hazard has been identified. The checks below reported no findings because they had nothing to measure, which is not the same as finding nothing wrong.' A line above it reads 'The analysis is AUTHORED; the check is COMPUTED.' A section headed 'The analysis has not started' names Hazard identification as the stage that was not performed. The checks follow: Unanalysed control actions (0), Control loops with no feedback (0), Hazards with no constraint marked '— cannot be evaluated yet' beside constraints reaching no element (0), and UCAs with no loss scenario (0). A trend table lists one commit with all counts at 0." width="1440" height="1561" loading="lazy">
+    <figcaption><b>What a not-started analysis looks like, and why it is not a pass.</b> This model
+    carries a loss, a controller, a control action, four UCAs and four loss scenarios &mdash; and no
+    hazard. Every relational check is therefore silent, and the page still refuses to call that
+    clean: the band is amber and reads <i>Not started</i>, the missing stage is named, and the one
+    check whose subject is absent reads &ldquo;cannot be evaluated yet&rdquo; where a zero would
+    otherwise sit. Captured from the running workbench.</figcaption>
+  </figure>
+
+  <div class="prose" style="margin-top:2rem">
+    <h3 id="mil-std-882">The MIL-STD-882 mapping, with the verdicts it actually reaches</h3>
+    <p>A defence programme that must produce MIL-STD-882E artefacts asks a fair question: does using
+    this vocabulary mean abandoning the standard it is accountable to. The project's published
+    mapping answers with a verdict on every row and nothing mapped silently. <code>exact</code>
+    where the target says the same thing; <code>lossy</code> where it says something close and the
+    difference is named in the row; <code>unmappable</code> where there is no counterpart, so the
+    concept stays in its own vocabulary.</p>
+    <p>Across the two tables, deduplicating the three mirrored pairs, that is 14 concepts mapped: 1
+    <code>exact</code>, 5 <code>lossy</code> and 8 <code>unmappable</code>. The spread is the
+    finding rather than a shortcoming of the mapping. STPA and MIL-STD-882 share their ends &mdash;
+    hazards, and the requirements or constraints that prevent them &mdash; and share almost nothing
+    in the middle. 882 carries risk language STPA does not have; STPA carries control language 882
+    does not.</p>
+    <p>The sharpest disagreement is probability, and the document does not try to bridge it: 882
+    requires a probability for every hazard, because risk is severity and probability together, and
+    STAMP's position is that the probability of a rare high-severity accident is not estimable. A
+    programme that must report a risk assessment code reports one; the table says the platform does
+    not supply it, rather than inventing a number. Nothing is converted in either direction, and the
+    platform takes no side between the two methods. The mapping, and the claims that must be
+    re-checked against a purchased copy of the standard, are in
+    <a href="https://github.com/modelwrite/modelwrite/blob/main/docs/stpa/mil-std-882-mapping.md">docs/stpa/mil-std-882-mapping.md</a>.</p>
+  </div>
 </section>
 
 <section class="section shell" id="analytics" aria-labelledby="analytics-h">
@@ -648,9 +906,12 @@
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
         <h3>There is no numeric or physical simulation.</h3>
-        <p>Model-level analysis and simulation are supported: coverage, traceability, composition and
-        process. FEA, thermal and fluid solvers are not part of this platform and are not planned.
-        Modelwrite reasons about the model, not about the physics.</p>
+        <p>Model-level analysis is supported: coverage, traceability, composition and process, and
+        the analyses library over both. Model-level simulation &mdash; executing a model's own
+        activity or process behaviour, reachability, dead ends, cycles and timing arithmetic &mdash;
+        is designed but not built, and is not claimed here. FEA, thermal and fluid solvers are not
+        part of this platform and are not planned. Modelwrite reasons about the model, not about the
+        physics.</p>
       </div>
     </li>
     <li>
@@ -670,9 +931,54 @@ cargo test -p mw-binding-xmi --test real_tmt -- --nocapture</code></pre>
     <li>
       <span class="limits__mark" aria-hidden="true">x</span>
       <div>
+        <h3>SysML v2 textual and Capella/Arcadia are viewers.</h3>
+        <p>Both read into OKF and neither can write back, so an export attempt is refused with a
+        message naming the direction rather than producing an approximate file. The consequence:
+        this is a way to read and measure a SysML v2 or a Capella/Arcadia model, never a way to
+        round-trip one, and the SysML v1 XMI reader is the only reader carrying a measured round
+        trip.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>The platform does not perform STPA and does not infer hazards.</h3>
+        <p>It checks the completeness and internal consistency of an analysis you authored, and
+        every finding names what it was computed over. The consequence is the one that matters in a
+        safety case: a model with no hazards is reported as <strong>not started</strong> rather than
+        clean, and a check whose subject is absent says it cannot be evaluated yet rather than
+        reporting a zero.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>Analyses measure and never write.</h3>
+        <p>A run reads one commit and stores a record. It cannot change the model it measures, and
+        no write path to a model is reachable from the analyses pages. The consequence: an analysis
+        can tell you what the model says at that commit, and it can never be the thing that changed
+        it.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
         <h3>The native XMI-to-OKF direction is not independently measured.</h3>
         <p>The gate measures the binding's own OKF-to-XMI-to-OKF round trip. The read rests on the
         binding's self-reported loss report, not on an independent golden corpus.</p>
+      </div>
+    </li>
+    <li>
+      <span class="limits__mark" aria-hidden="true">x</span>
+      <div>
+        <h3>The registered trial needs SMTP settings to email its login code.</h3>
+        <p>Email delivery is configured from the service environment: <code>MW_MAILER=smtp</code>
+        with <code>MW_MAIL_SMTP_HOST</code>, <code>MW_MAIL_SMTP_USERNAME</code> and
+        <code>MW_MAIL_SMTP_PASSWORD</code>. A deployment that selects SMTP without those settings
+        <em>fails</em> the send, naming the missing variable, rather than writing the login code to
+        the operator log. The consequence: a broken mail configuration shows up as a failed
+        registration, never as an email everyone believes was delivered except the person waiting
+        for it.</p>
       </div>
     </li>
     <li>
@@ -690,8 +996,10 @@ cargo test -p mw-binding-xmi --test real_tmt -- --nocapture</code></pre>
   <div class="section__head">
     <p class="eyebrow">07 / FAQ</p>
     <h2 id="faq-h">Does it replace my modelling tool?</h2>
-    <p>No. Modelwrite reads and does not write. It imports from your modelling tool, measures what
-    is there, and reports what it could not carry. You keep your modelling tool.</p>
+    <p>No. Modelwrite reads the model you have and reports what it could not carry; it does not
+    author your model for you, and the two viewer readers cannot write back at all. The SysML v1 XMI
+    reader is the one that also writes, so the gate can measure a round trip on it &mdash; that is a
+    measurement of the binding, not a way to edit your project. You keep your modelling tool.</p>
   </div>
 
   <ul class="faq">
@@ -754,7 +1062,8 @@ helm install modelwrite deploy/helm/modelwrite</code></pre>
     <p class="eyebrow">09 / Architecture</p>
     <h2 id="architecture-h">Architecture</h2>
     <p>The engine crates are the contract. The server, the CLI and every connector build on them, and
-    nothing bypasses the OKF crate and the gate.</p>
+    nothing bypasses the OKF crate and the gate. Three readers are registered against the binding
+    contract: one reads and writes, two are viewers.</p>
   </div>
 
   <div class="layers">
@@ -782,7 +1091,7 @@ helm install modelwrite deploy/helm/modelwrite</code></pre>
     <div class="layer">
       <p class="layer__name">Engine crates<span class="layer__note">AGPL-3.0-or-later</span></p>
       <ul class="layer__items">
-        <li><code>okf</code> &middot; <code>graph</code> &middot; <code>gate</code> &middot; <code>binding</code> &middot; <code>binding-xmi</code> (the SysML v1 XMI reader) &middot; <code>binding-sysmlv2</code> (the SysML v2 textual viewer)</li>
+        <li><code>okf</code> &middot; <code>graph</code> (including the STPA completeness checks) &middot; <code>gate</code> &middot; <code>binding</code> &middot; <code>binding-xmi</code> (the SysML v1 XMI reader and writer) &middot; <code>binding-sysmlv2</code> (the SysML v2 textual viewer) &middot; <code>binding-capella</code> (the Capella/Arcadia viewer)</li>
         <li><code>agent</code> (Reasoner and proposals) &middot; <code>capi</code> (C ABI) &middot; <code>mcp</code> (MCP server) &middot; <code>analytics</code></li>
       </ul>
     </div>

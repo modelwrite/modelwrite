@@ -66,8 +66,12 @@
     <h2 id="corpus-h">Every bundled example, with its licence and its honest state.</h2>
     <p>The four states below are the whole story. <strong>Loadable</strong> is
     XMI &mdash; the one format the platform imports and writes back today.
-    <strong>Read-only (viewer)</strong> is SysML v2 textual, carried as
-    <code>Direction::ImportOnly</code>: it imports, it does not write back.
+    <strong>Read-only (viewer)</strong> is SysML v2 textual and Capella/Arcadia,
+    both carried as <code>Direction::ImportOnly</code>: they import, they do not
+    write back, and an export attempt is refused naming the direction. Neither
+    Capella example is bundled here &mdash; both are EPL-2.0 and fetched outside
+    the repository &mdash; so on this page the state is exercised by the SysML v2
+    examples.
     <strong>Large / refused</strong> is the one XMI export whose migration needs
     losses accepted by hand. <strong>Not importable</strong> is Gaphor&rsquo;s own
     format, for which no binding exists. No bundled example is Loadable today:
