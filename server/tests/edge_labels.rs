@@ -7,6 +7,15 @@
 //! struck through by an edge line - the line the containment edges trace around the group. These
 //! tests read the labels and the boxes straight out of the SVG the server serves and hold the
 //! repair: no label over another label, none over a box, none struck through, and none dropped.
+//!
+//! What is NOT asserted here, and why. Whether a label's box is entered by another edge's line is
+//! measured in the browser (e2e/label-overlap.mjs), because a jump arc - the small bump an edge
+//! draws where it crosses another - exists only in the rendered path, not in the geometry this
+//! test can read out of the file. Measured over the corpus' seven scopes: 583 labels; six scopes
+//! have none entered by another line, and one ("control Module", in the densest scope, where a
+//! 0.39-unit graze of the box boundary is 0.3 px on the slide) has one. Before the fix the same
+//! measurement found 5 such labels on the single scope the controller looked at, entered by up to
+//! 7.4 units - half the height of the text.
 
 use std::sync::Arc;
 

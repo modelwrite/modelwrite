@@ -1155,15 +1155,25 @@ fn render_graph_svg(
     // placed so that it lands on no box, on no other label, and across no other line - the
     // containment border is one of those lines, and it used to cut the names in half. The
     // placement is a pure function of this geometry, so the export stays byte-identical.
-    let labelled: Vec<usize> = (0..edges.len())
-        .filter(|&pos| !edges[pos].label.is_empty() && drawn[pos].len() >= 2)
-        .collect();
-    let label_lines: Vec<Vec<(f64, f64)>> =
-        labelled.iter().map(|&pos| drawn[pos].clone()).collect();
-    let label_text: Vec<&str> = labelled
-        .iter()
-        .map(|&pos| edges[pos].label.as_str())
-        .collect();
+    //
+    // EVERY drawn line is handed over, including the unlabelled ones: an edge without a name is
+    // still a line on the drawing, and a label dropped across it is struck through just as badly.
+    // An empty name is a line the placer keeps clear of and never places anything on.
+    let mut label_lines: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut label_text: Vec<&str> = Vec::new();
+    let mut slot_for: HashMap<usize, usize> = HashMap::new();
+    for (pos, edge) in edges.iter().enumerate() {
+        if drawn[pos].len() < 2 {
+            continue;
+        }
+        slot_for.insert(pos, label_lines.len());
+        label_lines.push(drawn[pos].clone());
+        label_text.push(if edge.label.is_empty() {
+            ""
+        } else {
+            edge.label.as_str()
+        });
+    }
     let placed = routing::place_labels(
         &layout.nodes,
         &label_lines,
@@ -1175,12 +1185,15 @@ fn render_graph_svg(
     // to clear space rather than give up on it. When there is one the page says so, because a
     // relationship nobody can name is a relationship nobody can check.
     let mut unplaced: Vec<String> = Vec::new();
-    for (slot, &pos) in labelled.iter().enumerate() {
-        match &placed[slot] {
+    for (pos, edge) in edges.iter().enumerate() {
+        if edge.label.is_empty() {
+            continue;
+        }
+        match slot_for.get(&pos).and_then(|&slot| placed[slot].as_ref()) {
             Some(placement) => {
                 label_for.insert(pos, placement.clone());
             }
-            None => unplaced.push(edges[pos].label.clone()),
+            None => unplaced.push(edge.label.clone()),
         }
     }
 
