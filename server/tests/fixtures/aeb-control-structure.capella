@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Capella_Version_7.0.0-->
+<!--
+  A HAND-WRITTEN synthetic Capella 7.0.0 semantic model, in the shape the real exporter
+  writes (verified against the eclipse-capella/capella sample corpus). It exists so the
+  SERVER's import path can be driven with a Capella model without committing an EPL-2.0
+  vendor sample: the real corpus is fetched outside the repo and located by environment
+  variable, and the test that uses it skips loudly when it is absent.
+
+  This is an STPA-shaped control structure: a Brake Controller (the controller) allocates
+  Detect Obstacle, a Brake Actuator (the controlled process) allocates Apply Brake, the
+  Brake Command flows controller -> actuator and the Brake Status feedback flows back.
+  A system constraint (SC-1) carries the hazard mitigation text. Part, StateMachine,
+  State and TransfoLink are deliberately present and are outside the reader's subset, so
+  the loss report has real named content losses, not just id drops.
+-->
+<org.polarsys.capella.core.data.capellamodeller:Project xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:org.polarsys.capella.core.data.capellacore="http://www.polarsys.org/capella/core/core/7.0.0"
+    xmlns:org.polarsys.capella.core.data.capellamodeller="http://www.polarsys.org/capella/core/modeller/7.0.0"
+    xmlns:org.polarsys.capella.core.data.capellacommon="http://www.polarsys.org/capella/core/common/7.0.0"
+    xmlns:org.polarsys.capella.core.data.cs="http://www.polarsys.org/capella/core/cs/7.0.0"
+    xmlns:org.polarsys.capella.core.data.ctx="http://www.polarsys.org/capella/core/ctx/7.0.0"
+    xmlns:org.polarsys.capella.core.data.fa="http://www.polarsys.org/capella/core/fa/7.0.0"
+    xmlns:org.polarsys.capella.core.data.information.datavalue="http://www.polarsys.org/capella/core/information/datavalue/7.0.0"
+    id="aeb-project" name="AEB Control Structure">
+  <ownedModelRoots xsi:type="org.polarsys.capella.core.data.capellamodeller:SystemEngineering"
+      id="aeb-model-root" name="AEB">
+    <ownedArchitectures xsi:type="org.polarsys.capella.core.data.ctx:SystemAnalysis"
+        id="aeb-system-analysis" name="System Analysis">
+      <ownedFunctionPkg xsi:type="org.polarsys.capella.core.data.ctx:SystemFunctionPkg"
+          id="aeb-function-pkg" name="System Functions">
+        <ownedSystemFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+            id="f-detect" name="Detect Obstacle">
+          <ownedFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+              id="f-sense" name="Sense Range"/>
+          <outputs xsi:type="org.polarsys.capella.core.data.fa:FunctionOutputPort"
+              id="p-detect-out" name="FOP1"/>
+        </ownedSystemFunctions>
+        <ownedSystemFunctions xsi:type="org.polarsys.capella.core.data.ctx:SystemFunction"
+            id="f-brake" name="Apply Brake">
+          <inputs xsi:type="org.polarsys.capella.core.data.fa:FunctionInputPort"
+              id="p-brake-in" name="FIP1"/>
+        </ownedSystemFunctions>
+        <ownedFunctionalExchanges xsi:type="org.polarsys.capella.core.data.fa:FunctionalExchange"
+            id="fx-brake" name="Brake Command" source="#f-detect" target="#f-brake"/>
+        <ownedFunctionalExchanges xsi:type="org.polarsys.capella.core.data.fa:FunctionalExchange"
+            id="fx-status" name="Brake Status" source="#f-brake" target="#f-detect"/>
+      </ownedFunctionPkg>
+      <ownedSystemComponentPkg xsi:type="org.polarsys.capella.core.data.ctx:SystemComponentPkg"
+          id="aeb-component-pkg" name="System Components">
+        <ownedSystemComponents xsi:type="org.polarsys.capella.core.data.ctx:SystemComponent"
+            id="c-controller" name="Brake Controller">
+          <ownedFunctionalAllocation xsi:type="org.polarsys.capella.core.data.fa:ComponentFunctionalAllocation"
+              id="alloc-detect" targetElement="#f-detect" sourceElement="#c-controller"/>
+          <ownedFeatures xsi:type="org.polarsys.capella.core.data.cs:Part"
+              id="part-wheel" name="wheel"/>
+        </ownedSystemComponents>
+        <ownedSystemComponents xsi:type="org.polarsys.capella.core.data.ctx:SystemComponent"
+            id="c-actuator" name="Brake Actuator">
+          <ownedFunctionalAllocation xsi:type="org.polarsys.capella.core.data.fa:ComponentFunctionalAllocation"
+              id="alloc-brake" targetElement="#f-brake" sourceElement="#c-actuator"/>
+        </ownedSystemComponents>
+      </ownedSystemComponentPkg>
+      <ownedConstraints xsi:type="org.polarsys.capella.core.data.capellacore:Constraint"
+          id="sc-1" name="SC-1">
+        <ownedSpecification xsi:type="org.polarsys.capella.core.data.information.datavalue:OpaqueExpression"
+            id="opaque-1">
+          <bodies>The controller must never command a brake application while the driver is overriding</bodies>
+        </ownedSpecification>
+      </ownedConstraints>
+      <ownedStateMachines xsi:type="org.polarsys.capella.core.data.capellacommon:StateMachine"
+          id="sm-brake" name="Brake Modes">
+        <ownedStates xsi:type="org.polarsys.capella.core.data.capellacommon:State"
+            id="st-standby" name="Standby"/>
+      </ownedStateMachines>
+      <ownedTraces xsi:type="org.polarsys.capella.core.data.capellacore:TransfoLink"
+          id="tl-1"/>
+    </ownedArchitectures>
+  </ownedModelRoots>
+</org.polarsys.capella.core.data.capellamodeller:Project>

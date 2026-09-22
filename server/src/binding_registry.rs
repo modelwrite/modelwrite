@@ -22,6 +22,10 @@ fn implementations() -> Vec<Box<dyn Binding>> {
     vec![
         Box::new(binding_xmi::XmiBinding::new()),
         Box::new(binding_sysmlv2::SysmlV2Binding::new()),
+        // The Capella/Arcadia reader, a viewer like the SysML v2 one: it imports a
+        // `.capella` semantic model into OKF and declares Direction::ImportOnly, so the
+        // import page states the viewer direction and no round trip is measured for it.
+        Box::new(binding_capella::CapellaBinding::new()),
     ]
 }
 

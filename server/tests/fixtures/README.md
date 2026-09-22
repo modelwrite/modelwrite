@@ -27,3 +27,23 @@ The full text is at `sample/examples/sysml-v2/gfse-models/LICENSE`. Redistributi
 with the copyright notice, the conditions and the disclaimer retained is permitted
 without additional approval; committing the model here (with the notice recorded) is
 the redistribution the licence permits.
+
+## Capella/Arcadia fixture
+
+`aeb-control-structure.capella` is HAND-WRITTEN synthetic XMI in the shape the Capella
+7.0.0 exporter writes (verified against the `eclipse-capella/capella` sample corpus).
+It is committed so the server's Capella import test can drive the real import path with a
+Capella model without committing a vendor sample: the real `In-Flight Entertainment
+System.capella` is EPL-2.0, which is not AGPL-compatible, so it is fetched OUTSIDE the
+repository and located by environment variable (`CAPELLA_IFE_CAPELLA`), and the test that
+uses it skips loudly when it is absent.
+
+A Capella model is a project FOLDER (the `.capella` semantic model, the `.aird` Sirius
+diagram layer, the `.afm` viewpoint metadata). Only the `.capella` file holds the model
+and only it is read, so the file to drop or upload is that one file: no zip of the folder
+is required.
+
+The model is an STPA-shaped control structure (a Brake Controller allocating Detect
+Obstacle, a Brake Actuator allocating Apply Brake, the control and feedback exchanges,
+and system constraint SC-1), with Part, StateMachine, State and TransfoLink present on
+purpose so the loss report carries real named content losses as well as id drops.

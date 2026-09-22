@@ -81,6 +81,8 @@ pub enum Format {
     Cameo,
     /// SysML v2 textual notation.
     SysmlV2,
+    /// A Capella/Arcadia semantic model (the `.capella` file itself).
+    Capella,
     /// Nothing this platform reads, with what was seen instead.
     Unknown(String),
 }
@@ -94,6 +96,7 @@ impl Format {
             }
             Format::Cameo => "a Cameo/MagicDraw .mdzip container",
             Format::SysmlV2 => "SysML v2 textual notation",
+            Format::Capella => "a Capella/Arcadia .capella semantic model",
             Format::Unknown(_) => "not a format this server reads",
         }
     }
@@ -111,6 +114,11 @@ impl Format {
                 "{}@{}",
                 binding_sysmlv2::BINDING_ID,
                 binding_sysmlv2::BINDING_VERSION
+            )),
+            Format::Capella => Some(format!(
+                "{}@{}",
+                binding_capella::BINDING_ID,
+                binding_capella::BINDING_VERSION
             )),
             Format::Unknown(_) => None,
         }
@@ -148,13 +156,30 @@ fn looks_like_sysmlv2(head: &[u8], file_name: &str) -> bool {
     file_name.to_ascii_lowercase().ends_with(".sysml")
 }
 
+/// Whether the head of an artifact carries the markers of a Capella semantic model. A
+/// `.capella` is XMI whose root element is a `capellamodeller:Project`; the reader requires
+/// exactly that root and refuses the other two members of a Capella project - the `.aird`
+/// Sirius diagram layer and the `.afm` viewpoint metadata - with a message naming them. The
+/// root is in the document's own header, so the bounded sniff is enough.
+///
+/// A Capella model is a FOLDER, but only the `.capella` file is the semantic model and only it
+/// is read: the smallest honest thing to drop is that one file, not a zip of the project.
+fn looks_like_capella(head: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(head);
+    text.contains("capellamodeller:Project")
+}
+
 /// Detect the format of a dropped artifact from its head bytes and its file name. The order
-/// matters: a zip is a container (never XMI text), XMI markers beat the SysML v2 keywords a
+/// matters: a zip is a container (never XMI text), Capella markers beat the XMI markers a
+/// `.capella` file also carries (it IS XMI), XMI markers beat the SysML v2 keywords a
 /// .sysml-named but XMI-bodied file would otherwise trip, and anything unrecognised is reported
 /// as such rather than guessed at.
 pub fn detect(head: &[u8], file_name: &str) -> Format {
     if is_zip(head) {
         return Format::Cameo;
+    }
+    if looks_like_capella(head) {
+        return Format::Capella;
     }
     if looks_like_xmi(head) {
         return Format::Xmi;
@@ -171,6 +196,11 @@ pub fn detect(head: &[u8], file_name: &str) -> Format {
         "mdzip" => Format::Unknown(
             "the file name says .mdzip but the bytes are not a zip container".to_string(),
         ),
+        // A .capella name alone is enough to try the reader, like a .sysml name: the
+        // reader refuses a document that is not a Capella semantic model with a message
+        // naming what it found, which is a better answer than "not a format this server
+        // reads" for a file the person believes is a Capella model.
+        "capella" => Format::Capella,
         "" => Format::Unknown("the file has no name and no recognised content".to_string()),
         other => Format::Unknown(format!(
             "the .{} file is not a format this server reads",
@@ -957,16 +987,20 @@ pub fn dropzone_markup(bindings: &[BindingInfo], can_write: bool) -> Markup {
             h1 { "Drop your SysML model here, or choose a file" }
             p class="mw-dropzone-hint" {
                 "XMI — a MagicDraw, Cameo or any UML/SysML v1 export; a Cameo "
-                code { ".mdzip" } " container; or SysML v2 textual notation ("
-                code { ".sysml" } "). The format is detected from the file itself and the "
-                "project is named after it, so there is nothing to choose and no project to "
-                "create first."
+                code { ".mdzip" } " container; SysML v2 textual notation ("
+                code { ".sysml" } "); or a Capella/Arcadia model ("
+                code { ".capella" } "). A Capella model is a project folder, but only the "
+                code { ".capella" } " file holds the semantic model and only it is read — drop "
+                "that one file; the " code { ".aird" } " diagram layer and the "
+                code { ".afm" } " viewpoint metadata are not needed. The format is detected "
+                "from the file itself and the project is named after it, so there is nothing "
+                "to choose and no project to create first."
             }
             form method="post" action="/onboard" enctype="multipart/form-data"
                  class="mw-dropzone-form" {
                 label for="mw-dropzone-input" { "Your model file" }
                 input type="file" id="mw-dropzone-input" name="artifact"
-                      accept=".xmi,.xml,.uml,.mdzip,.sysml,.kerml" required;
+                      accept=".xmi,.xml,.uml,.mdzip,.sysml,.kerml,.capella" required;
                 details class="mw-dropzone-advanced" {
                     summary { "Advanced: name the project or pick the binding yourself" }
                     div class="advanced-grid" {
@@ -1290,7 +1324,7 @@ async fn perform_onboard(
         return Err(ApiError::unprocessable(
             format!(
                 "This file was not recognised, so nothing was imported: {}. Drop an XMI export, \
-                 a Cameo .mdzip container or a SysML v2 .sysml file.",
+                 a Cameo .mdzip container, a SysML v2 .sysml file or a Capella .capella model.",
                 detail
             ),
             Vec::new(),
@@ -1993,6 +2027,23 @@ mod tests {
             Format::SysmlV2
         );
         assert!(matches!(detect(b"hello", "notes.txt"), Format::Unknown(_)));
+    }
+
+    #[test]
+    fn a_capella_model_is_detected_by_its_own_root_not_by_the_xmi_it_is_written_in() {
+        // A .capella IS XMI, so the Capella marker has to be tested BEFORE the XMI markers:
+        // routing it to the XMI reader would read an Arcadia model as a UML one.
+        let head: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><org.polarsys.capella.core.data.capellamodeller:Project xmi:version=\"2.0\" xmlns:xmi=\"http://www.omg.org/XMI\" id=\"p\" name=\"AEB\"/>";
+        assert_eq!(detect(head, "AEB.capella"), Format::Capella);
+        // The bytes decide even when the file name says nothing.
+        assert_eq!(detect(head, "model.xml"), Format::Capella);
+        assert_eq!(
+            Format::Capella.binding().as_deref(),
+            Some("capella-arcadia@1.0")
+        );
+        // A .capella name is enough to TRY the reader, which refuses a document that is not
+        // a Capella semantic model with a message naming what it found.
+        assert_eq!(detect(b"<not-capella/>", "broken.capella"), Format::Capella);
     }
 
     #[test]

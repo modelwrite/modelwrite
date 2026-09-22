@@ -42,6 +42,12 @@ mw-gate = { path = "../engine/gate", version = "0.2.0" }
 mw-binding = { path = "../engine/binding", version = "0.2.0" }
 mw-binding-xmi = { path = "../engine/binding-xmi", version = "0.2.0" }
 mw-binding-sysmlv2 = { path = "../engine/binding-sysmlv2", version = "0.1.0" }
+# The Capella/Arcadia reader is a viewer (Direction::ImportOnly): the import page
+# offers it, an import yields OKF plus its named loss report, and the fidelity
+# harness is skipped for it (fidelity null) because a viewer cannot write back.
+# It brings no dependency of its own beyond roxmltree, which is already in the
+# tree, and it builds at the workspace engine floor of 1.75.
+mw-binding-capella = { path = "../engine/binding-capella", version = "0.1.0" }
 mw-agent = { path = "../engine/agent", version = "0.2.0" }
 mw-analytics = { path = "../engine/analytics", version = "0.2.0" }
 axum = { workspace = true, features = ["multipart"] }
