@@ -24,3 +24,5 @@ e2e/*.png
 e2e/diag-*.js
 e2e/flow-*.png
 target-tests*/
+e2e/*.svg
+e2e/*.html
